@@ -25,7 +25,8 @@ func newConfiguration() (c Configuration, err error) {
 	if i, err = asticonfig.New(&Configuration{
 		Encoder: astiencoder.Configuration{
 			Server: astiencoder.ConfigurationServer{
-				Addr: "127.0.0.1:4000",
+				Addr:    "127.0.0.1:4000",
+				PathWeb: "web",
 			},
 		},
 		Logger: astilog.Configuration{

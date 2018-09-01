@@ -9,6 +9,7 @@ type Configuration struct {
 type ConfigurationServer struct {
 	Addr     string `toml:"addr"`
 	Password string `toml:"password"`
+	PathWeb  string `toml:"path_web"`
 	Username string `toml:"username"`
 }
 

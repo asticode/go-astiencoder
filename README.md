@@ -3,4 +3,5 @@
 Goals are:
 
 - provide basic encoding needs
+- provide full hardware implementation
 - allow communicating with the encoder through a websocket

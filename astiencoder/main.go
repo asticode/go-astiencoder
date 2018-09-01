@@ -18,18 +18,18 @@ func main() {
 		astilog.Fatal(errors.Wrap(err, "main: creating configuration failed"))
 	}
 
-	// Create encoder
-	e := astiencoder.NewEncoder(c.Encoder)
-	defer e.Close()
+	// Create worker
+	w := astiencoder.NewWorker(c.Encoder)
+	defer w.Close()
 
 	// Handle signals
-	e.HandleSignals()
+	w.HandleSignals()
 
-	// Start the encoder
-	if err = e.Start(); err != nil {
-		astilog.Fatal(errors.Wrap(err, "main: starting encoder failed"))
+	// Start the worker
+	if err = w.Start(); err != nil {
+		astilog.Fatal(errors.Wrap(err, "main: starting worker failed"))
 	}
 
 	// Wait
-	e.Wait()
+	w.Wait()
 }
