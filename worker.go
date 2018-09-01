@@ -3,6 +3,7 @@ package astiencoder
 import (
 	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/go-astiws"
+	"github.com/pkg/errors"
 )
 
 // Worker represents a worker
@@ -18,15 +19,16 @@ type Worker struct {
 func NewWorker(c Configuration) (w *Worker) {
 	d := newDispatcher()
 	m := astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 8192})
-	s := newServer(c.Server, d, m)
+	aw := astiworker.NewWorker()
+	s := newServer(c.Server, d, m, aw)
 	e := newEncoder(d)
-	d.init(e, s)
+	d.init(e, s, aw)
 	return &Worker{
 		d:      d,
 		e:      e,
 		m:      m,
 		s:      s,
-		Worker: astiworker.NewWorker(),
+		Worker: aw,
 	}
 }
 
@@ -35,9 +37,16 @@ func (w *Worker) Close() error {
 	return nil
 }
 
-// Start starts the worker
-func (w *Worker) Start() (err error) {
-	// Start the server
-	w.s.start(w.Worker.Serve)
+// Serve starts the server
+func (w *Worker) Serve() {
+	w.s.serve()
+}
+
+// DispatchJob dispatches a job
+func (w *Worker) DispatchJob(j Job) (err error) {
+	if err = w.d.dispatchJob(j); err != nil {
+		err = errors.Wrap(err, "astiencoder: dispatching job failed")
+		return
+	}
 	return
 }

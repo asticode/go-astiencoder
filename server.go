@@ -2,6 +2,7 @@ package astiencoder
 
 import (
 	"github.com/asticode/go-astilog"
+	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/go-astiws"
 	"github.com/pkg/errors"
 	"net/http"
@@ -14,18 +15,20 @@ type server struct {
 	c ConfigurationServer
 	d *dispatcher
 	m *astiws.Manager
+	w *astiworker.Worker
 }
 
-func newServer(c ConfigurationServer, d *dispatcher, m *astiws.Manager) *server {
+func newServer(c ConfigurationServer, d *dispatcher, m *astiws.Manager, w *astiworker.Worker) *server {
 	return &server{
 		c: c,
 		d: d,
 		m: m,
+		w: w,
 	}
 }
 
-func (s *server) start(fn func(addr string, h http.Handler)) {
-	fn(s.c.Addr, s.handler())
+func (s *server) serve() {
+	s.w.Serve(s.c.Addr, s.handler())
 }
 
 func (s *server) handler() http.Handler {
