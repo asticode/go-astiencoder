@@ -1,3 +1,5 @@
 .DS_Store
 Thumbs.db
 .idea/
+vendor
+vendor_c

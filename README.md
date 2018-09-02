@@ -6,6 +6,25 @@ Goals are:
 - provide full hardware implementation
 - allow communicating with the encoder through a websocket
 
+# Installation
+## FFMpeg
+
+```
+$ make install-ffmpeg
+```
+
+## Astiencoder
+
+```
+$ go get github.com/asticode/go-astiencoder/...
+```
+
+You can check everything is working properly by running:
+
+```
+$ make version
+```
+
 # FFMpeg C bindings
 
 Right now this project is using [these bindings](https://github.com/asticode/goav).
@@ -19,4 +38,4 @@ Here's why:
 5) [this project](https://github.com/koropets/goav) is a fork of #3 with the latest commits (November 2017)
 6) [this project](https://github.com/alon-ne/goav) has a very nice set of examples
 
-Therefore I've forked #5, added commits from #4 and removed deprecated functions.
+Therefore I've forked #5, added useful commits from other forks and removed deprecated functions.
