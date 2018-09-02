@@ -35,7 +35,7 @@ func main() {
 	// Serve
 	w.Serve()
 
-	// Dispatch job
+	// Job has been provided
 	if len(*job) > 0 {
 		// Open file
 		var f *os.File
@@ -49,9 +49,9 @@ func main() {
 			astilog.Fatal(errors.Wrapf(err, "main: unmarshaling %s into %+v failed", *job, j))
 		}
 
-		// Dispatch job
-		if err = w.DispatchJob(j); err != nil {
-			astilog.Fatal(errors.Wrap(err, "main: dispatching job failed"))
+		// Exec job
+		if err = w.Cmds().ExecJob(j); err != nil {
+			astilog.Fatal(errors.Wrap(err, "main: executing job failed"))
 		}
 	}
 

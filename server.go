@@ -1,11 +1,11 @@
 package astiencoder
 
 import (
+	"net/http"
+
 	"github.com/asticode/go-astilog"
-	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/go-astiws"
 	"github.com/pkg/errors"
-	"net/http"
 
 	"github.com/asticode/go-astitools/http"
 	"github.com/julienschmidt/httprouter"
@@ -13,22 +13,16 @@ import (
 
 type server struct {
 	c ConfigurationServer
-	d *dispatcher
+	e *eventEmitter
 	m *astiws.Manager
-	w *astiworker.Worker
 }
 
-func newServer(c ConfigurationServer, d *dispatcher, m *astiws.Manager, w *astiworker.Worker) *server {
+func newServer(c ConfigurationServer, e *eventEmitter) *server {
 	return &server{
 		c: c,
-		d: d,
-		m: m,
-		w: w,
+		e: e,
+		m: astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 8192}),
 	}
-}
-
-func (s *server) serve() {
-	s.w.Serve(s.c.Addr, s.handler())
 }
 
 func (s *server) handler() http.Handler {
@@ -67,4 +61,8 @@ func (s *server) handleWebsocket() httprouter.Handle {
 func (s *server) websocketClientAdapter(c *astiws.Client) {
 	s.m.AutoRegisterClient(c)
 	// TODO Do stuff with the client
+}
+
+func (s *server) HandleEvent(e Event) {
+	// TODO Do stuff with the event
 }

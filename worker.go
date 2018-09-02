@@ -2,33 +2,29 @@ package astiencoder
 
 import (
 	"github.com/asticode/go-astitools/worker"
-	"github.com/asticode/go-astiws"
-	"github.com/pkg/errors"
 )
 
 // Worker represents a worker
 type Worker struct {
-	d *dispatcher
-	e *encoder
-	m *astiws.Manager
-	s *server
-	*astiworker.Worker
+	c   *Cmds
+	cfg Configuration
+	e   *executer
+	ee  *eventEmitter
+	w   *astiworker.Worker
 }
 
 // NewWorker creates a new worker
-func NewWorker(c Configuration) (w *Worker) {
-	d := newDispatcher()
-	m := astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 8192})
+func NewWorker(cfg Configuration) (w *Worker) {
 	aw := astiworker.NewWorker()
-	s := newServer(c.Server, d, m, aw)
-	e := newEncoder(d)
-	d.init(e, s, aw)
+	ee := newEventEmitter()
+	e := newExecuter(ee)
+	c := newCmds(e, aw)
 	return &Worker{
-		d:      d,
-		e:      e,
-		m:      m,
-		s:      s,
-		Worker: aw,
+		c:   c,
+		cfg: cfg,
+		e:   e,
+		ee:  ee,
+		w:   aw,
 	}
 }
 
@@ -37,16 +33,34 @@ func (w *Worker) Close() error {
 	return nil
 }
 
-// Serve starts the server
-func (w *Worker) Serve() {
-	w.s.serve()
+// Stop stops the worker
+func (w *Worker) Stop() {
+	w.w.Stop()
 }
 
-// DispatchJob dispatches a job
-func (w *Worker) DispatchJob(j Job) (err error) {
-	if err = w.d.dispatchJob(j); err != nil {
-		err = errors.Wrap(err, "astiencoder: dispatching job failed")
-		return
-	}
-	return
+// HandleSignals handles signals
+func (w *Worker) HandleSignals() {
+	w.w.HandleSignals()
+}
+
+// Wait is a blocking pattern
+func (w *Worker) Wait() {
+	w.w.Wait()
+}
+
+// Cmds returns the commands
+func (w *Worker) Cmds() Cmds {
+	return *w.c
+}
+
+// AddEventHandler adds an event handler
+func (w *Worker) AddEventHandler(h EventHandler) {
+	w.ee.addEventHandler(h)
+}
+
+// Serve creates and starts the server
+func (w *Worker) Serve() {
+	s := newServer(w.cfg.Server, w.ee)
+	w.AddEventHandler(s)
+	w.w.Serve(w.cfg.Server.Addr, s.handler())
 }
