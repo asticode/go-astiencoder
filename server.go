@@ -4,11 +4,10 @@ import (
 	"net/http"
 
 	"github.com/asticode/go-astilog"
-	"github.com/asticode/go-astiws"
-	"github.com/pkg/errors"
-
 	"github.com/asticode/go-astitools/http"
+	"github.com/asticode/go-astiws"
 	"github.com/julienschmidt/httprouter"
+	"github.com/pkg/errors"
 )
 
 type server struct {

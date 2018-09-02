@@ -64,3 +64,8 @@ func (w *Worker) Serve() {
 	w.AddEventHandler(s)
 	w.w.Serve(w.cfg.Server.Addr, s.handler())
 }
+
+// SetJobHandler sets the job handler
+func (w *Worker) SetJobHandler(h JobHandler) {
+	w.e.h = h
+}

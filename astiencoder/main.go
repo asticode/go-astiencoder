@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"os"
+
 	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astiencoder/libav"
 	"github.com/asticode/go-astilog"
 	"github.com/asticode/go-astitools/flag"
 	"github.com/pkg/errors"
-	"os"
 )
 
 // Flags
@@ -23,7 +25,7 @@ func main() {
 
 	// Version
 	if s == "version" {
-		fmt.Print(astiencoder.Version)
+		fmt.Print(astilibav.Version)
 		return
 	}
 
@@ -41,6 +43,9 @@ func main() {
 	w := astiencoder.NewWorker(c.Encoder)
 	defer w.Close()
 
+	// Set job handler
+	w.SetJobHandler(astilibav.HandleJob)
+
 	// Handle signals
 	w.HandleSignals()
 
@@ -56,7 +61,7 @@ func main() {
 		}
 
 		// Unmarshal
-		var j astiencoder.Job
+		var j astilibav.Job
 		if err = json.NewDecoder(f).Decode(&j); err != nil {
 			astilog.Fatal(errors.Wrapf(err, "main: unmarshaling %s into %+v failed", *job, j))
 		}

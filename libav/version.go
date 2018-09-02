@@ -1,4 +1,4 @@
-package astiencoder
+package astilibav
 
 import (
 	"fmt"
@@ -13,28 +13,16 @@ import (
 
 // Version stores the versions
 var Version = Versions{
-	Libs: LibsVersion{
-		AvCodec:  avcodec.AvcodecVersion(),
-		AvDevice: avdevice.AvdeviceVersion(),
-		AvFilter: avfilter.AvfilterVersion(),
-		AvUtil:   avutil.AvutilVersion(),
-		Resample: swresample.SwresampleLicense(),
-		SWScale:  swscale.SwscaleVersion(),
-	},
+	AvCodec:  avcodec.AvcodecVersion(),
+	AvDevice: avdevice.AvdeviceVersion(),
+	AvFilter: avfilter.AvfilterVersion(),
+	AvUtil:   avutil.AvutilVersion(),
+	Resample: swresample.SwresampleLicense(),
+	SWScale:  swscale.SwscaleVersion(),
 }
 
 // Versions represents the versions
 type Versions struct {
-	Libs LibsVersion
-}
-
-// String implements the Stringer interface
-func (v Versions) String() string {
-	return v.Libs.String()
-}
-
-// LibsVersion represents the libs versions
-type LibsVersion struct {
 	AvCodec  uint
 	AvDevice uint
 	AvFilter uint
@@ -44,7 +32,7 @@ type LibsVersion struct {
 }
 
 // String implements the Stringer interface
-func (v LibsVersion) String() string {
+func (v Versions) String() string {
 	return fmt.Sprintf(`avcodec: %v
 avdevice: %v
 avfilter: %v
