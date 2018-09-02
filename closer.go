@@ -1,0 +1,53 @@
+package astiencoder
+
+import (
+	"sync"
+	"github.com/asticode/go-astitools/error"
+)
+
+// CloseFunc is a method that closes something
+type CloseFunc func() error
+
+// Closer is an object that can close things
+type Closer struct {
+	fs []CloseFunc
+	m  *sync.Mutex
+}
+
+// NewCloser creates a new closer
+func NewCloser() *Closer {
+	return &Closer{
+		m: &sync.Mutex{},
+	}
+}
+
+// Close implements the io.Closer interface
+func (c *Closer) Close() (err error) {
+	// Get close funcs
+	c.m.Lock()
+	fs := append([]CloseFunc{}, c.fs...)
+	c.m.Unlock()
+
+	// Loop through closers
+	var errs []error
+	for _, f := range fs {
+		if errC := f(); errC != nil {
+			errs = append(errs, errC)
+		}
+	}
+
+	// Process errors
+	if len(errs) == 1 {
+		err = errs[0]
+	} else if len(errs) > 1 {
+		err = astierror.MultipleErrors(errs)
+	}
+	return
+}
+
+// AddCloser adds a closer at the beginning of the list
+func (c *Closer) AddCloseFunc(f CloseFunc) {
+	c.m.Lock()
+	defer c.m.Unlock()
+	c.fs = append([]CloseFunc{f}, c.fs...)
+}

@@ -9,12 +9,12 @@ import (
 
 // Demuxer represents a demuxer
 type Demuxer struct {
-	e astiencoder.EventEmitter
-	t astiencoder.TaskCreator
+	e astiencoder.EmitEventFunc
+	t astiencoder.CreateTaskFunc
 }
 
 // NewDemuxer creates a new demuxer
-func NewDemuxer(e astiencoder.EventEmitter, t astiencoder.TaskCreator) *Demuxer {
+func NewDemuxer(e astiencoder.EmitEventFunc, t astiencoder.CreateTaskFunc) *Demuxer {
 	return &Demuxer{
 		e: e,
 		t: t,

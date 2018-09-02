@@ -24,11 +24,11 @@ func EventError(err error) Event {
 	}
 }
 
-// EventHandler is a method capable of handling events coming out of the worker
-type EventHandler func(e Event)
+// HandleEventFunc is a method that can handle events coming out of the worker
+type HandleEventFunc func(e Event)
 
-// EventHandlerLogger is the logger event handler
-var EventHandlerLogger = func(e Event) {
+// LoggerHandleEventFunc is the logger handle event func
+var LoggerHandleEventFunc = func(e Event) {
 	switch e.Name {
 	case EventNameError:
 		if v, ok := e.Payload.(error); ok {
@@ -37,11 +37,11 @@ var EventHandlerLogger = func(e Event) {
 	}
 }
 
-// EventEmitter is a method capable of emitting events out of the worker
-type EventEmitter func(e Event)
+// EmitEventFunc is a method that can emit events out of the worker
+type EmitEventFunc func(e Event)
 
 type eventEmitter struct {
-	hs []EventHandler
+	fs []HandleEventFunc
 	m  *sync.Mutex
 }
 
@@ -51,16 +51,16 @@ func newEventEmitter() *eventEmitter {
 	}
 }
 
-func (e *eventEmitter) addEventHandler(h EventHandler) {
+func (e *eventEmitter) addHandleEventFunc(f HandleEventFunc) {
 	e.m.Lock()
 	defer e.m.Unlock()
-	e.hs = append(e.hs, h)
+	e.fs = append(e.fs, f)
 }
 
 func (e *eventEmitter) emit(evt Event) {
 	e.m.Lock()
 	defer e.m.Unlock()
-	for _, h := range e.hs {
-		go h(evt)
+	for _, f := range e.fs {
+		go f(evt)
 	}
 }

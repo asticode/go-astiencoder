@@ -53,19 +53,19 @@ func (w *Worker) Cmds() Cmds {
 	return *w.c
 }
 
-// AddEventHandler adds an event handler
-func (w *Worker) AddEventHandler(h EventHandler) {
-	w.ee.addEventHandler(h)
+// AddHandleEventFunc adds an handle event func
+func (w *Worker) AddHandleEventFunc(f HandleEventFunc) {
+	w.ee.addHandleEventFunc(f)
 }
 
-// SetJobHandler sets the job handler
-func (w *Worker) SetJobHandler(h JobHandler) {
-	w.e.h = h
+// SetHandleJobFunc sets the handle job func
+func (w *Worker) SetHandleJobFunc(f HandleJobFunc) {
+	w.e.f = f
 }
 
 // Serve creates and starts the server
 func (w *Worker) Serve() {
 	s := newServer(w.cfg.Server, w.ee)
-	w.AddEventHandler(s.handleEvent)
+	w.AddHandleEventFunc(s.handleEvent)
 	w.w.Serve(w.cfg.Server.Addr, s.handler())
 }

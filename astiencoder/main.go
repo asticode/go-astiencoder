@@ -43,11 +43,11 @@ func main() {
 	w := astiencoder.NewWorker(c.Encoder)
 	defer w.Close()
 
-	// Add event handler
-	w.AddEventHandler(astiencoder.EventHandlerLogger)
+	// Add handle event func
+	w.AddHandleEventFunc(astiencoder.LoggerHandleEventFunc)
 
-	// Set job handler
-	w.SetJobHandler(astilibav.DefaultJobHandler)
+	// Set handle job func
+	w.SetHandleJobFunc(astilibav.DefaultJobHandler)
 
 	// Handle signals
 	w.HandleSignals()

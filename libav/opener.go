@@ -12,14 +12,14 @@ import (
 
 // Opener represents an object capable of opening a url
 type Opener struct {
-	e  astiencoder.EventEmitter
+	e  astiencoder.EmitEventFunc
 	hs []OpenerHandler
 	m  *sync.Mutex
-	t  astiencoder.TaskCreator
+	t  astiencoder.CreateTaskFunc
 }
 
 // NewOpener creates a new Opener
-func NewOpener(e astiencoder.EventEmitter, t astiencoder.TaskCreator) *Opener {
+func NewOpener(e astiencoder.EmitEventFunc, t astiencoder.CreateTaskFunc) *Opener {
 	return &Opener{
 		e: e,
 		m: &sync.Mutex{},
