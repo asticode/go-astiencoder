@@ -70,7 +70,7 @@ func main() {
 		}
 
 		// Exec job
-		if err = w.Cmds().ExecJob(j); err != nil {
+		if err = w.ExecJob(j); err != nil {
 			astilog.Fatal(errors.Wrap(err, "main: executing job failed"))
 		}
 	}

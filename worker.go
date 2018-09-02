@@ -2,11 +2,11 @@ package astiencoder
 
 import (
 	"github.com/asticode/go-astitools/worker"
+	"github.com/pkg/errors"
 )
 
 // Worker represents a worker
 type Worker struct {
-	c   *Cmds
 	cfg Configuration
 	e   *executer
 	ee  *eventEmitter
@@ -18,9 +18,7 @@ func NewWorker(cfg Configuration) (w *Worker) {
 	aw := astiworker.NewWorker()
 	ee := newEventEmitter()
 	e := newExecuter(ee, aw)
-	c := newCmds(e)
 	return &Worker{
-		c:   c,
 		cfg: cfg,
 		e:   e,
 		ee:  ee,
@@ -48,11 +46,6 @@ func (w *Worker) Wait() {
 	w.w.Wait()
 }
 
-// Cmds returns the commands
-func (w *Worker) Cmds() Cmds {
-	return *w.c
-}
-
 // AddHandleEventFunc adds an handle event func
 func (w *Worker) AddHandleEventFunc(f HandleEventFunc) {
 	w.ee.addHandleEventFunc(f)
@@ -68,4 +61,18 @@ func (w *Worker) Serve() {
 	s := newServer(w.cfg.Server, w.ee)
 	w.AddHandleEventFunc(s.handleEvent)
 	w.w.Serve(w.cfg.Server.Addr, s.handler())
+}
+
+// ExecJob executes a job
+func (w *Worker) ExecJob(j Job) (err error) {
+	if err = w.e.execJob(j); err != nil {
+		err = errors.Wrapf(err, "astiencoder: executing job %+v failed", j)
+		return
+	}
+	return
+}
+
+// DispatchCmd dispatches a cmd
+func (w *Worker) DispatchCmd(c Cmd) {
+	w.e.dispatchCmd(c)
 }

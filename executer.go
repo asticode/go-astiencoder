@@ -31,6 +31,12 @@ func newExecuter(e *eventEmitter, w *astiworker.Worker) *executer {
 	}
 }
 
+func (e *executer) isBusy() bool {
+	e.m.Lock()
+	defer e.m.Unlock()
+	return e.busy
+}
+
 func (e *executer) lock() error {
 	e.m.Lock()
 	defer e.m.Unlock()
@@ -95,4 +101,21 @@ func (e *executer) execJob(j Job) (err error) {
 		t.Done()
 	}()
 	return
+}
+
+func (e *executer) dispatchCmd(c Cmd) {
+	// No job handler
+	if e.h == nil {
+		return
+	}
+
+	// Executer is not busy
+	if !e.isBusy() {
+		return
+	}
+
+	// Handle cmd
+	if v, ok := e.h.(CmdHandler); ok {
+		go v.HandleCmd(c)
+	}
 }
