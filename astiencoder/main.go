@@ -43,6 +43,9 @@ func main() {
 	w := astiencoder.NewWorker(c.Encoder)
 	defer w.Close()
 
+	// Add event handler
+	w.AddEventHandler(astiencoder.EventHandlerLogger)
+
 	// Set job handler
 	w.SetJobHandler(astilibav.DefaultJobHandler)
 
@@ -61,7 +64,7 @@ func main() {
 		}
 
 		// Unmarshal
-		var j astilibav.Job
+		var j astiencoder.Job
 		if err = json.NewDecoder(f).Decode(&j); err != nil {
 			astilog.Fatal(errors.Wrapf(err, "main: unmarshaling %s into %+v failed", *job, j))
 		}

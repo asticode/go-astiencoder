@@ -16,9 +16,9 @@ func newCmds(e *executer) *Cmds {
 }
 
 // ExecJob commands the worker to execute a new job
-func (c Cmds) ExecJob(job interface{}) (err error) {
-	if err = c.e.execJob(job); err != nil {
-		err = errors.Wrapf(err, "astiencoder: executing job %+v failed", job)
+func (c Cmds) ExecJob(j Job) (err error) {
+	if err = c.e.execJob(j); err != nil {
+		err = errors.Wrapf(err, "astiencoder: executing job %+v failed", j)
 		return
 	}
 	return

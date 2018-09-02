@@ -6,50 +6,44 @@ import (
 	"sync"
 
 	"github.com/asticode/go-astiencoder"
-	"github.com/selfmodify/goav/avformat"
-	"github.com/asticode/go-astitools/worker"
-	"github.com/asticode/go-astilog"
 	"github.com/pkg/errors"
+	"github.com/selfmodify/goav/avformat"
 )
 
-// Opener represents an object capable of opening stuff
+// Opener represents an object capable of opening a url
 type Opener struct {
-	hs []OpenerOutputHandler
+	e  astiencoder.EventEmitter
+	hs []OpenerHandler
 	m  *sync.Mutex
+	t  astiencoder.TaskCreator
 }
 
 // NewOpener creates a new Opener
-func NewOpener() *Opener {
+func NewOpener(e astiencoder.EventEmitter, t astiencoder.TaskCreator) *Opener {
 	return &Opener{
+		e: e,
 		m: &sync.Mutex{},
+		t: t,
 	}
 }
 
-// OpenerOutput represents an opener output
-type OpenerOutput struct {
-	CtxFormat *avformat.Context
-	Job       Job
-}
+// OpenerHandler represents an object capable of handling an opener result
+type OpenerHandler func(ctx context.Context, ctxFormat *avformat.Context) error
 
-// OpenerOutputHandler represents an object capable of handling an opener output
-type OpenerOutputHandler interface {
-	HandleOpenerOutput(ctx context.Context, t *astiworker.Task, o OpenerOutput) error
-}
-
-// AddOutputHandler adds an output handler
-func (o *Opener) AddOutputHandler(out OpenerOutputHandler) {
+// AddHandler adds a handler
+func (o *Opener) AddHandler(out OpenerHandler) {
 	o.m.Lock()
 	defer o.m.Unlock()
 	o.hs = append(o.hs, out)
 }
 
 // Open opens a url
-func (o *Opener) Open(ctx context.Context, t *astiworker.Task, j Job) (err error) {
+func (o *Opener) Open(ctx context.Context, url string) (err error) {
 	// Open input
-	var out OpenerOutput
+	var ctxFormat *avformat.Context
 	if err = astiencoder.CtxFunc(ctx, func() error {
-		if avformat.AvformatOpenInput(&out.CtxFormat, j.URL, nil, nil) != 0 {
-			return fmt.Errorf("astilibav: avformat.AvformatOpenInput on %s failed", j.URL)
+		if avformat.AvformatOpenInput(&ctxFormat, url, nil, nil) != 0 {
+			return fmt.Errorf("astilibav: avformat.AvformatOpenInput on %s failed", url)
 		}
 		return nil
 	}); err != nil {
@@ -60,8 +54,8 @@ func (o *Opener) Open(ctx context.Context, t *astiworker.Task, j Job) (err error
 
 	// Retrieve stream information
 	if err = astiencoder.CtxFunc(ctx, func() error {
-		if out.CtxFormat.AvformatFindStreamInfo(nil) < 0 {
-			return fmt.Errorf("astilibav: ctxFormat.AvformatFindStreamInfo on %s failed", j.URL)
+		if ctxFormat.AvformatFindStreamInfo(nil) < 0 {
+			return fmt.Errorf("astilibav: ctxFormat.AvformatFindStreamInfo on %s failed", url)
 		}
 		return nil
 	}); err != nil {
@@ -71,11 +65,11 @@ func (o *Opener) Open(ctx context.Context, t *astiworker.Task, j Job) (err error
 	// Handle output
 	o.m.Lock()
 	for idx, h := range o.hs {
-		st := t.NewSubTask()
-		go func(idx int, h OpenerOutputHandler) {
-			defer st.Done()
-			if err := h.HandleOpenerOutput(ctx, t, out); err != nil {
-				astilog.Error(errors.Wrapf(err, "astilibav: handling opener output %+v with handler #%d failed", out, idx))
+		t := o.t()
+		go func(idx int, h OpenerHandler) {
+			defer t.Done()
+			if err := h(ctx, ctxFormat); err != nil {
+				o.e(astiencoder.EventError(errors.Wrapf(err, "astilibav: opener handler #%d failed", idx)))
 			}
 		}(idx, h)
 	}

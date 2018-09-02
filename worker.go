@@ -58,14 +58,14 @@ func (w *Worker) AddEventHandler(h EventHandler) {
 	w.ee.addEventHandler(h)
 }
 
-// Serve creates and starts the server
-func (w *Worker) Serve() {
-	s := newServer(w.cfg.Server, w.ee)
-	w.AddEventHandler(s)
-	w.w.Serve(w.cfg.Server.Addr, s.handler())
-}
-
 // SetJobHandler sets the job handler
 func (w *Worker) SetJobHandler(h JobHandler) {
 	w.e.h = h
+}
+
+// Serve creates and starts the server
+func (w *Worker) Serve() {
+	s := newServer(w.cfg.Server, w.ee)
+	w.AddEventHandler(s.handleEvent)
+	w.w.Serve(w.cfg.Server.Addr, s.handler())
 }

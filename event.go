@@ -1,6 +1,14 @@
 package astiencoder
 
-import "sync"
+import (
+	"github.com/asticode/go-astilog"
+	"sync"
+)
+
+// Default event names
+var (
+	EventNameError = "error"
+)
 
 // Event is an event coming out of the worker
 type Event struct {
@@ -8,15 +16,29 @@ type Event struct {
 	Payload interface{} `json:"payload"`
 }
 
-// EventHandler is an object capable of handling events coming out of the worker
-type EventHandler interface {
-	HandleEvent(e Event)
+// EventError returns an error event
+func EventError(err error) Event {
+	return Event{
+		Name:    EventNameError,
+		Payload: err,
+	}
 }
 
-// EventEmitter is an object capable of emitting events out of the worker
-type EventEmitter interface {
-	Emit(e Event)
+// EventHandler is a method capable of handling events coming out of the worker
+type EventHandler func(e Event)
+
+// EventHandlerLogger is the logger event handler
+var EventHandlerLogger = func(e Event) {
+	switch e.Name {
+	case EventNameError:
+		if v, ok := e.Payload.(error); ok {
+			astilog.Error(v)
+		}
+	}
 }
+
+// EventEmitter is a method capable of emitting events out of the worker
+type EventEmitter func(e Event)
 
 type eventEmitter struct {
 	hs []EventHandler
@@ -35,7 +57,10 @@ func (e *eventEmitter) addEventHandler(h EventHandler) {
 	e.hs = append(e.hs, h)
 }
 
-// Emit implements the EventEmitter interface
-func (e *eventEmitter) Emit(evt Event) {
-	// TODO
+func (e *eventEmitter) emit(evt Event) {
+	e.m.Lock()
+	defer e.m.Unlock()
+	for _, h := range e.hs {
+		go h(evt)
+	}
 }

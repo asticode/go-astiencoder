@@ -62,6 +62,6 @@ func (s *server) websocketClientAdapter(c *astiws.Client) {
 	// TODO Do stuff with the client
 }
 
-func (s *server) HandleEvent(e Event) {
+func (s *server) handleEvent(e Event) {
 	// TODO Do stuff with the event
 }
