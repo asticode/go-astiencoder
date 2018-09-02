@@ -14,13 +14,13 @@ var DefaultJobHandler = func(ctx context.Context, j astiencoder.Job, e astiencod
 	c := astiencoder.NewCloser()
 
 	// Create opener
-	o := NewOpener(e, t)
+	o := NewOpener(c, e, t)
 
 	// Create demuxer
 	d := NewDemuxer(e, t)
 
 	// Connect the demuxer to the opener
-	o.AddHandler(d.Demux)
+	o.AddHandleResultFunc(d.Demux)
 
 	// Open
 	if err := o.Open(ctx, j.URL); err != nil {

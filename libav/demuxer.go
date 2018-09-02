@@ -2,6 +2,7 @@ package astilibav
 
 import (
 	"context"
+	"fmt"
 	"github.com/selfmodify/goav/avformat"
 
 	"github.com/asticode/go-astiencoder"
@@ -23,7 +24,16 @@ func NewDemuxer(e astiencoder.EmitEventFunc, t astiencoder.CreateTaskFunc) *Demu
 
 // Demux demuxes an input
 func (d *Demuxer) Demux(ctx context.Context, ctxFormat *avformat.Context) (err error) {
-	// Dump information about file onto standard error
-	//o.CtxFormat.AvDumpFormat(0, o.Job.URL, 0)
+	// Retrieve stream information
+	if err = astiencoder.CtxFunc(ctx, func() error {
+		if ret := ctxFormat.AvformatFindStreamInfo(nil); ret < 0 {
+			return fmt.Errorf("astilibav: ctxFormat.AvformatFindStreamInfo on %s failed with ret = %d", ctxFormat.Filename(), ret)
+		}
+		return nil
+	}); err != nil {
+		return
+	}
+
+	// TODO Loop through streams
 	return
 }

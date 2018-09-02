@@ -40,7 +40,7 @@ func (c *Closer) Close() (err error) {
 	if len(errs) == 1 {
 		err = errs[0]
 	} else if len(errs) > 1 {
-		err = astierror.MultipleErrors(errs)
+		err = astierror.NewMultiple(errs)
 	}
 	return
 }
