@@ -2,10 +2,9 @@ package astiencoder
 
 import (
 	"context"
+	"fmt"
 	"sync"
-	"time"
 
-	"github.com/asticode/go-astilog"
 	"github.com/pkg/errors"
 	"github.com/selfmodify/goav/avcodec"
 	"github.com/selfmodify/goav/avformat"
@@ -52,16 +51,30 @@ func (e *executer) unlock() {
 
 // TODO Make sure the execution is shut down gracefully when context is cancelled
 func (e *executer) execJob(ctx context.Context, j Job) (err error) {
-	// Open video file
-	/*
-		if avformat.AvformatOpenInput(&ctxtFormat, filename, nil, nil) != 0 {
-			log.Println("Error: Couldn't open file.")
-			return
+	// Open input
+	var ctxFormat *avformat.Context
+	if err = ctxFunc(ctx, func() error {
+		if avformat.AvformatOpenInput(&ctxFormat, j.URL, nil, nil) != 0 {
+			return  fmt.Errorf("astiencoder: avformat.AvformatOpenInput on %s failed", j.URL)
 		}
-	*/
+		return nil
+	}); err != nil {
+		return
+	}
+	// For now it panics
+	// defer ctxFormat.AvformatCloseInput()
 
-	astilog.Debugf("astiencoder: executing job %+v", j)
-	//astitime.Sleep(ctx, 10*time.Second)
-	time.Sleep(5 * time.Second)
+	// Retrieve stream information
+	if err = ctxFunc(ctx, func() error {
+		if ctxFormat.AvformatFindStreamInfo(nil) < 0 {
+			return fmt.Errorf("astiencoder: ctxFormat.AvformatFindStreamInfo on %s failed", j.URL)
+		}
+		return nil
+	}); err != nil {
+		return
+	}
+
+	// Dump information about file onto standard error
+	ctxFormat.AvDumpFormat(0, j.URL, 0)
 	return
 }
