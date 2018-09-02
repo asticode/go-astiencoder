@@ -44,7 +44,7 @@ func main() {
 	defer w.Close()
 
 	// Set job handler
-	w.SetJobHandler(astilibav.HandleJob)
+	w.SetJobHandler(astilibav.DefaultJobHandler)
 
 	// Handle signals
 	w.HandleSignals()

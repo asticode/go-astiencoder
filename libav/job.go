@@ -5,7 +5,8 @@ import (
 	"fmt"
 
 	"github.com/asticode/go-astiencoder"
-	"github.com/selfmodify/goav/avformat"
+	"github.com/asticode/go-astitools/worker"
+	"github.com/pkg/errors"
 )
 
 // Job represents a job
@@ -13,8 +14,8 @@ type Job struct {
 	URL string `json:"url"`
 }
 
-// HandleJob implements the astiencoder.JobHandler interface
-func HandleJob(ctx context.Context, job interface{}, e astiencoder.EventEmitter) (err error) {
+// DefaultJobHandler is the default job handler
+var DefaultJobHandler = func(ctx context.Context, t *astiworker.Task, job interface{}, e astiencoder.EventEmitter) (err error) {
 	// Parse job
 	j, ok := job.(Job)
 	if !ok {
@@ -22,30 +23,19 @@ func HandleJob(ctx context.Context, job interface{}, e astiencoder.EventEmitter)
 		return
 	}
 
-	// Open input
-	var ctxFormat *avformat.Context
-	if err = astiencoder.CtxFunc(ctx, func() error {
-		if avformat.AvformatOpenInput(&ctxFormat, j.URL, nil, nil) != 0 {
-			return fmt.Errorf("astiencoder: avformat.AvformatOpenInput on %s failed", j.URL)
-		}
-		return nil
-	}); err != nil {
+	// Create opener
+	o := NewOpener()
+
+	// Create demuxer
+	d := NewDemuxer()
+
+	// Connect the demuxer to the opener
+	o.AddOutputHandler(d)
+
+	// Open
+	if err = o.Open(ctx, t, j); err != nil {
+		err = errors.Wrapf(err, "astilibav: opening job %+v failed", j)
 		return
 	}
-	// For now it panics
-	// defer ctxFormat.AvformatCloseInput()
-
-	// Retrieve stream information
-	if err = astiencoder.CtxFunc(ctx, func() error {
-		if ctxFormat.AvformatFindStreamInfo(nil) < 0 {
-			return fmt.Errorf("astiencoder: ctxFormat.AvformatFindStreamInfo on %s failed", j.URL)
-		}
-		return nil
-	}); err != nil {
-		return
-	}
-
-	// Dump information about file onto standard error
-	ctxFormat.AvDumpFormat(0, j.URL, 0)
 	return
 }

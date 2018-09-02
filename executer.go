@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/asticode/go-astilog"
+	"github.com/asticode/go-astitools/worker"
 	"github.com/pkg/errors"
 )
 
@@ -15,19 +17,21 @@ var (
 
 // JobHandler handles a job
 // Make sure the execution is shut down gracefully when context is cancelled
-type JobHandler func(ctx context.Context, job interface{}, e EventEmitter) error
+type JobHandler func(ctx context.Context, t *astiworker.Task, job interface{}, e EventEmitter) error
 
 type executer struct {
 	busy bool
 	ee   *eventEmitter
 	h    JobHandler
 	m    *sync.Mutex
+	w    *astiworker.Worker
 }
 
-func newExecuter(ee *eventEmitter) *executer {
+func newExecuter(ee *eventEmitter, w *astiworker.Worker) *executer {
 	return &executer{
 		ee: ee,
 		m:  &sync.Mutex{},
+		w:  w,
 	}
 }
 
@@ -47,16 +51,35 @@ func (e *executer) unlock() {
 	e.busy = false
 }
 
-func (e *executer) execJob(ctx context.Context, job interface{}) (err error) {
+func (e *executer) execJob(job interface{}) (err error) {
 	// No handler
 	if e.h == nil {
 		return ErrNoJobHandler
 	}
 
-	// Handle job
-	if err = e.h(ctx, job, e.ee); err != nil {
-		err = errors.Wrapf(err, "astiencoder: handling job %+v failed", job)
+	// Lock executer
+	if err = e.lock(); err != nil {
+		err = errors.Wrap(err, "astiencoder: locking executer failed")
 		return
 	}
+
+	// Create task
+	t := e.w.NewTask()
+	go func() {
+		// Handle job
+		if err = e.h(e.w.Context(), t, job, e.ee); err != nil {
+			astilog.Error(errors.Wrapf(err, "astiencoder: handling job %+v failed", job))
+			return
+		}
+
+		// Wait for task to be done
+		t.Wait()
+
+		// Unlock executer
+		e.unlock()
+
+		// Task is done
+		t.Done()
+	}()
 	return
 }

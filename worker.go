@@ -17,8 +17,8 @@ type Worker struct {
 func NewWorker(cfg Configuration) (w *Worker) {
 	aw := astiworker.NewWorker()
 	ee := newEventEmitter()
-	e := newExecuter(ee)
-	c := newCmds(e, aw)
+	e := newExecuter(ee, aw)
+	c := newCmds(e)
 	return &Worker{
 		c:   c,
 		cfg: cfg,
