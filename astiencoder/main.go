@@ -46,8 +46,8 @@ func main() {
 	// Add handle event func
 	w.AddHandleEventFunc(astiencoder.LoggerHandleEventFunc)
 
-	// Set handle job func
-	w.SetHandleJobFunc(astilibav.DefaultJobHandler)
+	// Set job handler
+	w.SetJobHandler(newHandler())
 
 	// Handle signals
 	w.HandleSignals()

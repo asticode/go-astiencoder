@@ -58,9 +58,9 @@ func (w *Worker) AddHandleEventFunc(f HandleEventFunc) {
 	w.ee.addHandleEventFunc(f)
 }
 
-// SetHandleJobFunc sets the handle job func
-func (w *Worker) SetHandleJobFunc(f HandleJobFunc) {
-	w.e.f = f
+// SetJobHandler sets the job handler
+func (w *Worker) SetJobHandler(h JobHandler) {
+	w.e.h = h
 }
 
 // Serve creates and starts the server

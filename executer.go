@@ -18,7 +18,7 @@ type executer struct {
 	busy  bool
 	count int
 	e     *eventEmitter
-	f     HandleJobFunc
+	h     JobHandler
 	m     *sync.Mutex
 	w     *astiworker.Worker
 }
@@ -55,9 +55,9 @@ func (e *executer) inc() int {
 }
 
 func (e *executer) execJob(j Job) (err error) {
-	// No job handle func
-	if e.f == nil {
-		return errors.New("astiencoder: no job handle func")
+	// No job handler
+	if e.h == nil {
+		return errors.New("astiencoder: no job handler")
 	}
 
 	// Lock executer
@@ -74,7 +74,7 @@ func (e *executer) execJob(j Job) (err error) {
 
 		// Handle job
 		var c io.Closer
-		if c, err = e.f(e.w.Context(), j, e.e.emit, t.NewSubTask); err != nil {
+		if c, err = e.h.HandleJob(e.w.Context(), j, e.e.emit, t.NewSubTask); err != nil {
 			e.e.emit(EventError(errors.Wrapf(err, "astiencoder: execution #%d of job %+v failed", count, j)))
 		}
 
