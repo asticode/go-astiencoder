@@ -7,7 +7,14 @@ import (
 
 	"github.com/asticode/go-astilog"
 	"github.com/pkg/errors"
+	"github.com/selfmodify/goav/avcodec"
+	"github.com/selfmodify/goav/avformat"
 )
+
+func init() {
+	avformat.AvRegisterAll()
+	avcodec.AvcodecRegisterAll()
+}
 
 // Errors
 var (
@@ -43,8 +50,16 @@ func (e *executer) unlock() {
 	e.busy = false
 }
 
-// TODO Make sure the executer shuts down gracefully when context is cancelled
+// TODO Make sure the execution is shut down gracefully when context is cancelled
 func (e *executer) execJob(ctx context.Context, j Job) (err error) {
+	// Open video file
+	/*
+		if avformat.AvformatOpenInput(&ctxtFormat, filename, nil, nil) != 0 {
+			log.Println("Error: Couldn't open file.")
+			return
+		}
+	*/
+
 	astilog.Debugf("astiencoder: executing job %+v", j)
 	//astitime.Sleep(ctx, 10*time.Second)
 	time.Sleep(5 * time.Second)

@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astilog"
+	"github.com/asticode/go-astitools/flag"
 	"github.com/pkg/errors"
 	"os"
 )
@@ -16,14 +18,24 @@ var (
 
 func main() {
 	// Parse flags
+	s := astiflag.Subcommand()
 	flag.Parse()
-	astilog.FlagInit()
+
+	// Version
+	if s == "version" {
+		fmt.Print(astiencoder.Version)
+		return
+	}
 
 	// Create configuration
+	astilog.SetDefaultLogger()
 	c, err := newConfiguration()
 	if err != nil {
 		astilog.Fatal(errors.Wrap(err, "main: creating configuration failed"))
 	}
+
+	// Create logger
+	astilog.SetLogger(astilog.New(c.Logger))
 
 	// Create worker
 	w := astiencoder.NewWorker(c.Encoder)
