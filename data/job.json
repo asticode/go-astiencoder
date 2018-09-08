@@ -9,7 +9,7 @@
       "url": "tmp/sample.ts"
     }
   },
-  "processes": {
+  "operations": {
     "remux": {
       "inputs": [
         {

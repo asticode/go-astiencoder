@@ -14,7 +14,7 @@ var (
 // Event is an event coming out of the encoder
 type Event struct {
 	Name    string      `json:"name"`
-	Payload interface{} `json:"payload"`
+	Payload interface{} `json:"payload,omitempty"`
 }
 
 // EventError returns an error event
@@ -25,8 +25,8 @@ func EventError(err error) Event {
 	}
 }
 
-// HandleEventFunc returns a method that can handle events coming out of the encoder
-type HandleEventFunc func() (isBlocking bool, fn func(e Event))
+// EventHandler returns a method that can handle events coming out of the encoder
+type EventHandler func() (isBlocking bool, fn func(e Event))
 
 // LoggerHandleEventFunc returns the logger handle event func
 var LoggerHandleEventFunc = func() (isBlocking bool, fn func(e Event)) {
@@ -59,10 +59,10 @@ func newEventEmitter() *eventEmitter {
 	}
 }
 
-func (e *eventEmitter) addHandleEventFunc(f HandleEventFunc) {
+func (e *eventEmitter) addHandler(h EventHandler) {
 	e.m.Lock()
 	defer e.m.Unlock()
-	isBlocking, fn := f()
+	isBlocking, fn := h()
 	e.hs = append(e.hs, eventHandler{
 		isBlocking: isBlocking,
 		fn:         fn,

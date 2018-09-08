@@ -2,63 +2,76 @@ package astilibav
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astilog"
+	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
 	"github.com/pkg/errors"
 )
 
+var countDemuxer uint64
+
 // Demuxer represents a demuxer
 type Demuxer struct {
+	*astiencoder.BaseNode
 	cs        map[int][]chan *avcodec.Packet // Indexed by stream index
 	ctxFormat *avformat.Context
 	e         astiencoder.EmitEventFunc
-	eofFuncs  []DemuxEOFFunc
+	hs        map[int][]PktHandler // Indexed by stream index
 	m         *sync.Mutex
-	pktFuncs  map[int][]DemuxPktFunc // Indexed by stream index
 	w         *astiencoder.Worker
 }
 
-// DemuxPktFunc represents a method that can handle a pkt
-type DemuxPktFunc func(pkt *avcodec.Packet)
-
-// DemuxEOFFunc represents a method that can handle the eof
-type DemuxEOFFunc func()
+// PktHandler represents an object capable of handling packets
+type PktHandler interface {
+	HandlePkt(pkt *avcodec.Packet)
+}
 
 // NewDemuxer creates a new demuxer
-func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, t astiencoder.CreateTaskFunc) *Demuxer {
+func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc) *Demuxer {
+	atomic.AddUint64(&countDemuxer, uint64(1))
 	return &Demuxer{
+		BaseNode: astiencoder.NewBaseNode(astiencoder.NodeMetadata{
+			Description: fmt.Sprintf("Demuxes %s", ctxFormat.Filename()),
+			Label:       fmt.Sprintf("Demuxer #%d", countDemuxer),
+			Name:        fmt.Sprintf("demuxer_%d", countDemuxer),
+		}),
 		cs:        make(map[int][]chan *avcodec.Packet),
 		ctxFormat: ctxFormat,
 		e:         e,
-		pktFuncs:  make(map[int][]DemuxPktFunc),
+		hs:        make(map[int][]PktHandler),
 		m:         &sync.Mutex{},
-		w:         astiencoder.NewWorker(t),
+		w:         astiencoder.NewWorker(),
 	}
 }
 
-// OnPkt adds a pkt handler
-func (d *Demuxer) OnPkt(streamIdx int, f DemuxPktFunc) {
+// OnPkt adds pkt handlers for a specific stream index
+func (d *Demuxer) OnPkt(streamIdx int, hs ...PktHandler) {
 	d.m.Lock()
 	defer d.m.Unlock()
-	d.cs[streamIdx] = append(d.cs[streamIdx], make(chan *avcodec.Packet))
-	d.pktFuncs[streamIdx] = append(d.pktFuncs[streamIdx], f)
+	for _, h := range hs {
+		d.cs[streamIdx] = append(d.cs[streamIdx], make(chan *avcodec.Packet))
+		d.hs[streamIdx] = append(d.hs[streamIdx], h)
+		d.AddChildren(h.(astiencoder.Node))
+	}
 	return
 }
 
-// OnEOF adds an eof handler
-func (d *Demuxer) OnEOF(f DemuxEOFFunc) {
-	d.m.Lock()
-	defer d.m.Unlock()
-	d.eofFuncs = append(d.eofFuncs, f)
-}
-
 // Start starts the demuxer
-func (d *Demuxer) Start(ctx context.Context) {
-	d.w.Start(ctx, d.startHandlerFuncs, func() {
+func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
+	d.w.Start(ctx, t, d.startHandlerFuncs, func(t *astiworker.Task) {
+		// Count
+		var count int
+		defer func(c *int) {
+			astilog.Warnf("astilibav: demuxed %d pkts", count)
+		}(&count)
+
 		// Loop
 		var pkt = &avcodec.Packet{}
 		for {
@@ -71,7 +84,6 @@ func (d *Demuxer) Start(ctx context.Context) {
 			}); err != nil {
 				// Assert
 				if v, ok := errors.Cause(err).(AvError); ok && int(v) == avutil.AVERROR_EOF {
-					d.handleEOF()
 					return
 				}
 				d.e(astiencoder.EventError(err))
@@ -79,12 +91,13 @@ func (d *Demuxer) Start(ctx context.Context) {
 			}
 
 			// TODO Copy packet?
+			count++
 
 			// Handle packet
 			d.handlePkt(pkt)
 
 			// Check context
-			if d.w.Ctx().Err() != nil {
+			if d.w.Context().Err() != nil {
 				return
 			}
 		}
@@ -101,17 +114,17 @@ func (d *Demuxer) startHandlerFuncs() {
 	defer d.m.Unlock()
 	for streamIdx, cs := range d.cs {
 		for idx, c := range cs {
-			f := d.pktFuncs[streamIdx][idx]
-			go func(c chan *avcodec.Packet, f DemuxPktFunc) {
+			h := d.hs[streamIdx][idx]
+			go func(c chan *avcodec.Packet, h PktHandler) {
 				for {
 					select {
 					case pkt := <-c:
-						f(pkt)
-					case <-d.w.Ctx().Done():
+						h.HandlePkt(pkt)
+					case <-d.w.Context().Done():
 						return
 					}
 				}
-			}(c, f)
+			}(c, h)
 		}
 	}
 }
@@ -127,13 +140,5 @@ func (d *Demuxer) handlePkt(pkt *avcodec.Packet) {
 		go func(c chan *avcodec.Packet) {
 			c <- pkt
 		}(c)
-	}
-}
-
-func (d *Demuxer) handleEOF() {
-	d.m.Lock()
-	defer d.m.Unlock()
-	for _, f := range d.eofFuncs {
-		go f()
 	}
 }

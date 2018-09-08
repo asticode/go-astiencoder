@@ -3,6 +3,8 @@ package astiencoder
 import (
 	"context"
 	"sync"
+
+	"github.com/asticode/go-astitools/worker"
 )
 
 // Worker represents a worker that can start and stop
@@ -11,25 +13,26 @@ type Worker struct {
 	ctx    context.Context
 	oStart *sync.Once
 	oStop  *sync.Once
-	t      CreateTaskFunc
 }
 
 // NewWorker creates a new worker
-func NewWorker(t CreateTaskFunc) *Worker {
+func NewWorker() *Worker {
 	return &Worker{
 		oStart: &sync.Once{},
 		oStop:  &sync.Once{},
-		t:      t,
 	}
 }
 
-// Ctx returns the worker's ctx
-func (w *Worker) Ctx() context.Context {
+// Context returns the worker context
+func (w *Worker) Context() context.Context {
 	return w.ctx
 }
 
+// CreateTaskFunc is a method that can create a task
+type CreateTaskFunc func() *astiworker.Task
+
 // Start starts the worker
-func (w *Worker) Start(ctx context.Context, startFunc func(), execFunc func()) {
+func (w *Worker) Start(ctx context.Context, tc CreateTaskFunc, startFunc func(), execFunc func(t *astiworker.Task)) {
 	// Make sure the worker can only be started once
 	w.oStart.Do(func() {
 		// Check context
@@ -38,7 +41,7 @@ func (w *Worker) Start(ctx context.Context, startFunc func(), execFunc func()) {
 		}
 
 		// Create task
-		t := w.t()
+		t := tc()
 
 		// Reset context
 		w.ctx, w.cancel = context.WithCancel(ctx)
@@ -60,7 +63,7 @@ func (w *Worker) Start(ctx context.Context, startFunc func(), execFunc func()) {
 			defer w.Stop()
 
 			// Exec func
-			execFunc()
+			execFunc(t)
 		}()
 	})
 }

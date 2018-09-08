@@ -43,11 +43,11 @@ func main() {
 	e := astiencoder.NewEncoder(c.Encoder)
 	defer e.Close()
 
-	// Add handle event func
-	e.AddHandleEventFunc(astiencoder.LoggerHandleEventFunc)
+	// Add event handler
+	e.AddEventHandler(astiencoder.LoggerHandleEventFunc)
 
-	// Set job handler
-	e.SetJobHandler(newHandler())
+	// Set workflow builder
+	e.SetWorkflowBuilder(newBuilder())
 
 	// Handle signals
 	e.HandleSignals()
@@ -69,12 +69,14 @@ func main() {
 			astilog.Fatal(errors.Wrapf(err, "main: unmarshaling %s into %+v failed", *job, j))
 		}
 
-		// Exec job
-		if err = e.ExecJob(j, astiencoder.ExecOptions{
-			QuitWhenDone: true,
-		}); err != nil {
-			astilog.Fatal(errors.Wrap(err, "main: executing job failed"))
+		// Create workflow
+		var w *astiencoder.Workflow
+		if w, err = e.NewWorkflow("default", j); err != nil {
+			astilog.Fatal(errors.Wrapf(err, "main: creating default workflow for job %+v failed", j))
 		}
+
+		// Start workflow
+		w.Start()
 	}
 
 	// Wait

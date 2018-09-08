@@ -45,8 +45,8 @@ func (c *Closer) Close() (err error) {
 	return
 }
 
-// AddCloser adds a closer at the beginning of the list
-func (c *Closer) AddCloseFunc(f CloseFunc) {
+// Add adds a close func at the beginning of the list
+func (c *Closer) Add(f CloseFunc) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	c.fs = append([]CloseFunc{f}, c.fs...)

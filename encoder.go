@@ -1,28 +1,39 @@
 package astiencoder
 
 import (
+	"sync"
+
+	"fmt"
+
 	"github.com/asticode/go-astitools/worker"
 	"github.com/pkg/errors"
 )
 
-// Encoder represents a encoder
+// Encoder represents an encoder
 type Encoder struct {
+	b   WorkflowBuilder
 	cfg Configuration
-	e   *executer
 	ee  *eventEmitter
+	m   *sync.Mutex
 	w   *astiworker.Worker
+	ws  map[string]*Workflow
+}
+
+// WorkflowBuilder represents an object that can build a workflow based on a job
+type WorkflowBuilder interface {
+	BuildWorkflow(j Job, w *Workflow) error
 }
 
 // NewEncoder creates a new encoder
 func NewEncoder(cfg Configuration) *Encoder {
 	aw := astiworker.NewWorker()
 	ee := newEventEmitter()
-	e := newExecuter(ee, aw)
 	return &Encoder{
 		cfg: cfg,
-		e:   e,
 		ee:  ee,
+		m:   &sync.Mutex{},
 		w:   aw,
+		ws:  make(map[string]*Workflow),
 	}
 }
 
@@ -46,33 +57,55 @@ func (e *Encoder) Wait() {
 	e.w.Wait()
 }
 
-// AddHandleEventFunc adds an handle event func
-func (e *Encoder) AddHandleEventFunc(f HandleEventFunc) {
-	e.ee.addHandleEventFunc(f)
+// AddEventHandler adds an event handler
+func (e *Encoder) AddEventHandler(h EventHandler) {
+	e.ee.addHandler(h)
 }
 
-// SetJobHandler sets the job handler
-func (e *Encoder) SetJobHandler(h JobHandler) {
-	e.e.h = h
+// SetWorkflowBuilder sets the workflow builder
+func (e *Encoder) SetWorkflowBuilder(b WorkflowBuilder) {
+	e.b = b
 }
 
 // Serve creates and starts the server
 func (e *Encoder) Serve() {
 	s := newServer(e.cfg.Server, e.ee)
-	e.AddHandleEventFunc(s.handleEvent)
+	e.AddEventHandler(s.handleEvent)
 	e.w.Serve(e.cfg.Server.Addr, s.handler())
 }
 
-// ExecJob executes a job
-func (e *Encoder) ExecJob(j Job, o ExecOptions) (err error) {
-	if err = e.e.startJob(j, o); err != nil {
-		err = errors.Wrapf(err, "astiencoder: starting job %+v with exec options %+v failed", j, o)
+// NewWorkflow creates a new workflow based on a job
+func (e *Encoder) NewWorkflow(name string, j Job) (w *Workflow, err error) {
+	// No workflow builder
+	if e.b == nil {
+		err = errors.New("astiencoder: no workflow builder")
 		return
 	}
-	return
-}
 
-// DispatchCmd dispatches a cmd
-func (e *Encoder) DispatchCmd(c Cmd) {
-	e.e.dispatchCmd(c)
+	// Name is already used
+	e.m.Lock()
+	_, ok := e.ws[name]
+	e.m.Unlock()
+	if ok {
+		err = fmt.Errorf("astiencoder: workflow name %s is already used", name)
+		return
+	}
+
+	// Create closer
+	c := NewCloser()
+
+	// Create workflow
+	w = NewWorkflow(e.w.Context(), e.ee.emit, e.w.NewTask, c)
+
+	// Build workflow
+	if err = e.b.BuildWorkflow(j, w); err != nil {
+		err = errors.Wrapf(err, "astiencoder: building workflow for job %+v failed", j)
+		return
+	}
+
+	// Store workflow
+	e.m.Lock()
+	e.ws[name] = w
+	e.m.Unlock()
+	return
 }
