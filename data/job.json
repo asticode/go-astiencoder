@@ -1,3 +1,27 @@
 {
-  "url": "data/sample.mp4"
+  "inputs": {
+    "default": {
+      "url": "data/sample.mp4"
+    }
+  },
+  "outputs": {
+    "default": {
+      "url": "tmp/sample.ts"
+    }
+  },
+  "processes": {
+    "remux": {
+      "inputs": [
+        {
+          "name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ],
+      "type": "remux"
+    }
+  }
 }

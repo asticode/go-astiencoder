@@ -9,7 +9,43 @@ import (
 
 // Job represents a job
 type Job struct {
+	Inputs    map[string]JobInput   `json:"inputs"`
+	Outputs   map[string]JobOutput  `json:"outputs"`
+	Processes map[string]JobProcess `json:"processes"`
+}
+
+// JobInput represents a job input
+type JobInput struct {
 	URL string `json:"url"`
+}
+
+// JobOutput represents a job output
+type JobOutput struct {
+	URL string `json:"url"`
+}
+
+// Job process types
+const (
+	JobProcessTypeRemux = "remux"
+)
+
+// JobProcess represents a job process
+type JobProcess struct {
+	Inputs  []JobProcessInput  `json:"inputs"`
+	Outputs []JobProcessOutput `json:"outputs"`
+	Type    string             `json:"type"`
+}
+
+// JobProcessInput  represents a job process input
+type JobProcessInput struct {
+	Name string   `json:"name"`
+	PID  string   `json:"pid"`
+}
+
+// JobProcessOutput represents a job process output
+type JobProcessOutput struct {
+	Name string `json:"name"`
+	PID  string `json:"pid"`
 }
 
 // CreateTaskFunc is a method that can create a task

@@ -7,16 +7,20 @@ import (
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astiencoder/libav"
 	"github.com/asticode/go-astilog"
+	"github.com/asticode/goav/avformat"
 	"github.com/pkg/errors"
 )
 
-type handler struct {
-	d *astilibav.Demuxer
-	o *astilibav.Opener
-}
+type handler struct{}
 
 func newHandler() *handler {
 	return &handler{}
+}
+
+type openedInput struct {
+	ctxFormat *avformat.Context
+	d         *astilibav.Demuxer
+	i         astiencoder.JobInput
 }
 
 // HandleJob implements the astiencoder.JobHandler interface
@@ -25,17 +29,36 @@ func (h *handler) HandleJob(ctx context.Context, j astiencoder.Job, e astiencode
 	c := astiencoder.NewCloser()
 
 	// Create opener
-	h.o = astilibav.NewOpener(c, e, t)
+	o := astilibav.NewOpener(c)
 
-	// Create demuxer
-	h.d = astilibav.NewDemuxer(e, t)
+	// Loop through inputs
+	var is = make(map[string]openedInput)
+	for n, i := range j.Inputs {
+		// Open
+		ctxFormat, err := o.OpenInput(ctx, n, i)
+		if err != nil {
+			return c, errors.Wrapf(err, "main: opening input %s with conf %+v failed", n, i)
+		}
 
-	// Connect the demuxer to the opener
-	h.o.AddHandleResultFunc(h.d.Demux)
+		// Index
+		is[n] = openedInput{
+			ctxFormat: ctxFormat,
+			d:         astilibav.NewDemuxer(c, e, t),
+			i:         i,
+		}
+	}
 
-	// Open
-	if err := h.o.Open(ctx, j.URL); err != nil {
-		return c, errors.Wrap(err, "main: open failed")
+	// TODO Prepare outputs
+
+	// Loop through processes
+	for n, p := range j.Processes {
+		_ = n
+		switch p.Type {
+		case astiencoder.JobProcessTypeRemux:
+
+		default:
+			astilog.Warnf("main: unhandled job process type %s", p.Type)
+		}
 	}
 	return c, nil
 }

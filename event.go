@@ -1,8 +1,9 @@
 package astiencoder
 
 import (
-	"github.com/asticode/go-astilog"
 	"sync"
+
+	"github.com/asticode/go-astilog"
 )
 
 // Default event names
@@ -24,15 +25,17 @@ func EventError(err error) Event {
 	}
 }
 
-// HandleEventFunc is a method that can handle events coming out of the worker
-type HandleEventFunc func(e Event)
+// HandleEventFunc returns a method that can handle events coming out of the worker
+type HandleEventFunc func() (isBlocking bool, fn func(e Event))
 
-// LoggerHandleEventFunc is the logger handle event func
-var LoggerHandleEventFunc = func(e Event) {
-	switch e.Name {
-	case EventNameError:
-		if v, ok := e.Payload.(error); ok {
-			astilog.Error(v)
+// LoggerHandleEventFunc returns the logger handle event func
+var LoggerHandleEventFunc = func() (isBlocking bool, fn func(e Event)) {
+	return true, func(e Event) {
+		switch e.Name {
+		case EventNameError:
+			if v, ok := e.Payload.(error); ok {
+				astilog.Error(v)
+			}
 		}
 	}
 }
@@ -40,8 +43,13 @@ var LoggerHandleEventFunc = func(e Event) {
 // EmitEventFunc is a method that can emit events out of the worker
 type EmitEventFunc func(e Event)
 
+type eventHandler struct {
+	fn         func(e Event)
+	isBlocking bool
+}
+
 type eventEmitter struct {
-	fs []HandleEventFunc
+	hs []eventHandler
 	m  *sync.Mutex
 }
 
@@ -54,13 +62,21 @@ func newEventEmitter() *eventEmitter {
 func (e *eventEmitter) addHandleEventFunc(f HandleEventFunc) {
 	e.m.Lock()
 	defer e.m.Unlock()
-	e.fs = append(e.fs, f)
+	isBlocking, fn := f()
+	e.hs = append(e.hs, eventHandler{
+		isBlocking: isBlocking,
+		fn:         fn,
+	})
 }
 
 func (e *eventEmitter) emit(evt Event) {
 	e.m.Lock()
 	defer e.m.Unlock()
-	for _, f := range e.fs {
-		go f(evt)
+	for _, h := range e.hs {
+		if h.isBlocking {
+			h.fn(evt)
+		} else {
+			go h.fn(evt)
+		}
 	}
 }

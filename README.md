@@ -1,8 +1,10 @@
 `astiencoder` is an attempt to create an open source Go encoder based on [ffmpeg](https://github.com/FFmpeg/FFmpeg) C bindings.
 
+NOTE: this is a work in progress therefore the API will change without notice.
+
 Goals are:
 
-- provide basic encoding needs
+- implement [ffmpeg examples](https://github.com/FFmpeg/FFmpeg/tree/n4.0.2/doc/examples)
 - provide full hardware acceleration implementation
 - allow communicating with the encoder through a websocket
 - allow developers to play with this lib to create their own specific encoder
