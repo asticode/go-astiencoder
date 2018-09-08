@@ -16,8 +16,8 @@ var (
 
 // Configuration represents a configuration
 type Configuration struct {
-	Encoder astiencoder.Configuration `toml:"encoder"`
 	Logger  astilog.Configuration     `toml:"logger"`
+	Encoder astiencoder.Configuration `toml:"encoder"`
 }
 
 func newConfiguration() (c Configuration, err error) {

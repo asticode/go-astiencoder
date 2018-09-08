@@ -39,21 +39,21 @@ func main() {
 	// Create logger
 	astilog.SetLogger(astilog.New(c.Logger))
 
-	// Create worker
-	w := astiencoder.NewWorker(c.Encoder)
-	defer w.Close()
+	// Create encoder
+	e := astiencoder.NewEncoder(c.Encoder)
+	defer e.Close()
 
 	// Add handle event func
-	w.AddHandleEventFunc(astiencoder.LoggerHandleEventFunc)
+	e.AddHandleEventFunc(astiencoder.LoggerHandleEventFunc)
 
 	// Set job handler
-	w.SetJobHandler(newHandler())
+	e.SetJobHandler(newHandler())
 
 	// Handle signals
-	w.HandleSignals()
+	e.HandleSignals()
 
 	// Serve
-	w.Serve()
+	e.Serve()
 
 	// Job has been provided
 	if len(*job) > 0 {
@@ -70,7 +70,7 @@ func main() {
 		}
 
 		// Exec job
-		if err = w.ExecJob(j, astiencoder.ExecOptions{
+		if err = e.ExecJob(j, astiencoder.ExecOptions{
 			QuitWhenDone: true,
 		}); err != nil {
 			astilog.Fatal(errors.Wrap(err, "main: executing job failed"))
@@ -78,5 +78,5 @@ func main() {
 	}
 
 	// Wait
-	w.Wait()
+	e.Wait()
 }

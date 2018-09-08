@@ -11,7 +11,7 @@ var (
 	EventNameError = "error"
 )
 
-// Event is an event coming out of the worker
+// Event is an event coming out of the encoder
 type Event struct {
 	Name    string      `json:"name"`
 	Payload interface{} `json:"payload"`
@@ -25,7 +25,7 @@ func EventError(err error) Event {
 	}
 }
 
-// HandleEventFunc returns a method that can handle events coming out of the worker
+// HandleEventFunc returns a method that can handle events coming out of the encoder
 type HandleEventFunc func() (isBlocking bool, fn func(e Event))
 
 // LoggerHandleEventFunc returns the logger handle event func
@@ -40,7 +40,7 @@ var LoggerHandleEventFunc = func() (isBlocking bool, fn func(e Event)) {
 	}
 }
 
-// EmitEventFunc is a method that can emit events out of the worker
+// EmitEventFunc is a method that can emit events out of the encoder
 type EmitEventFunc func(e Event)
 
 type eventHandler struct {

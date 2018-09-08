@@ -106,7 +106,7 @@ func (e *executer) startJob(j Job, o ExecOptions) (err error) {
 			}
 		}
 
-		// Stop worker
+		// Stop encoder
 		if o.QuitWhenDone {
 			e.w.Stop()
 		}
