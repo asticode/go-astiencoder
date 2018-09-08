@@ -9,11 +9,12 @@ import (
 )
 
 // Workflow represents a workflow
+// TODO Allow visualising workflow => terminal + jpeg + server
 type Workflow struct {
 	c                *Closer
 	e                EmitEventFunc
 	m                *sync.Mutex
-	parentCtx        context.Context
+	rootCtx          context.Context
 	rootNodes        []Node
 	rootNodesIndexed map[string]Node
 	t                CreateTaskFunc
@@ -21,12 +22,12 @@ type Workflow struct {
 }
 
 // NewWorkflow creates a new workflow
-func NewWorkflow(parentCtx context.Context, e EmitEventFunc, t CreateTaskFunc, c *Closer) *Workflow {
+func NewWorkflow(rootCtx context.Context, e EmitEventFunc, t CreateTaskFunc, c *Closer) *Workflow {
 	return &Workflow{
 		c:                c,
 		e:                e,
 		m:                &sync.Mutex{},
-		parentCtx:        parentCtx,
+		rootCtx:          rootCtx,
 		rootNodesIndexed: make(map[string]Node),
 		t:                t,
 		w:                NewWorker(),
@@ -56,7 +57,7 @@ func (w *Workflow) AddRoot(n Node) {
 
 // Start starts the workflow
 func (w *Workflow) Start() {
-	w.w.Start(w.parentCtx, w.t, nil, func(t *astiworker.Task) {
+	w.w.Start(w.rootCtx, w.t, nil, func(t *astiworker.Task) {
 		// Get root nodes
 		w.m.Lock()
 		ns := append([]Node{}, w.rootNodes...)
@@ -69,9 +70,9 @@ func (w *Workflow) Start() {
 		t.Wait()
 
 		// Workflow is done only when:
-		//  - parent ctx has been cancelled
+		//  - root ctx has been cancelled
 		//  - ctx has not been cancelled
-		if w.parentCtx.Err() != nil || w.w.ctx.Err() == nil {
+		if w.rootCtx.Err() != nil || w.w.ctx.Err() == nil {
 			if err := w.c.Close(); err != nil {
 				w.e(EventError(errors.Wrap(err, "astiencoder: closing workflow failed")))
 			}

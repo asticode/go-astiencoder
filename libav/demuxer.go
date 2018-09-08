@@ -84,6 +84,7 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			}); err != nil {
 				// Assert
 				if v, ok := errors.Cause(err).(AvError); ok && int(v) == avutil.AVERROR_EOF {
+					// TODO Find a way to stop children here
 					return
 				}
 				d.e(astiencoder.EventError(err))
@@ -137,6 +138,8 @@ func (d *Demuxer) handlePkt(pkt *avcodec.Packet) {
 		return
 	}
 	for _, c := range cs {
+		// TODO Only allow a certain number of go routines to run per child
+		// TODO That way, the demuxer doesn't read everything in memory even though the child takes a lot of time to process one pkt
 		go func(c chan *avcodec.Packet) {
 			c <- pkt
 		}(c)
