@@ -1,8 +1,8 @@
 dev:
-	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" go run astiencoder/*.go -v -j testdata/job.json
+	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go run astiencoder/*.go -v -j data/job.json
 
 version:
-	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" go run astiencoder/*.go version
+	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go run astiencoder/*.go version
 
 install-ffmpeg:
 	mkdir -p vendor_c/src

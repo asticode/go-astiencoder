@@ -3,9 +3,9 @@ package astilibav
 import (
 	"context"
 	"fmt"
-	"github.com/selfmodify/goav/avformat"
 
 	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/goav/avformat"
 )
 
 // Demuxer represents a demuxer

@@ -3,6 +3,8 @@ package astiencoder
 import (
 	"sync"
 
+	"github.com/asticode/go-astilog"
+
 	"io"
 
 	"github.com/asticode/go-astitools/worker"
@@ -13,6 +15,11 @@ import (
 var (
 	ErrExecuterIsBusy = errors.New("astiencoder: executer is busy")
 )
+
+// ExecOptions represents execution options
+type ExecOptions struct {
+	QuitWhenDone bool `json:"quit_when_done"`
+}
 
 type executer struct {
 	busy  bool
@@ -60,7 +67,10 @@ func (e *executer) inc() int {
 	return e.count
 }
 
-func (e *executer) execJob(j Job) (err error) {
+func (e *executer) startJob(j Job, o ExecOptions) (err error) {
+	// Log
+	astilog.Debugf("astiencoder: starting job %+v with exec options %+v", j, o)
+
 	// No job handler
 	if e.h == nil {
 		return errors.New("astiencoder: no job handler")
@@ -80,6 +90,7 @@ func (e *executer) execJob(j Job) (err error) {
 
 		// Handle job
 		var c io.Closer
+		astilog.Debug("astiencoder: handling job")
 		if c, err = e.h.HandleJob(e.w.Context(), j, e.e.emit, t.NewSubTask); err != nil {
 			e.e.emit(EventError(errors.Wrapf(err, "astiencoder: execution #%d of job %+v failed", count, j)))
 		}
@@ -89,9 +100,15 @@ func (e *executer) execJob(j Job) (err error) {
 
 		// Close
 		if c != nil {
+			astilog.Debug("astiencoder: closing job")
 			if err = c.Close(); err != nil {
 				e.e.emit(EventError(errors.Wrapf(err, "astiencoder: closing execution #%d for job %+v failed", count, j)))
 			}
+		}
+
+		// Stop worker
+		if o.QuitWhenDone {
+			e.w.Stop()
 		}
 
 		// Unlock executer

@@ -64,9 +64,9 @@ func (w *Worker) Serve() {
 }
 
 // ExecJob executes a job
-func (w *Worker) ExecJob(j Job) (err error) {
-	if err = w.e.execJob(j); err != nil {
-		err = errors.Wrapf(err, "astiencoder: executing job %+v failed", j)
+func (w *Worker) ExecJob(j Job, o ExecOptions) (err error) {
+	if err = w.e.startJob(j, o); err != nil {
+		err = errors.Wrapf(err, "astiencoder: starting job %+v with exec options %+v failed", j, o)
 		return
 	}
 	return

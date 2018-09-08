@@ -3,12 +3,11 @@ package astilibav
 import (
 	"context"
 	"fmt"
-	"github.com/asticode/go-astilog"
 	"sync"
 
 	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/goav/avformat"
 	"github.com/pkg/errors"
-	"github.com/selfmodify/goav/avformat"
 )
 
 // Opener represents an object capable of opening a url
@@ -55,9 +54,7 @@ func (o *Opener) Open(ctx context.Context, url string) (err error) {
 
 	// Make sure the format ctx is properly closed
 	o.c.AddCloseFunc(func() error {
-		// TODO For now it panics
-		astilog.Debugf("astilibav: ctxFormat.AvformatCloseInput() panics :(")
-		//ctxFormat.AvformatCloseInput()
+		avformat.AvformatCloseInput(ctxFormat)
 		return nil
 	})
 

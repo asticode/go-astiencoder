@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
+	"io"
+
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astiencoder/libav"
 	"github.com/asticode/go-astilog"
 	"github.com/pkg/errors"
-	"io"
 )
 
 type handler struct {
@@ -34,12 +35,12 @@ func (h *handler) HandleJob(ctx context.Context, j astiencoder.Job, e astiencode
 
 	// Open
 	if err := h.o.Open(ctx, j.URL); err != nil {
-		return c, errors.Wrapf(err, "astiencoder: opening job %+v failed", j)
+		return c, errors.Wrap(err, "main: open failed")
 	}
 	return c, nil
 }
 
 // HandleCmd implements the astiencoder.CmdHandler interface
 func (h *handler) HandleCmd(c astiencoder.Cmd) {
-	astilog.Debugf("astiencoder: TODO: handle cmd %+v", c)
+	astilog.Debugf("main: TODO: handle cmd %+v", c)
 }

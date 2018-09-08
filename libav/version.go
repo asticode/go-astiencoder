@@ -3,12 +3,12 @@ package astilibav
 import (
 	"fmt"
 
-	"github.com/selfmodify/goav/avcodec"
-	"github.com/selfmodify/goav/avdevice"
-	"github.com/selfmodify/goav/avfilter"
-	"github.com/selfmodify/goav/avutil"
-	"github.com/selfmodify/goav/swresample"
-	"github.com/selfmodify/goav/swscale"
+	"github.com/asticode/goav/avcodec"
+	"github.com/asticode/goav/avdevice"
+	"github.com/asticode/goav/avfilter"
+	"github.com/asticode/goav/avutil"
+	"github.com/asticode/goav/swresample"
+	"github.com/asticode/goav/swscale"
 )
 
 // Version stores the versions
