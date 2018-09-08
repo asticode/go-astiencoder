@@ -19,7 +19,7 @@ type Demuxer struct {
 	eofFuncs  []DemuxEOFFunc
 	m         *sync.Mutex
 	pktFuncs  map[int][]DemuxPktFunc // Indexed by stream index
-	w         *worker
+	w         *astiencoder.Worker
 }
 
 // DemuxPktFunc represents a method that can handle a pkt
@@ -36,7 +36,7 @@ func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, t asti
 		e:         e,
 		pktFuncs:  make(map[int][]DemuxPktFunc),
 		m:         &sync.Mutex{},
-		w:         newWorker(t),
+		w:         astiencoder.NewWorker(t),
 	}
 }
 
@@ -58,7 +58,7 @@ func (d *Demuxer) OnEOF(f DemuxEOFFunc) {
 
 // Start starts the demuxer
 func (d *Demuxer) Start(ctx context.Context) {
-	d.w.start(ctx, d.startHandlerFuncs, func() {
+	d.w.Start(ctx, d.startHandlerFuncs, func() {
 		// Loop
 		var pkt = &avcodec.Packet{}
 		for {
@@ -84,7 +84,7 @@ func (d *Demuxer) Start(ctx context.Context) {
 			d.handlePkt(pkt)
 
 			// Check context
-			if d.w.ctx.Err() != nil {
+			if d.w.Ctx().Err() != nil {
 				return
 			}
 		}
@@ -93,7 +93,7 @@ func (d *Demuxer) Start(ctx context.Context) {
 
 // Stop stops the demuxer
 func (d *Demuxer) Stop() {
-	d.w.stop()
+	d.w.Stop()
 }
 
 func (d *Demuxer) startHandlerFuncs() {
@@ -107,7 +107,7 @@ func (d *Demuxer) startHandlerFuncs() {
 					select {
 					case pkt := <-c:
 						f(pkt)
-					case <-d.w.ctx.Done():
+					case <-d.w.Ctx().Done():
 						return
 					}
 				}

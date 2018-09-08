@@ -2,6 +2,7 @@ package astilibav
 
 import (
 	"context"
+
 	"github.com/asticode/go-astilog"
 
 	"github.com/asticode/go-astiencoder"
@@ -13,7 +14,7 @@ import (
 type Muxer struct {
 	c         chan *avcodec.Packet
 	ctxFormat *avformat.Context
-	w         *worker
+	w         *astiencoder.Worker
 }
 
 // NewMuxer creates a new muxer
@@ -21,20 +22,20 @@ func NewMuxer(ctxFormat *avformat.Context, t astiencoder.CreateTaskFunc) *Muxer 
 	return &Muxer{
 		c:         make(chan *avcodec.Packet),
 		ctxFormat: ctxFormat,
-		w:         newWorker(t),
+		w:         astiencoder.NewWorker(t),
 	}
 }
 
 // Start starts the muxer
 func (m *Muxer) Start(ctx context.Context) {
-	m.w.start(ctx, nil, func() {
+	m.w.Start(ctx, nil, func() {
 		// Loop
 		for {
 			select {
-			case pkt := <- m.c:
+			case pkt := <-m.c:
 				// TODO Do stuff with the packet
 				astilog.Warn("packet received: %p", pkt)
-			case <- m.w.ctx.Done():
+			case <-m.w.Ctx().Done():
 				return
 			}
 		}
@@ -43,7 +44,7 @@ func (m *Muxer) Start(ctx context.Context) {
 
 // Stop stops the muxer
 func (m *Muxer) Stop() {
-	m.w.stop()
+	m.w.Stop()
 }
 
 // SendPkt sends a new packet to the muxer
