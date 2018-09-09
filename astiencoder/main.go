@@ -76,7 +76,9 @@ func main() {
 		}
 
 		// Start workflow
-		w.Start()
+		w.Start(astiencoder.StartOptions{
+			StopChildrenWhenDone: true,
+		})
 	}
 
 	// Wait

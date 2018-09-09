@@ -8,7 +8,8 @@ import (
 
 // Default event names
 var (
-	EventNameError = "error"
+	EventNameError        = "error"
+	EventNameWorkflowDone = "workflow.done"
 )
 
 // Event is an event coming out of the encoder
@@ -33,9 +34,9 @@ var LoggerHandleEventFunc = func() (isBlocking bool, fn func(e Event)) {
 	return true, func(e Event) {
 		switch e.Name {
 		case EventNameError:
-			if v, ok := e.Payload.(error); ok {
-				astilog.Error(v)
-			}
+			astilog.Error(e.Payload.(error))
+		case EventNameWorkflowDone:
+			astilog.Debugf("astiencoder: workflow %s is done", e.Payload.(string))
 		}
 	}
 }

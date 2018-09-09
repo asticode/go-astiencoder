@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/asticode/go-astilog"
 	"github.com/asticode/go-astitools/worker"
 	"github.com/pkg/errors"
 )
@@ -11,26 +12,24 @@ import (
 // Workflow represents a workflow
 // TODO Allow visualising workflow => terminal + jpeg + server
 type Workflow struct {
-	c                *Closer
-	e                EmitEventFunc
-	m                *sync.Mutex
-	rootCtx          context.Context
-	rootNodes        []Node
-	rootNodesIndexed map[string]Node
-	t                CreateTaskFunc
-	w                *Worker
+	*BaseNode
+	c       *Closer
+	e       EmitEventFunc
+	m       *sync.Mutex
+	name    string
+	rootCtx context.Context
+	t       CreateTaskFunc
 }
 
-// NewWorkflow creates a new workflow
-func NewWorkflow(rootCtx context.Context, e EmitEventFunc, t CreateTaskFunc, c *Closer) *Workflow {
+func newWorkflow(name string, rootCtx context.Context, e EmitEventFunc, t CreateTaskFunc, c *Closer) *Workflow {
 	return &Workflow{
-		c:                c,
-		e:                e,
-		m:                &sync.Mutex{},
-		rootCtx:          rootCtx,
-		rootNodesIndexed: make(map[string]Node),
-		t:                t,
-		w:                NewWorker(),
+		BaseNode: NewBaseNode(NodeMetadata{}),
+		c:        c,
+		e:        e,
+		m:        &sync.Mutex{},
+		name:     name,
+		rootCtx:  rootCtx,
+		t:        t,
 	}
 }
 
@@ -44,27 +43,14 @@ func (w *Workflow) EmitEventFunc() EmitEventFunc {
 	return w.e
 }
 
-// AddRoot adds a root node
-func (w *Workflow) AddRoot(n Node) {
-	w.m.Lock()
-	defer w.m.Unlock()
-	if _, ok := w.rootNodesIndexed[n.Metadata().Name]; ok {
-		return
-	}
-	w.rootNodes = append(w.rootNodes, n)
-	w.rootNodesIndexed[n.Metadata().Name] = n
-}
-
 // Start starts the workflow
-func (w *Workflow) Start() {
-	w.w.Start(w.rootCtx, w.t, nil, func(t *astiworker.Task) {
-		// Get root nodes
-		w.m.Lock()
-		ns := append([]Node{}, w.rootNodes...)
-		w.m.Unlock()
+func (w *Workflow) Start(o StartOptions) {
+	w.BaseNode.Start(w.rootCtx, StartOptions{}, w.t, nil, func(t *astiworker.Task) {
+		// Log
+		astilog.Debugf("astiencoder: starting workflow %s", w.name)
 
 		// Start nodes
-		w.startNodes(ns, t.NewSubTask)
+		w.startNodes(w.Children(), o, t.NewSubTask)
 
 		// Wait for task to be done
 		t.Wait()
@@ -72,26 +58,37 @@ func (w *Workflow) Start() {
 		// Workflow is done only when:
 		//  - root ctx has been cancelled
 		//  - ctx has not been cancelled
-		if w.rootCtx.Err() != nil || w.w.ctx.Err() == nil {
+		if w.rootCtx.Err() != nil || w.Context().Err() == nil {
+			// Close
+			astilog.Debugf("astiencoder: closing workflow %s", w.name)
 			if err := w.c.Close(); err != nil {
-				w.e(EventError(errors.Wrap(err, "astiencoder: closing workflow failed")))
+				w.e(EventError(errors.Wrapf(err, "astiencoder: closing workflow %s failed", w.name)))
+			}
+
+			// Workflow is done
+			if w.rootCtx.Err() == nil {
+				w.e(Event{
+					Name:    EventNameWorkflowDone,
+					Payload: w.name,
+				})
 			}
 		}
 	})
 }
 
-func (w *Workflow) startNodes(ns []Node, t CreateTaskFunc) {
+func (w *Workflow) startNodes(ns []Node, o StartOptions, t CreateTaskFunc) {
 	// Loop through nodes
 	for _, n := range ns {
 		// Start node
-		n.Start(w.w.ctx, t)
+		n.Start(w.Context(), o, t)
 
 		// Start children nodes
-		w.startNodes(n.Children(), t)
+		w.startNodes(n.Children(), o, t)
 	}
 }
 
 // Stop stops the workflow
 func (w *Workflow) Stop() {
-	w.w.Stop()
+	astilog.Debugf("astiencoder: stopping workflow %s", w.name)
+	w.BaseNode.Stop()
 }

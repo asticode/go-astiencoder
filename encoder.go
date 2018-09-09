@@ -11,12 +11,13 @@ import (
 
 // Encoder represents an encoder
 type Encoder struct {
-	b   WorkflowBuilder
-	cfg Configuration
-	ee  *eventEmitter
-	m   *sync.Mutex
-	w   *astiworker.Worker
-	ws  map[string]*Workflow
+	b      WorkflowBuilder
+	cfg    Configuration
+	ee     *eventEmitter
+	m      *sync.Mutex
+	w      *astiworker.Worker
+	ws     map[string]*Workflow
+	wsDone map[string]bool
 }
 
 // WorkflowBuilder represents an object that can build a workflow based on a job
@@ -25,16 +26,19 @@ type WorkflowBuilder interface {
 }
 
 // NewEncoder creates a new encoder
-func NewEncoder(cfg Configuration) *Encoder {
+func NewEncoder(cfg Configuration) (e *Encoder) {
 	aw := astiworker.NewWorker()
 	ee := newEventEmitter()
-	return &Encoder{
-		cfg: cfg,
-		ee:  ee,
-		m:   &sync.Mutex{},
-		w:   aw,
-		ws:  make(map[string]*Workflow),
+	e = &Encoder{
+		cfg:    cfg,
+		ee:     ee,
+		m:      &sync.Mutex{},
+		w:      aw,
+		ws:     make(map[string]*Workflow),
+		wsDone: make(map[string]bool),
 	}
+	ee.addHandler(e.handleEvent)
+	return
 }
 
 // Close implements the io.Closer interface
@@ -92,10 +96,10 @@ func (e *Encoder) NewWorkflow(name string, j Job) (w *Workflow, err error) {
 	}
 
 	// Create closer
-	c := NewCloser()
+	c := newCloser()
 
 	// Create workflow
-	w = NewWorkflow(e.w.Context(), e.ee.emit, e.w.NewTask, c)
+	w = newWorkflow(name, e.w.Context(), e.ee.emit, e.w.NewTask, c)
 
 	// Build workflow
 	if err = e.b.BuildWorkflow(j, w); err != nil {
@@ -108,4 +112,21 @@ func (e *Encoder) NewWorkflow(name string, j Job) (w *Workflow, err error) {
 	e.ws[name] = w
 	e.m.Unlock()
 	return
+}
+
+func (e *Encoder) handleEvent() (bool, func(Event)) {
+	return false, func(evt Event) {
+		switch evt.Name {
+		case EventNameWorkflowDone:
+			e.m.Lock()
+			defer e.m.Unlock()
+			if _, ok := e.ws[evt.Payload.(string)]; !ok {
+				return
+			}
+			e.wsDone[evt.Payload.(string)] = true
+			if e.cfg.Exec.StopWhenWorkflowsAreDone && len(e.ws) == len(e.wsDone) {
+				e.Stop()
+			}
+		}
+	}
 }

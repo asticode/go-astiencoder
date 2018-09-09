@@ -24,6 +24,9 @@ func newConfiguration() (c Configuration, err error) {
 	var i interface{}
 	if i, err = asticonfig.New(&Configuration{
 		Encoder: astiencoder.Configuration{
+			Exec: astiencoder.ConfigurationExec{
+				StopWhenWorkflowsAreDone: true,
+			},
 			Server: astiencoder.ConfigurationServer{
 				Addr:    "127.0.0.1:4000",
 				PathWeb: "web",

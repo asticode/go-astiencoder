@@ -25,7 +25,6 @@ type Demuxer struct {
 	e         astiencoder.EmitEventFunc
 	hs        map[int][]PktHandler // Indexed by stream index
 	m         *sync.Mutex
-	w         *astiencoder.Worker
 }
 
 // PktHandler represents an object capable of handling packets
@@ -47,7 +46,6 @@ func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc) *Demux
 		e:         e,
 		hs:        make(map[int][]PktHandler),
 		m:         &sync.Mutex{},
-		w:         astiencoder.NewWorker(),
 	}
 }
 
@@ -58,14 +56,15 @@ func (d *Demuxer) OnPkt(streamIdx int, hs ...PktHandler) {
 	for _, h := range hs {
 		d.cs[streamIdx] = append(d.cs[streamIdx], make(chan *avcodec.Packet))
 		d.hs[streamIdx] = append(d.hs[streamIdx], h)
-		d.AddChildren(h.(astiencoder.Node))
+		n := h.(astiencoder.Node)
+		astiencoder.ConnectNodes(d, n)
 	}
 	return
 }
 
 // Start starts the demuxer
-func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
-	d.w.Start(ctx, t, d.startHandlerFuncs, func(t *astiworker.Task) {
+func (d *Demuxer) Start(ctx context.Context, o astiencoder.StartOptions, t astiencoder.CreateTaskFunc) {
+	d.BaseNode.Start(ctx, o, t, d.startHandlerFuncs, func(t *astiworker.Task) {
 		// Count
 		var count int
 		defer func(c *int) {
@@ -84,7 +83,6 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			}); err != nil {
 				// Assert
 				if v, ok := errors.Cause(err).(AvError); ok && int(v) == avutil.AVERROR_EOF {
-					// TODO Find a way to stop children here
 					return
 				}
 				d.e(astiencoder.EventError(err))
@@ -98,16 +96,11 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			d.handlePkt(pkt)
 
 			// Check context
-			if d.w.Context().Err() != nil {
+			if d.Context().Err() != nil {
 				return
 			}
 		}
 	})
-}
-
-// Stop stops the demuxer
-func (d *Demuxer) Stop() {
-	d.w.Stop()
 }
 
 func (d *Demuxer) startHandlerFuncs() {
@@ -121,7 +114,9 @@ func (d *Demuxer) startHandlerFuncs() {
 					select {
 					case pkt := <-c:
 						h.HandlePkt(pkt)
-					case <-d.w.Context().Done():
+						// TODO This is fucked as sometimes the context will be cancelled before every packets being sent
+						// TODO Need one channel
+					case <-d.Context().Done():
 						return
 					}
 				}

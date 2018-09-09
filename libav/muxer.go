@@ -19,7 +19,6 @@ type Muxer struct {
 	*astiencoder.BaseNode
 	c         chan *avcodec.Packet
 	ctxFormat *avformat.Context
-	w         *astiencoder.Worker
 }
 
 // NewMuxer creates a new muxer
@@ -33,13 +32,12 @@ func NewMuxer(ctxFormat *avformat.Context) *Muxer {
 		}),
 		c:         make(chan *avcodec.Packet),
 		ctxFormat: ctxFormat,
-		w:         astiencoder.NewWorker(),
 	}
 }
 
 // Start starts the muxer
-func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
-	m.w.Start(ctx, t, nil, func(t *astiworker.Task) {
+func (m *Muxer) Start(ctx context.Context, o astiencoder.StartOptions, t astiencoder.CreateTaskFunc) {
+	m.BaseNode.Start(ctx, o, t, nil, func(t *astiworker.Task) {
 		// Count
 		var count int
 		defer func(c *int) {
@@ -47,22 +45,20 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		}(&count)
 
 		// Loop
+		// TODO Need one channel
 		for {
 			select {
 			case pkt := <-m.c:
 				// TODO Do stuff with the packet
 				_ = pkt
 				count++
-			case <-m.w.Context().Done():
+				// TODO If we add a sleep here while activating StopChildrenWhenDone, it only muxes a couple of packets
+				// instead of queueing them properly. The context breaks everything.
+			case <-m.Context().Done():
 				return
 			}
 		}
 	})
-}
-
-// Stop stops the muxer
-func (m *Muxer) Stop() {
-	m.w.Stop()
 }
 
 // HandlePkt implements the PktHandler interface

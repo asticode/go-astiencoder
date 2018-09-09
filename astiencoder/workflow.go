@@ -190,7 +190,7 @@ func (b *builder) addRemuxToWorkflow(w *astiencoder.Workflow, is []openedInput, 
 			}
 
 			// Add demuxer as root node of the workflow
-			w.AddRoot(i.d)
+			w.AddChild(i.d)
 
 			// On packet
 			i.d.OnPkt(s.Index(), ms...)

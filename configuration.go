@@ -2,7 +2,13 @@ package astiencoder
 
 // Configuration represents an encoder configuration
 type Configuration struct {
+	Exec   ConfigurationExec   `toml:"exec"`
 	Server ConfigurationServer `toml:"server"`
+}
+
+// ConfigurationExec represents an exec configuration
+type ConfigurationExec struct {
+	StopWhenWorkflowsAreDone bool `toml:"stop_when_workflows_are_done"`
 }
 
 // ConfigurationServer represents a server configuration
