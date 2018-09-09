@@ -92,7 +92,7 @@ func (b *builder) openInputs(j astiencoder.Job, o *astilibav.Opener, e astiencod
 		// Index
 		is[n] = openedInput{
 			ctxFormat: ctxFormat,
-			d:         astilibav.NewDemuxer(ctxFormat, e),
+			d:         astilibav.NewDemuxer(ctxFormat, e, 10),
 			i:         i,
 		}
 	}
@@ -173,9 +173,9 @@ func (b *builder) addOperationToWorkflow(w *astiencoder.Workflow, name string, o
 
 func (b *builder) addRemuxToWorkflow(w *astiencoder.Workflow, is []openedInput, os []openedOutput) (err error) {
 	// Loop through outputs
-	var ms []astilibav.PktHandler
+	var hs []astilibav.PktHandler
 	for _, o := range os {
-		ms = append(ms, o.m)
+		hs = append(hs, o.m)
 	}
 
 	// Loop through inputs
@@ -193,7 +193,7 @@ func (b *builder) addRemuxToWorkflow(w *astiencoder.Workflow, is []openedInput, 
 			w.AddChild(i.d)
 
 			// On packet
-			i.d.OnPkt(s.Index(), ms...)
+			i.d.OnPkt(s.Index(), hs...)
 		}
 	}
 	return

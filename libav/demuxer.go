@@ -8,6 +8,7 @@ import (
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astilog"
+	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
@@ -20,10 +21,11 @@ var countDemuxer uint64
 // Demuxer represents a demuxer
 type Demuxer struct {
 	*astiencoder.BaseNode
-	ctxFormat *avformat.Context
-	e         astiencoder.EmitEventFunc
-	hs        map[int][]PktHandler // Indexed by stream index
-	m         *sync.Mutex
+	ctxFormat           *avformat.Context
+	e                   astiencoder.EmitEventFunc
+	hs                  map[int][]PktHandler // Indexed by stream index
+	m                   *sync.Mutex
+	packetsBufferLength int
 }
 
 // PktHandler represents an object capable of handling packets
@@ -32,7 +34,7 @@ type PktHandler interface {
 }
 
 // NewDemuxer creates a new demuxer
-func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc) *Demuxer {
+func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, packetsBufferLength int) *Demuxer {
 	c := atomic.AddUint64(&countDemuxer, uint64(1))
 	return &Demuxer{
 		BaseNode: astiencoder.NewBaseNode(astiencoder.NodeMetadata{
@@ -40,10 +42,11 @@ func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc) *Demux
 			Label:       fmt.Sprintf("Demuxer #%d", c),
 			Name:        fmt.Sprintf("demuxer_%d", c),
 		}),
-		ctxFormat: ctxFormat,
-		e:         e,
-		hs:        make(map[int][]PktHandler),
-		m:         &sync.Mutex{},
+		ctxFormat:           ctxFormat,
+		e:                   e,
+		hs:                  make(map[int][]PktHandler),
+		packetsBufferLength: packetsBufferLength,
+		m:                   &sync.Mutex{},
 	}
 }
 
@@ -68,25 +71,18 @@ func (d *Demuxer) Start(ctx context.Context, o astiencoder.StartOptions, t astie
 			astilog.Warnf("astilibav: demuxed %d pkts", count)
 		}(&count)
 
-		// Make sure all packets are sent
-		wg := &sync.WaitGroup{}
-		defer wg.Wait()
+		// Create regulator
+		r := astisync.NewRegulator(d.Context(), d.packetsBufferLength)
+		defer r.Wait()
 
 		// Loop
 		var pkt = &avcodec.Packet{}
 		for {
 			// Read frame
-			if err := astiencoder.CtxFunc(ctx, func() error {
-				if ret := d.ctxFormat.AvReadFrame(pkt); ret < 0 {
-					return errors.Wrapf(newAvError(ret), "astilibav: ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
+			if ret := d.ctxFormat.AvReadFrame(pkt); ret < 0 {
+				if ret != avutil.AVERROR_EOF {
+					d.e(astiencoder.EventError(errors.Wrapf(newAvError(ret), "astilibav: ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())))
 				}
-				return nil
-			}); err != nil {
-				// Assert
-				if v, ok := errors.Cause(err).(AvError); ok && int(v) == avutil.AVERROR_EOF {
-					return
-				}
-				d.e(astiencoder.EventError(err))
 				return
 			}
 
@@ -94,7 +90,7 @@ func (d *Demuxer) Start(ctx context.Context, o astiencoder.StartOptions, t astie
 			count++
 
 			// Handle packet
-			d.handlePkt(pkt, wg)
+			d.handlePkt(pkt, r)
 
 			// Check context
 			if d.Context().Err() != nil {
@@ -104,7 +100,7 @@ func (d *Demuxer) Start(ctx context.Context, o astiencoder.StartOptions, t astie
 	})
 }
 
-func (d *Demuxer) handlePkt(pkt *avcodec.Packet, wg *sync.WaitGroup) {
+func (d *Demuxer) handlePkt(pkt *avcodec.Packet, r *astisync.Regulator) {
 	// Lock
 	d.m.Lock()
 	defer d.m.Unlock()
@@ -115,14 +111,21 @@ func (d *Demuxer) handlePkt(pkt *avcodec.Packet, wg *sync.WaitGroup) {
 		return
 	}
 
+	// Create new process
+	p := r.NewProcess()
+
+	// Add subprocesses
+	p.AddSubprocesses(len(hs))
+
 	// Loop through handlers
 	for _, h := range hs {
-		// TODO Only allow a certain number of go routines to run per child
-		// TODO That way, the demuxer doesn't read everything in memory even though the child takes a lot of time to process one pkt
-		wg.Add(1)
+		// Handle pkt
 		go func(h PktHandler) {
-			defer wg.Done()
+			defer p.SubprocessIsDone()
 			h.HandlePkt(pkt)
 		}(h)
 	}
+
+	// Wait for one of the subprocess to be done
+	p.Wait()
 }
