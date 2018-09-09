@@ -20,6 +20,6 @@ type ConfigurationServer struct {
 }
 
 // FlagConfig represents flag configuration
-func FlagConfig() Configuration {
-	return Configuration{}
+func FlagConfig() *Configuration {
+	return &Configuration{}
 }

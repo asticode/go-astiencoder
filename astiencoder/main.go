@@ -75,6 +75,9 @@ func main() {
 			astilog.Fatal(errors.Wrapf(err, "main: creating default workflow for job %+v failed", j))
 		}
 
+		// Make sure the worker stops when the workflow is done
+		c.Encoder.Exec.StopWhenWorkflowsAreDone = true
+
 		// Start workflow
 		w.Start(astiencoder.StartOptions{
 			StopChildrenWhenDone: true,

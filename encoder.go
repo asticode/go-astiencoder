@@ -12,7 +12,7 @@ import (
 // Encoder represents an encoder
 type Encoder struct {
 	b      WorkflowBuilder
-	cfg    Configuration
+	cfg    *Configuration
 	ee     *eventEmitter
 	m      *sync.Mutex
 	w      *astiworker.Worker
@@ -26,7 +26,7 @@ type WorkflowBuilder interface {
 }
 
 // NewEncoder creates a new encoder
-func NewEncoder(cfg Configuration) (e *Encoder) {
+func NewEncoder(cfg *Configuration) (e *Encoder) {
 	aw := astiworker.NewWorker()
 	ee := newEventEmitter()
 	e = &Encoder{

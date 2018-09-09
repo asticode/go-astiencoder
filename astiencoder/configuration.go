@@ -17,16 +17,13 @@ var (
 // Configuration represents a configuration
 type Configuration struct {
 	Logger  astilog.Configuration     `toml:"logger"`
-	Encoder astiencoder.Configuration `toml:"encoder"`
+	Encoder *astiencoder.Configuration `toml:"encoder"`
 }
 
 func newConfiguration() (c Configuration, err error) {
 	var i interface{}
 	if i, err = asticonfig.New(&Configuration{
-		Encoder: astiencoder.Configuration{
-			Exec: astiencoder.ConfigurationExec{
-				StopWhenWorkflowsAreDone: true,
-			},
+		Encoder: &astiencoder.Configuration{
 			Server: astiencoder.ConfigurationServer{
 				Addr:    "127.0.0.1:4000",
 				PathWeb: "web",
