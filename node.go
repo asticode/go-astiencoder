@@ -94,7 +94,7 @@ type BaseNodeStartFunc func()
 type BaseNodeExecFunc func(t *astiworker.Task)
 
 // Start starts the node
-func (n *BaseNode) Start(ctx context.Context, o StartOptions, tc CreateTaskFunc, startFunc BaseNodeStartFunc, execFunc BaseNodeExecFunc) {
+func (n *BaseNode) Start(ctx context.Context, o StartOptions, tc CreateTaskFunc, execFunc BaseNodeExecFunc) {
 	// Make sure the node can only be started once
 	n.oStart.Do(func() {
 		// Check context
@@ -110,11 +110,6 @@ func (n *BaseNode) Start(ctx context.Context, o StartOptions, tc CreateTaskFunc,
 
 		// Reset once
 		n.oStop = &sync.Once{}
-
-		// Start func
-		if startFunc != nil {
-			startFunc()
-		}
 
 		// Execute the rest in a goroutine
 		go func() {

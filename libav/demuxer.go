@@ -20,7 +20,6 @@ var countDemuxer uint64
 // Demuxer represents a demuxer
 type Demuxer struct {
 	*astiencoder.BaseNode
-	cs        map[int][]chan *avcodec.Packet // Indexed by stream index
 	ctxFormat *avformat.Context
 	e         astiencoder.EmitEventFunc
 	hs        map[int][]PktHandler // Indexed by stream index
@@ -34,14 +33,13 @@ type PktHandler interface {
 
 // NewDemuxer creates a new demuxer
 func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc) *Demuxer {
-	atomic.AddUint64(&countDemuxer, uint64(1))
+	c := atomic.AddUint64(&countDemuxer, uint64(1))
 	return &Demuxer{
 		BaseNode: astiencoder.NewBaseNode(astiencoder.NodeMetadata{
 			Description: fmt.Sprintf("Demuxes %s", ctxFormat.Filename()),
-			Label:       fmt.Sprintf("Demuxer #%d", countDemuxer),
-			Name:        fmt.Sprintf("demuxer_%d", countDemuxer),
+			Label:       fmt.Sprintf("Demuxer #%d", c),
+			Name:        fmt.Sprintf("demuxer_%d", c),
 		}),
-		cs:        make(map[int][]chan *avcodec.Packet),
 		ctxFormat: ctxFormat,
 		e:         e,
 		hs:        make(map[int][]PktHandler),
@@ -54,7 +52,6 @@ func (d *Demuxer) OnPkt(streamIdx int, hs ...PktHandler) {
 	d.m.Lock()
 	defer d.m.Unlock()
 	for _, h := range hs {
-		d.cs[streamIdx] = append(d.cs[streamIdx], make(chan *avcodec.Packet))
 		d.hs[streamIdx] = append(d.hs[streamIdx], h)
 		n := h.(astiencoder.Node)
 		astiencoder.ConnectNodes(d, n)
@@ -64,12 +61,16 @@ func (d *Demuxer) OnPkt(streamIdx int, hs ...PktHandler) {
 
 // Start starts the demuxer
 func (d *Demuxer) Start(ctx context.Context, o astiencoder.StartOptions, t astiencoder.CreateTaskFunc) {
-	d.BaseNode.Start(ctx, o, t, d.startHandlerFuncs, func(t *astiworker.Task) {
+	d.BaseNode.Start(ctx, o, t, func(t *astiworker.Task) {
 		// Count
 		var count int
 		defer func(c *int) {
 			astilog.Warnf("astilibav: demuxed %d pkts", count)
 		}(&count)
+
+		// Make sure all packets are sent
+		wg := &sync.WaitGroup{}
+		defer wg.Wait()
 
 		// Loop
 		var pkt = &avcodec.Packet{}
@@ -93,7 +94,7 @@ func (d *Demuxer) Start(ctx context.Context, o astiencoder.StartOptions, t astie
 			count++
 
 			// Handle packet
-			d.handlePkt(pkt)
+			d.handlePkt(pkt, wg)
 
 			// Check context
 			if d.Context().Err() != nil {
@@ -103,40 +104,25 @@ func (d *Demuxer) Start(ctx context.Context, o astiencoder.StartOptions, t astie
 	})
 }
 
-func (d *Demuxer) startHandlerFuncs() {
+func (d *Demuxer) handlePkt(pkt *avcodec.Packet, wg *sync.WaitGroup) {
+	// Lock
 	d.m.Lock()
 	defer d.m.Unlock()
-	for streamIdx, cs := range d.cs {
-		for idx, c := range cs {
-			h := d.hs[streamIdx][idx]
-			go func(c chan *avcodec.Packet, h PktHandler) {
-				for {
-					select {
-					case pkt := <-c:
-						h.HandlePkt(pkt)
-						// TODO This is fucked as sometimes the context will be cancelled before every packets being sent
-						// TODO Need one channel
-					case <-d.Context().Done():
-						return
-					}
-				}
-			}(c, h)
-		}
-	}
-}
 
-func (d *Demuxer) handlePkt(pkt *avcodec.Packet) {
-	d.m.Lock()
-	defer d.m.Unlock()
-	cs, ok := d.cs[pkt.StreamIndex()]
+	// Retrieve handlers
+	hs, ok := d.hs[pkt.StreamIndex()]
 	if !ok {
 		return
 	}
-	for _, c := range cs {
+
+	// Loop through handlers
+	for _, h := range hs {
 		// TODO Only allow a certain number of go routines to run per child
 		// TODO That way, the demuxer doesn't read everything in memory even though the child takes a lot of time to process one pkt
-		go func(c chan *avcodec.Packet) {
-			c <- pkt
-		}(c)
+		wg.Add(1)
+		go func(h PktHandler) {
+			defer wg.Done()
+			h.HandlePkt(pkt)
+		}(h)
 	}
 }

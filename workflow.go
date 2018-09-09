@@ -45,7 +45,7 @@ func (w *Workflow) EmitEventFunc() EmitEventFunc {
 
 // Start starts the workflow
 func (w *Workflow) Start(o StartOptions) {
-	w.BaseNode.Start(w.rootCtx, StartOptions{}, w.t, nil, func(t *astiworker.Task) {
+	w.BaseNode.Start(w.rootCtx, StartOptions{}, w.t, func(t *astiworker.Task) {
 		// Log
 		astilog.Debugf("astiencoder: starting workflow %s", w.name)
 
