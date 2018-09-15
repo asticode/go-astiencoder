@@ -85,7 +85,7 @@ func (d *Demuxer) Connect(i, o *avformat.Stream, h DemuxHandler) {
 }
 
 // Start starts the demuxer
-func (d *Demuxer) Start(ctx context.Context, o astiencoder.StartOptions, t astiencoder.CreateTaskFunc) {
+func (d *Demuxer) Start(ctx context.Context, o astiencoder.WorkflowStartOptions, t astiencoder.CreateTaskFunc) {
 	d.BaseNode.Start(ctx, o, t, func(t *astiworker.Task) {
 		// Create regulator
 		r := astisync.NewRegulator(d.Context(), d.packetsBufferLength)

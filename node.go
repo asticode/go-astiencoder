@@ -28,22 +28,19 @@ type NodeMetadata struct {
 type NodeChild interface {
 	AddParent(n Node)
 	ParentIsDone(m NodeMetadata)
+	Parents() []Node
 }
 
 // NodeParent represents an object with child nodes
 type NodeParent interface {
 	AddChild(n Node)
+	ChildIsDone(m NodeMetadata)
 	Children() []Node
-}
-
-// StartOptions represents start options
-type StartOptions struct {
-	StopChildrenWhenDone bool
 }
 
 // Starter represents an object that can start/stop
 type Starter interface {
-	Start(ctx context.Context, o StartOptions, t CreateTaskFunc)
+	Start(ctx context.Context, o WorkflowStartOptions, t CreateTaskFunc)
 	Stop()
 }
 
@@ -55,27 +52,30 @@ func ConnectNodes(parent, child Node) {
 
 // BaseNode represents a base node
 type BaseNode struct {
-	cancel      context.CancelFunc
-	children    map[string]Node
-	ctx         context.Context
-	m           *sync.Mutex
-	md          NodeMetadata
-	oStart      *sync.Once
-	oStop       *sync.Once
-	parents     map[string]Node
-	parentsDone map[string]bool
+	cancel       context.CancelFunc
+	children     map[string]Node
+	childrenDone map[string]bool
+	ctx          context.Context
+	m            *sync.Mutex
+	md           NodeMetadata
+	o            WorkflowStartOptions
+	oStart       *sync.Once
+	oStop        *sync.Once
+	parents      map[string]Node
+	parentsDone  map[string]bool
 }
 
 // NewBaseNode creates a new base node
 func NewBaseNode(m NodeMetadata) *BaseNode {
 	return &BaseNode{
-		children:    make(map[string]Node),
-		m:           &sync.Mutex{},
-		md:          m,
-		oStart:      &sync.Once{},
-		oStop:       &sync.Once{},
-		parents:     make(map[string]Node),
-		parentsDone: make(map[string]bool),
+		children:     make(map[string]Node),
+		childrenDone: make(map[string]bool),
+		m:            &sync.Mutex{},
+		md:           m,
+		oStart:       &sync.Once{},
+		oStop:        &sync.Once{},
+		parents:      make(map[string]Node),
+		parentsDone:  make(map[string]bool),
 	}
 }
 
@@ -94,9 +94,12 @@ type BaseNodeStartFunc func()
 type BaseNodeExecFunc func(t *astiworker.Task)
 
 // Start starts the node
-func (n *BaseNode) Start(ctx context.Context, o StartOptions, tc CreateTaskFunc, execFunc BaseNodeExecFunc) {
+func (n *BaseNode) Start(ctx context.Context, o WorkflowStartOptions, tc CreateTaskFunc, execFunc BaseNodeExecFunc) {
 	// Make sure the node can only be started once
 	n.oStart.Do(func() {
+		// Store options
+		n.o = o
+
 		// Check context
 		if ctx.Err() != nil {
 			return
@@ -122,12 +125,14 @@ func (n *BaseNode) Start(ctx context.Context, o StartOptions, tc CreateTaskFunc,
 			// Exec func
 			execFunc(t)
 
-			// Stop children
-			if o.StopChildrenWhenDone && (n.ctx.Err() == nil || n.allParentsAreDone()) {
-				// Loop through children
-				for _, c := range n.Children() {
-					c.ParentIsDone(n.md)
-				}
+			// Loop through children
+			for _, c := range n.Children() {
+				c.ParentIsDone(n.md)
+			}
+
+			// Loop through parents
+			for _, p := range n.Parents() {
+				p.ChildIsDone(n.md)
 			}
 		}()
 	})
@@ -155,6 +160,19 @@ func (n *BaseNode) AddChild(i Node) {
 		return
 	}
 	n.children[i.Metadata().Name] = i
+}
+
+// ChildIsDone implements the NodeParent interface
+func (n *BaseNode) ChildIsDone(m NodeMetadata) {
+	n.m.Lock()
+	defer n.m.Unlock()
+	if _, ok := n.children[m.Name]; !ok {
+		return
+	}
+	n.childrenDone[m.Name] = true
+	if n.o.StopWhenNodesAreDone && len(n.childrenDone) == len(n.children) {
+		n.Stop()
+	}
 }
 
 // Children implements the NodeParent interface
@@ -190,15 +208,24 @@ func (n *BaseNode) ParentIsDone(m NodeMetadata) {
 		return
 	}
 	n.parentsDone[m.Name] = true
-	if len(n.parentsDone) == len(n.parents) {
+	if n.o.StopWhenNodesAreDone && len(n.parentsDone) == len(n.parents) {
 		n.Stop()
 	}
 }
 
-func (n *BaseNode) allParentsAreDone() bool {
+// Parents implements the NodeChild interface
+func (n *BaseNode) Parents() (ns []Node) {
 	n.m.Lock()
 	defer n.m.Unlock()
-	return len(n.parentsDone) == len(n.parents)
+	var ks []string
+	for k := range n.parents {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	for _, k := range ks {
+		ns = append(ns, n.parents[k])
+	}
+	return
 }
 
 // Metadata implements the Node interface

@@ -65,19 +65,21 @@ func (m *Muxer) CloneStream(i *avformat.Stream) (o *avformat.Stream, err error) 
 }
 
 // Start starts the muxer
-func (m *Muxer) Start(ctx context.Context, o astiencoder.StartOptions, t astiencoder.CreateTaskFunc) {
+func (m *Muxer) Start(ctx context.Context, o astiencoder.WorkflowStartOptions, t astiencoder.CreateTaskFunc) {
 	m.BaseNode.Start(ctx, o, t, func(t *astiworker.Task) {
+		// Handle context
+		go m.q.HandleCtx(m.Context())
+
 		// Make sure to write header once
-		// TODO Return if step below fails
-		m.o.Do(func() {
-			if ret := m.ctxFormat.AvformatWriteHeader(nil); ret < 0 {
-				emitAvError(m.e, ret, "m.ctxFormat.AvformatWriteHeader on %s failed", m.ctxFormat.Filename())
-				return
-			}
-		})
+		var ret int
+		m.o.Do(func() { ret = m.ctxFormat.AvformatWriteHeader(nil) })
+		if ret < 0 {
+			emitAvError(m.e, ret, "m.ctxFormat.AvformatWriteHeader on %s failed", m.ctxFormat.Filename())
+			return
+		}
 
 		// Start queue
-		m.q.Start(m.Context(), func(p interface{}) {
+		m.q.Start(func(p interface{}) {
 			// Assert payload
 			pkt := p.(*avcodec.Packet)
 
@@ -103,5 +105,5 @@ type MuxHandler interface {
 
 // HandlePkt implements the MuxHandler interface
 func (m *Muxer) HandlePkt(pkt *avcodec.Packet) {
-	m.q.SendAndWait(pkt)
+	m.q.Send(pkt, true)
 }

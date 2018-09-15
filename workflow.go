@@ -43,9 +43,14 @@ func (w *Workflow) EmitEventFunc() EmitEventFunc {
 	return w.e
 }
 
+// WorkflowStartOptions represents workflow start options
+type WorkflowStartOptions struct {
+	StopWhenNodesAreDone bool
+}
+
 // Start starts the workflow
-func (w *Workflow) Start(o StartOptions) {
-	w.BaseNode.Start(w.rootCtx, StartOptions{}, w.t, func(t *astiworker.Task) {
+func (w *Workflow) Start(o WorkflowStartOptions) {
+	w.BaseNode.Start(w.rootCtx, WorkflowStartOptions{}, w.t, func(t *astiworker.Task) {
 		// Log
 		astilog.Debugf("astiencoder: starting workflow %s", w.name)
 
@@ -76,7 +81,7 @@ func (w *Workflow) Start(o StartOptions) {
 	})
 }
 
-func (w *Workflow) startNodes(ns []Node, o StartOptions, t CreateTaskFunc) {
+func (w *Workflow) startNodes(ns []Node, o WorkflowStartOptions, t CreateTaskFunc) {
 	// Loop through nodes
 	for _, n := range ns {
 		// Start node
