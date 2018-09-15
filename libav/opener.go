@@ -41,6 +41,7 @@ func (o *Opener) OpenInput(name string, c astiencoder.JobInput) (ctxFormat *avfo
 	return
 }
 
+// OpenOutput opens an output
 func (o *Opener) OpenOutput(name string, c astiencoder.JobOutput) (ctxFormat *avformat.Context, err error) {
 	// Alloc format context
 	if ret := avformat.AvformatAllocOutputContext2(&ctxFormat, nil, "", c.URL); ret < 0 {

@@ -43,7 +43,7 @@ func (b *builder) BuildWorkflow(j astiencoder.Job, w *astiencoder.Workflow) (err
 
 	// Open inputs
 	var is map[string]openedInput
-	if is, err = b.openInputs(j, o, w.EmitEventFunc()); err != nil {
+	if is, err = b.openInputs(j, o, w.EmitEventFunc(), w.Closer()); err != nil {
 		err = errors.Wrap(err, "main: opening inputs failed")
 		return
 	}
@@ -56,7 +56,7 @@ func (b *builder) BuildWorkflow(j astiencoder.Job, w *astiencoder.Workflow) (err
 
 	// Open outputs
 	var os map[string]openedOutput
-	if os, err = b.openOutputs(j, o); err != nil {
+	if os, err = b.openOutputs(j, o, w.EmitEventFunc()); err != nil {
 		err = errors.Wrap(err, "main: opening outputs failed")
 		return
 	}
@@ -78,7 +78,7 @@ func (b *builder) BuildWorkflow(j astiencoder.Job, w *astiencoder.Workflow) (err
 	return
 }
 
-func (b *builder) openInputs(j astiencoder.Job, o *astilibav.Opener, e astiencoder.EmitEventFunc) (is map[string]openedInput, err error) {
+func (b *builder) openInputs(j astiencoder.Job, o *astilibav.Opener, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (is map[string]openedInput, err error) {
 	// Loop through inputs
 	is = make(map[string]openedInput)
 	for n, i := range j.Inputs {
@@ -92,14 +92,14 @@ func (b *builder) openInputs(j astiencoder.Job, o *astilibav.Opener, e astiencod
 		// Index
 		is[n] = openedInput{
 			ctxFormat: ctxFormat,
-			d:         astilibav.NewDemuxer(ctxFormat, e, 10),
+			d:         astilibav.NewDemuxer(ctxFormat, e, c, 10),
 			i:         i,
 		}
 	}
 	return
 }
 
-func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener) (os map[string]openedOutput, err error) {
+func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener, e astiencoder.EmitEventFunc) (os map[string]openedOutput, err error) {
 	// Loop through outputs
 	os = make(map[string]openedOutput)
 	for n, out := range j.Outputs {
@@ -113,7 +113,7 @@ func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener) (os map[st
 		// Index
 		os[n] = openedOutput{
 			ctxFormat: ctxFormat,
-			m:         astilibav.NewMuxer(ctxFormat),
+			m:         astilibav.NewMuxer(ctxFormat, e),
 			o:         out,
 		}
 	}
@@ -171,29 +171,36 @@ func (b *builder) addOperationToWorkflow(w *astiencoder.Workflow, name string, o
 	return
 }
 
-func (b *builder) addRemuxToWorkflow(w *astiencoder.Workflow, is []openedInput, os []openedOutput) (err error) {
-	// Loop through outputs
-	var hs []astilibav.PktHandler
-	for _, o := range os {
-		hs = append(hs, o.m)
-	}
-
+// TODO Add test that takes sample.mp4 and compare the output with what's expected
+func (b *builder) addRemuxToWorkflow(w *astiencoder.Workflow, ois []openedInput, oos []openedOutput) (err error) {
 	// Loop through inputs
-	for _, i := range is {
+	for _, i := range ois {
 		// Loop through streams
-		for _, s := range i.ctxFormat.Streams() {
+		for _, is := range i.ctxFormat.Streams() {
 			// Only process some media types
-			if s.CodecParameters().CodecType() != avcodec.AVMEDIA_TYPE_AUDIO &&
-				s.CodecParameters().CodecType() != avcodec.AVMEDIA_TYPE_SUBTITLE &&
-				s.CodecParameters().CodecType() != avcodec.AVMEDIA_TYPE_VIDEO {
+			if is.CodecParameters().CodecType() != avcodec.AVMEDIA_TYPE_AUDIO &&
+				is.CodecParameters().CodecType() != avcodec.AVMEDIA_TYPE_SUBTITLE &&
+				is.CodecParameters().CodecType() != avcodec.AVMEDIA_TYPE_VIDEO {
 				continue
 			}
 
 			// Add demuxer as root node of the workflow
 			w.AddChild(i.d)
 
-			// On packet
-			i.d.OnPkt(s.Index(), hs...)
+			// Loop through outputs
+			for _, o := range oos {
+				// Clone stream
+				var os *avformat.Stream
+				if os, err = o.m.CloneStream(is); err != nil {
+					err = errors.Wrapf(err, "main: cloning stream %+v of %s failed", is, i.ctxFormat.Filename())
+					return
+				}
+
+				// TODO modify packet
+
+				// Handle packet
+				i.d.OnPkt(is, os, o.m)
+			}
 		}
 	}
 	return
