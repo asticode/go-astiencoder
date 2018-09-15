@@ -17,6 +17,7 @@ import (
 
 var countTransmuxer uint64
 
+// TODO Keep it as is or simplify by only wrapping a muxer and overriding its HandlePkt function
 type transmuxer struct {
 	*astiencoder.BaseNode
 	h astilibav.MuxHandler
@@ -55,8 +56,8 @@ func (r *transmuxer) Start(ctx context.Context, o astiencoder.StartOptions, t as
 			// Modify packet
 			d.pkt.SetStreamIndex(d.outStream.Index())
 			d.pkt.SetDuration(avutil.AvRescaleQ(d.pkt.Duration(), d.inStream.TimeBase(), d.outStream.TimeBase()))
-			d.pkt.SetDts(avutil.AvRescaleQRnd(d.pkt.Dts(), d.inStream.TimeBase(), d.outStream.TimeBase(), avutil.AV_ROUND_NEAR_INF|avutil.AV_ROUND_PASS_MINMAX))
-			d.pkt.SetPts(avutil.AvRescaleQRnd(d.pkt.Pts(), d.inStream.TimeBase(), d.outStream.TimeBase(), avutil.AV_ROUND_NEAR_INF|avutil.AV_ROUND_PASS_MINMAX))
+			d.pkt.SetDts(avutil.AvRescaleQ(d.pkt.Dts(), d.inStream.TimeBase(), d.outStream.TimeBase()))
+			d.pkt.SetPts(avutil.AvRescaleQ(d.pkt.Pts(), d.inStream.TimeBase(), d.outStream.TimeBase()))
 			d.pkt.SetPos(-1)
 
 			// Handle packet

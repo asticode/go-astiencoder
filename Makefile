@@ -1,8 +1,11 @@
 dev:
-	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go run astiencoder/*.go -v -j data/job.json
+	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go run ./astiencoder -v -j examples/remux.json
+
+test:
+	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go test -v ./...
 
 version:
-	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go run astiencoder/*.go version
+	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go run ./astiencoder version
 
 install-ffmpeg:
 	mkdir -p vendor_c/src

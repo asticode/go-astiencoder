@@ -1,12 +1,12 @@
 {
   "inputs": {
     "default": {
-      "url": "data/sample.mp4"
+      "url": "examples/sample.mp4"
     }
   },
   "outputs": {
     "default": {
-      "url": "tmp/sample.ts"
+      "url": "examples/tmp/remux.ts"
     }
   },
   "operations": {
