@@ -17,7 +17,7 @@ import (
 
 var countMuxer uint64
 
-// Muxer represents a muxer
+// Muxer represents an object capable of muxing packets into an output
 type Muxer struct {
 	*astiencoder.BaseNode
 	ctxFormat *avformat.Context
@@ -57,7 +57,9 @@ func (m *Muxer) CloneStream(i *avformat.Stream) (o *avformat.Stream, err error) 
 		err = errors.Wrapf(newAvError(ret), "astilibav: avcodec.AvcodecParametersCopy from %+v to %+v failed", i.CodecParameters(), o.CodecParameters())
 		return
 	}
-	// TODO Set codec parameters codec_tag to 0
+
+	// Reset codec tag as shown in https://github.com/FFmpeg/FFmpeg/blob/n4.0.2/doc/examples/remuxing.c#L122
+	o.CodecParameters().SetCodecTag(0)
 	return
 }
 
@@ -92,7 +94,12 @@ func (m *Muxer) Start(ctx context.Context, o astiencoder.StartOptions, t astienc
 	})
 }
 
-// HandlePkt implements the PktHandler interface
-func (m *Muxer) HandlePkt(pkt *avcodec.Packet, s *avformat.Stream) {
+// MuxHandler represents a mux handler
+type MuxHandler interface {
+	HandlePkt(pkt *avcodec.Packet)
+}
+
+// HandlePkt implements the MuxHandler interface
+func (m *Muxer) HandlePkt(pkt *avcodec.Packet) {
 	m.q.SendAndWait(pkt)
 }

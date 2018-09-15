@@ -196,10 +196,14 @@ func (b *builder) addRemuxToWorkflow(w *astiencoder.Workflow, ois []openedInput,
 					return
 				}
 
-				// TODO modify packet
+				// Create transmuxer
+				t := newTransmuxer()
 
-				// Handle packet
-				i.d.OnPkt(is, os, o.m)
+				// Connect transmuxer to muxer
+				t.connect(o.m)
+
+				// Connect demuxer to transmuxer
+				i.d.Connect(is, os, t)
 			}
 		}
 	}

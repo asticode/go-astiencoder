@@ -123,7 +123,7 @@ func (n *BaseNode) Start(ctx context.Context, o StartOptions, tc CreateTaskFunc,
 			execFunc(t)
 
 			// Stop children
-			if o.StopChildrenWhenDone && n.ctx.Err() == nil {
+			if o.StopChildrenWhenDone && (n.ctx.Err() == nil || n.allParentsAreDone()) {
 				// Loop through children
 				for _, c := range n.Children() {
 					c.ParentIsDone(n.md)
@@ -193,6 +193,12 @@ func (n *BaseNode) ParentIsDone(m NodeMetadata) {
 	if len(n.parentsDone) == len(n.parents) {
 		n.Stop()
 	}
+}
+
+func (n *BaseNode) allParentsAreDone() bool {
+	n.m.Lock()
+	defer n.m.Unlock()
+	return len(n.parentsDone) == len(n.parents)
 }
 
 // Metadata implements the Node interface
