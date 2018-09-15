@@ -59,7 +59,6 @@ func (m *Muxer) CloneStream(i *avformat.Stream) (o *avformat.Stream, err error) 
 	}
 
 	// Reset codec tag as shown in https://github.com/FFmpeg/FFmpeg/blob/n4.0.2/doc/examples/remuxing.c#L122
-	// TODO Fix for mp4
 	o.CodecParameters().SetCodecTag(0)
 	return
 }
