@@ -32,10 +32,7 @@ func (b *builder) addRemuxToWorkflow(w *astiencoder.Workflow, ois []openedInput,
 				}
 
 				// Create transmuxer
-				t := newTransmuxer()
-
-				// Connect transmuxer to muxer
-				t.connect(o.m)
+				t := newTransmuxer(o.m)
 
 				// Connect demuxer to transmuxer
 				i.d.Connect(is, os, t)
