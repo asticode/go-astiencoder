@@ -59,6 +59,7 @@ func (m *Muxer) CloneStream(i *avformat.Stream) (o *avformat.Stream, err error) 
 	}
 
 	// Reset codec tag as shown in https://github.com/FFmpeg/FFmpeg/blob/n4.0.2/doc/examples/remuxing.c#L122
+	// TODO Fix for mp4
 	o.CodecParameters().SetCodecTag(0)
 	return
 }
@@ -67,6 +68,7 @@ func (m *Muxer) CloneStream(i *avformat.Stream) (o *avformat.Stream, err error) 
 func (m *Muxer) Start(ctx context.Context, o astiencoder.StartOptions, t astiencoder.CreateTaskFunc) {
 	m.BaseNode.Start(ctx, o, t, func(t *astiworker.Task) {
 		// Make sure to write header once
+		// TODO Return if step below fails
 		m.o.Do(func() {
 			if ret := m.ctxFormat.AvformatWriteHeader(nil); ret < 0 {
 				emitAvError(m.e, ret, "m.ctxFormat.AvformatWriteHeader on %s failed", m.ctxFormat.Filename())
