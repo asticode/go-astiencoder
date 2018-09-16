@@ -54,7 +54,7 @@ func (b *builder) BuildWorkflow(j astiencoder.Job, w *astiencoder.Workflow) (err
 
 	// Open outputs
 	var os map[string]openedOutput
-	if os, err = b.openOutputs(j, o, w.EmitEventFunc()); err != nil {
+	if os, err = b.openOutputs(j, o, w.EmitEventFunc(), w.Closer()); err != nil {
 		err = errors.Wrap(err, "main: opening outputs failed")
 		return
 	}
@@ -97,7 +97,7 @@ func (b *builder) openInputs(j astiencoder.Job, o *astilibav.Opener, e astiencod
 	return
 }
 
-func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener, e astiencoder.EmitEventFunc) (os map[string]openedOutput, err error) {
+func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (os map[string]openedOutput, err error) {
 	// Loop through outputs
 	os = make(map[string]openedOutput)
 	for n, out := range j.Outputs {
@@ -111,7 +111,7 @@ func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener, e astienco
 		// Index
 		os[n] = openedOutput{
 			ctxFormat: ctxFormat,
-			m:         astilibav.NewMuxer(ctxFormat, e),
+			m:         astilibav.NewMuxer(ctxFormat, e, c),
 			o:         out,
 		}
 	}

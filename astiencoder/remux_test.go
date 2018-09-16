@@ -37,7 +37,7 @@ func TestRemux(t *testing.T) {
 	}
 
 	// Start workflow
-	w.Start(astiencoder.StartOptions{StopChildrenWhenDone: true})
+	w.Start(astiencoder.WorkflowStartOptions{StopWhenNodesAreDone: true})
 
 	// Wait
 	e.Wait()

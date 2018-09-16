@@ -20,6 +20,7 @@ var countMuxer uint64
 // Muxer represents an object capable of muxing packets into an output
 type Muxer struct {
 	*astiencoder.BaseNode
+	c         *astiencoder.Closer
 	ctxFormat *avformat.Context
 	e         astiencoder.EmitEventFunc
 	o         *sync.Once
@@ -27,14 +28,15 @@ type Muxer struct {
 }
 
 // NewMuxer creates a new muxer
-func NewMuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc) *Muxer {
-	c := atomic.AddUint64(&countMuxer, uint64(1))
+func NewMuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer) *Muxer {
+	count := atomic.AddUint64(&countMuxer, uint64(1))
 	return &Muxer{
 		BaseNode: astiencoder.NewBaseNode(astiencoder.NodeMetadata{
 			Description: fmt.Sprintf("Muxes to %s", ctxFormat.Filename()),
-			Label:       fmt.Sprintf("Muxer #%d", c),
-			Name:        fmt.Sprintf("muxer_%d", c),
+			Label:       fmt.Sprintf("Muxer #%d", count),
+			Name:        fmt.Sprintf("muxer_%d", count),
 		}),
+		c:         c,
 		ctxFormat: ctxFormat,
 		e:         e,
 		o:         &sync.Once{},
@@ -77,6 +79,14 @@ func (m *Muxer) Start(ctx context.Context, o astiencoder.WorkflowStartOptions, t
 			return
 		}
 
+		// Write trailer once everything is done
+		m.c.Add(func() error {
+			if ret := m.ctxFormat.AvWriteTrailer(); ret < 0 {
+				return errors.Wrapf(newAvError(ret), "m.ctxFormat.AvWriteTrailer on %s failed", m.ctxFormat.Filename())
+			}
+			return nil
+		})
+
 		// Start queue
 		m.q.Start(func(p interface{}) {
 			// Assert payload
@@ -88,12 +98,6 @@ func (m *Muxer) Start(ctx context.Context, o astiencoder.WorkflowStartOptions, t
 				return
 			}
 		})
-
-		// TODO Only write trailer if root ctx has been cancelled or if eof
-		if ret := m.ctxFormat.AvWriteTrailer(); ret < 0 {
-			emitAvError(m.e, ret, "m.ctxFormat.AvWriteTrailer on %s failed", m.ctxFormat.Filename())
-			return
-		}
 	})
 }
 
