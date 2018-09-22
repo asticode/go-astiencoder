@@ -430,7 +430,6 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 	return
 }
 
-// TODO Add scale + pix_fmt + timebase + pixel_aspect
 func (b *builder) createFilterer(bd *buildData, inCtx, outCtx operationCtx) (f *astilibav.Filterer, err error) {
 	// Create filters
 	var filters []string
@@ -440,11 +439,16 @@ func (b *builder) createFilterer(bd *buildData, inCtx, outCtx operationCtx) (f *
 		filters = append(filters, fmt.Sprintf("minterpolate='fps=%d/%d'", outCtx.frameRate.Num(), outCtx.frameRate.Den()))
 	}
 
+	// Scale
+	if inCtx.height != outCtx.height || inCtx.width != outCtx.width {
+		filters = append(filters, fmt.Sprintf("scale='w=%d:h=%d'", outCtx.width, outCtx.height))
+	}
+
 	// There are filters
 	if len(filters) > 0 {
 		// Create filterer options
 		fo := astilibav.FiltererOptions{
-			Content: strings.Join(filters, ";"),
+			Content: strings.Join(filters, ","),
 			Input:   inCtx.filtererInputOptions(),
 		}
 

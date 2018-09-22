@@ -12,7 +12,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func testJob(t *testing.T, jobPath, expectedPath string) {
+func testJob(t *testing.T, jobPath string, assertPaths func(j astiencoder.Job) map[string]string ) {
 	// Create encoder
 	cfg := &astiencoder.Configuration{}
 	cfg.Exec.StopWhenWorkflowsAreDone = true
@@ -42,8 +42,10 @@ func testJob(t *testing.T, jobPath, expectedPath string) {
 	// Wait
 	e.Wait()
 
-	// Open expected
-	assertFilesEqual(expectedPath, j.Outputs["default"].URL, t)
+	// Check expected paths
+	for expectedPath, actualPath := range assertPaths(j) {
+		assertFilesEqual(expectedPath, actualPath, t)
+	}
 }
 
 func openJob(path string) (j astiencoder.Job, err error) {
