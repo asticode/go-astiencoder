@@ -204,6 +204,9 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 				return
 			}
 
+			// TODO Add scale + pix_fmt + timebase + pixel_aspect
+			// TODO Add interpolate
+
 			// Create encoder options
 			eo := b.createEncoderOptions(is, o)
 

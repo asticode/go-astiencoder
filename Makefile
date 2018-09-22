@@ -8,7 +8,7 @@ build:
 	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go build -o $(GOPATH)/bin/astiencoder ./astiencoder
 
 test:
-	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go test -v ./...
+	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go test -cover -v ./...
 
 version:
 	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go run ./astiencoder version

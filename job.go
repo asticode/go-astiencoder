@@ -51,6 +51,7 @@ type JobOperation struct {
 }
 
 // JobOperationInput represents a job operation input
+// TODO Add start, end and duration (use seek?)
 type JobOperationInput struct {
 	// Possible values are "audio", "subtitle" and "video"
 	MediaType string `json:"media_type,omitempty"`

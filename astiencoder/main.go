@@ -18,6 +18,11 @@ var (
 	job = flag.String("j", "", "the path to the job in JSON format")
 )
 
+// TODO Implement remux + thumbnails + basic cpu encode
+// TODO Update readme
+// TODO Add tests
+// TODO Allow packaging in smooth, hls and dash
+
 func main() {
 	// Parse flags
 	s := astiflag.Subcommand()

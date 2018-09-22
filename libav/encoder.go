@@ -125,6 +125,8 @@ func (e *Encoder) Start(ctx context.Context, o astiencoder.WorkflowStartOptions,
 		// Handle context
 		go e.q.HandleCtx(e.Context())
 
+		// TODO Add stats
+
 		// Create regulator
 		r := astisync.NewRegulator(e.Context(), e.packetsBufferLength)
 		defer r.Wait()
