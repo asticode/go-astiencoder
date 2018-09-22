@@ -1,12 +1,14 @@
 package astilibav
 
+import "C"
 import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/asticode/go-astilog"
+	"os"
 	"sync/atomic"
 	"text/template"
+	"unsafe"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astitools/sync"
@@ -30,7 +32,7 @@ type PktDumper struct {
 }
 
 // PktDumpFunc represents a pkt dump func
-type PktDumpFunc func(pkt *avcodec.Packet, pattern string)
+type PktDumpFunc func(pkt *avcodec.Packet, pattern string) error
 
 // NewPktDumper creates a new pk dumper
 func NewPktDumper(pattern string, fn PktDumpFunc, data map[string]interface{}, e astiencoder.EmitEventFunc) (d *PktDumper, err error) {
@@ -84,7 +86,10 @@ func (d *PktDumper) Start(ctx context.Context, o astiencoder.WorkflowStartOption
 			}
 
 			// Dump
-			d.fn(pkt, buf.String())
+			if err := d.fn(pkt, buf.String()); err != nil {
+				d.e(astiencoder.EventError(errors.Wrapf(err, "astilibav: pkt dump func with pattern %s failed", buf)))
+				return
+			}
 		})
 	})
 }
@@ -95,8 +100,19 @@ func (d *PktDumper) HandlePkt(pkt *avcodec.Packet) {
 }
 
 // PktDumpFunc is a PktDumpFunc that dumps the packet to a file
-var PktDumpFile = func(pkt *avcodec.Packet, pattern string) {
-	// TODO Write to file
-	astilog.Warnf("writing pkt to %s", pattern)
-	// http://www.cplusplus.com/reference/cstdio/fwrite/
+var PktDumpFile = func(pkt *avcodec.Packet, pattern string) (err error) {
+	// Create file
+	var f *os.File
+	if f, err = os.Create(pattern); err != nil {
+		err = errors.Wrapf(err, "astilibav: creating file %s failed", pattern)
+		return
+	}
+	defer f.Close()
+
+	// Write to file
+	if _, err = f.Write(C.GoBytes(unsafe.Pointer(pkt.Data()), (C.int)(pkt.Size()))); err != nil {
+		err = errors.Wrapf(err, "astilibav: writing to file %s failed", pattern)
+		return
+	}
+	return
 }
