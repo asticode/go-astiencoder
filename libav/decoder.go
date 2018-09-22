@@ -3,10 +3,10 @@ package astilibav
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astilog"
 	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avcodec"
@@ -20,15 +20,24 @@ var countDecoder uint64
 // Decoder represents an object capable of decoding packets
 type Decoder struct {
 	*astiencoder.BaseNode
-	ctxCodec *avcodec.Context
-	e        astiencoder.EmitEventFunc
-	f        *avutil.Frame
-	q        *astisync.CtxQueue
-	s        *avformat.Stream
+	c                   *astiencoder.Closer
+	ctxCodec            *avcodec.Context
+	e                   astiencoder.EmitEventFunc
+	f                   *avutil.Frame
+	hs                  []decoderHandlerData
+	m                   *sync.Mutex
+	packetsBufferLength int
+	q                   *astisync.CtxQueue
+	s                   *avformat.Stream
+}
+
+type decoderHandlerData struct {
+	f *avutil.Frame
+	h FrameHandler
 }
 
 // NewDecoder creates a new decoder
-func NewDecoder(s *avformat.Stream, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (d *Decoder, err error) {
+func NewDecoder(s *avformat.Stream, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (d *Decoder, err error) {
 	// Create decoder
 	count := atomic.AddUint64(&countDecoder, uint64(1))
 	d = &Decoder{
@@ -37,10 +46,13 @@ func NewDecoder(s *avformat.Stream, e astiencoder.EmitEventFunc, c *astiencoder.
 			Label:       fmt.Sprintf("Decoder #%d", count),
 			Name:        fmt.Sprintf("decoder_%d", count),
 		}),
-		e: e,
-		f: avutil.AvFrameAlloc(),
-		q: astisync.NewCtxQueue(),
-		s: s,
+		c:                   c,
+		e:                   e,
+		f:                   avutil.AvFrameAlloc(),
+		m:                   &sync.Mutex{},
+		packetsBufferLength: packetsBufferLength,
+		q:                   astisync.NewCtxQueue(),
+		s:                   s,
 	}
 
 	// Make sure the frame is freed
@@ -84,11 +96,39 @@ func NewDecoder(s *avformat.Stream, e astiencoder.EmitEventFunc, c *astiencoder.
 	return
 }
 
-// Start starts the Decoder
+// Connect connects the decoder to a FrameHandler
+func (d *Decoder) Connect(h FrameHandler) {
+	// Lock
+	d.m.Lock()
+	defer d.m.Unlock()
+
+	// Create frame
+	f := avutil.AvFrameAlloc()
+	d.c.Add(func() error {
+		avutil.AvFrameFree(f)
+		return nil
+	})
+
+	// Append handler
+	d.hs = append(d.hs, decoderHandlerData{
+		f: f,
+		h: h,
+	})
+
+	// Connect nodes
+	n := h.(astiencoder.Node)
+	astiencoder.ConnectNodes(d, n)
+}
+
+// Start starts the decoder
 func (d *Decoder) Start(ctx context.Context, o astiencoder.WorkflowStartOptions, t astiencoder.CreateTaskFunc) {
 	d.BaseNode.Start(ctx, o, t, func(t *astiworker.Task) {
 		// Handle context
 		go d.q.HandleCtx(d.Context())
+
+		// Create regulator
+		r := astisync.NewRegulator(d.Context(), d.packetsBufferLength)
+		defer r.Wait()
 
 		// Start queue
 		d.q.Start(func(p interface{}) {
@@ -112,7 +152,7 @@ func (d *Decoder) Start(ctx context.Context, o astiencoder.WorkflowStartOptions,
 				}
 
 				// Handle frame
-				d.handleFrame()
+				d.handleFrame(r)
 			}
 		})
 	})
@@ -123,6 +163,34 @@ func (d *Decoder) HandlePkt(pkt *avcodec.Packet) {
 	d.q.Send(pkt, true)
 }
 
-func (d *Decoder) handleFrame() {
-	astilog.Warnf("handling frame %+v", d.f)
+func (d *Decoder) handleFrame(r *astisync.Regulator) {
+	// Lock
+	d.m.Lock()
+	defer d.m.Unlock()
+
+	// Create new process
+	p := r.NewProcess()
+
+	// Add subprocesses
+	p.AddSubprocesses(len(d.hs))
+
+	// Loop through handlers
+	for _, h := range d.hs {
+		// Copy frame
+		if ret := avutil.AvFrameRef(h.f, d.f); ret < 0 {
+			emitAvError(d.e, ret, "avutil.AvFrameRef of %+v to %+v failed", d.f, h.f)
+			p.SubprocessIsDone()
+			continue
+		}
+
+		// Handle frame
+		go func(h decoderHandlerData) {
+			defer p.SubprocessIsDone()
+			defer avutil.AvFrameUnref(h.f)
+			h.h.HandleFrame(h.f)
+		}(h)
+	}
+
+	// Wait for one of the subprocess to be done
+	p.Wait()
 }

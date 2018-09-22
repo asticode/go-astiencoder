@@ -12,10 +12,23 @@ type JobInput struct {
 	URL string `json:"url"`
 }
 
+// Job output types
+const (
+	// The packet data is dumped directly somewhere without any mux
+	JobOutputTypePktDump = "pkt_dump"
+)
+
 // JobOutput represents a job output
 type JobOutput struct {
-	URL string `json:"url"`
+	// Default is "default". Possible values are "default" and "pkt_dump"
+	Type string `json:"type"`
+	URL  string `json:"url"`
 }
+
+// Job operation formats
+const (
+	JobOperationFormatJpeg = "jpeg"
+)
 
 // Job operation types
 const (
@@ -24,11 +37,14 @@ const (
 
 // JobOperation represents a job operation
 type JobOperation struct {
+	// Default is "auto". Possible values are "auto" and "jpeg"
+	Format string `json:"format"`
 	// Frame rate is a per-operation value since we may have different frame rate operations for a similar output
 	FrameRate float64              `json:"frame_rate"`
 	Inputs    []JobOperationInput  `json:"inputs"`
 	Outputs   []JobOperationOutput `json:"outputs"`
-	Type      string               `json:"type"`
+	// Default is "default". Possible values are "default" and "remux"
+	Type string `json:"type"`
 }
 
 // JobOperationInput represents a job operation input

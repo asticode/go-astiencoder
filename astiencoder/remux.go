@@ -8,7 +8,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (b *builder) addRemuxToWorkflow(name string, cfg astiencoder.JobOperation, bd *buildData, ois []openedInput, oos []openedOutput) (err error) {
+func (b *builder) addRemuxOperation(name string, cfg astiencoder.JobOperation, bd *buildData, ois []openedInput, oos []openedOutput) (err error) {
 	// Loop through inputs
 	for _, i := range ois {
 		// Loop through streams

@@ -2,23 +2,12 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astiencoder/libav"
 	"github.com/asticode/goav/avformat"
 	"github.com/pkg/errors"
 )
-
-type nodePktHandler interface {
-	astiencoder.Node
-	astilibav.PktHandler
-}
-
-type nodePktWriter interface {
-	astiencoder.Node
-	astilibav.PktWriter
-}
 
 type builder struct{}
 
@@ -38,6 +27,11 @@ type openedOutput struct {
 	ctxFormat *avformat.Context
 	h         nodePktHandler
 	name      string
+}
+
+type nodePktHandler interface {
+	astiencoder.Node
+	astilibav.PktHandler
 }
 
 type buildData struct {
@@ -135,14 +129,11 @@ func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener, e astienco
 			name: n,
 		}
 
-		// Switch on extension
-		switch filepath.Ext(cfg.URL) {
-		case ".jpg", ".jpeg":
-			// Create file writer
-			if oo.h, err = newFileWriter(astilibav.NewFileWriter(e), cfg.URL, e); err != nil {
-				err = errors.Wrapf(err, "main: creating snapshot writer for output %s with conf %+v failed", n, cfg)
-				return
-			}
+		// Switch on type
+		switch cfg.Type {
+		case astiencoder.JobOutputTypePktDump:
+			// This is a per-operation and per-input value since we may want to index the path by input name
+			// The writer is created afterwards
 		default:
 			// Open
 			if oo.ctxFormat, err = o.OpenOutput(n, cfg); err != nil {
@@ -161,24 +152,6 @@ func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener, e astienco
 }
 
 func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation, bd *buildData) (err error) {
-	// Get inputs and outputs
-	var ois []openedInput
-	var oos []openedOutput
-	if ois, oos, err = bd.operationInputsOutputs(o); err != nil {
-		return
-	}
-
-	// Switch on operation type
-	switch o.Type {
-	case astiencoder.JobOperationTypeRemux:
-		err = b.addRemuxToWorkflow(name, o, bd, ois, oos)
-	default:
-		err = b.addEncodeToWorkflow(name, o, bd, ois, oos)
-	}
-	return
-}
-
-func (bd *buildData) operationInputsOutputs(o astiencoder.JobOperation) (is []openedInput, os []openedOutput, err error) {
 	// No inputs
 	if len(o.Inputs) == 0 {
 		err = errors.New("main: no operation inputs provided")
@@ -186,6 +159,7 @@ func (bd *buildData) operationInputsOutputs(o astiencoder.JobOperation) (is []op
 	}
 
 	// Loop through inputs
+	var is []openedInput
 	for _, pi := range o.Inputs {
 		// Retrieve opened input
 		i, ok := bd.inputs[pi.Name]
@@ -205,6 +179,7 @@ func (bd *buildData) operationInputsOutputs(o astiencoder.JobOperation) (is []op
 	}
 
 	// Loop through outputs
+	var os []openedOutput
 	for _, po := range o.Outputs {
 		// Retrieve opened output
 		o, ok := bd.outputs[po.Name]
@@ -215,6 +190,14 @@ func (bd *buildData) operationInputsOutputs(o astiencoder.JobOperation) (is []op
 
 		// Append output
 		os = append(os, o)
+	}
+
+	// Switch on operation type
+	switch o.Type {
+	case astiencoder.JobOperationTypeRemux:
+		err = b.addRemuxOperation(name, o, bd, is, os)
+	default:
+		err = b.addDefaultOperation(name, o, bd, is, os)
 	}
 	return
 }

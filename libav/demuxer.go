@@ -121,7 +121,7 @@ func (d *Demuxer) handlePkt(pkt *avcodec.Packet, r *astisync.Regulator) {
 	p := r.NewProcess()
 
 	// Add subprocesses
-	p.AddSubprocesses(len(hs), nil)
+	p.AddSubprocesses(len(hs))
 
 	// Loop through handlers
 	for _, h := range hs {

@@ -1,13 +1,16 @@
 package astilibav
 
-import "github.com/asticode/goav/avcodec"
+import (
+	"github.com/asticode/goav/avcodec"
+	"github.com/asticode/goav/avutil"
+)
+
+// FrameHandler represents an object that can handle a frame
+type FrameHandler interface {
+	HandleFrame(f *avutil.Frame)
+}
 
 // PktHandler represents an object that can handle a pkt
 type PktHandler interface {
 	HandlePkt(pkt *avcodec.Packet)
-}
-
-// PktWriter represents an object that can write a pkt to a specific path
-type PktWriter interface {
-	WritePkt(pkt *avcodec.Packet, path string)
 }

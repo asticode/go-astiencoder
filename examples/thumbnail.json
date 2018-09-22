@@ -6,11 +6,13 @@
   },
   "outputs": {
     "default": {
-      "url": "examples/tmp/thumbnail-{{ .idx }}.jpeg"
+      "type": "pkt_dump",
+      "url": "examples/tmp/{{.input}}-{{.stream_idx}}-{{.pts}}-{{.count}}.jpeg"
     }
   },
   "operations": {
     "default": {
+      "format": "jpeg",
       "frame_rate": 1,
       "inputs": [
         {
