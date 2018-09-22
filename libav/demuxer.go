@@ -48,8 +48,7 @@ func (d *Demuxer) Connect(i *avformat.Stream, h PktHandler) {
 	})
 
 	// Connect nodes
-	n := h.(astiencoder.Node)
-	astiencoder.ConnectNodes(d, n)
+	astiencoder.ConnectNodes(d, h.(astiencoder.Node))
 }
 
 // Start starts the demuxer

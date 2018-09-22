@@ -115,8 +115,7 @@ func (e *Encoder) Connect(h PktHandler) {
 	e.d.addHandler(h, nil)
 
 	// Connect nodes
-	n := h.(astiencoder.Node)
-	astiencoder.ConnectNodes(e, n)
+	astiencoder.ConnectNodes(e, h.(astiencoder.Node))
 }
 
 // Start starts the encoder
