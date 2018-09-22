@@ -28,10 +28,8 @@ type Demuxer struct {
 }
 
 type demuxerHandlerData struct {
-	h         DemuxHandler
-	inStream  *avformat.Stream
-	outStream *avformat.Stream
-	pkt       *avcodec.Packet
+	h   PktHandler
+	pkt *avcodec.Packet
 }
 
 // NewDemuxer creates a new demuxer
@@ -52,14 +50,8 @@ func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *ast
 	}
 }
 
-// DemuxHandler represents a demux handler
-// This method has to be blocking since, once it returns, the packet is unref
-type DemuxHandler interface {
-	HandlePkt(pkt *avcodec.Packet, inStream, outStream *avformat.Stream)
-}
-
-// Connect connects the demuxer to a DemuxHandler for a specific stream index
-func (d *Demuxer) Connect(i, o *avformat.Stream, h DemuxHandler) {
+// Connect connects the demuxer to a PktHandler for a specific stream index
+func (d *Demuxer) Connect(i *avformat.Stream, h PktHandler) {
 	// Lock
 	d.m.Lock()
 	defer d.m.Unlock()
@@ -73,10 +65,8 @@ func (d *Demuxer) Connect(i, o *avformat.Stream, h DemuxHandler) {
 
 	// Append handler
 	d.hs[i.Index()] = append(d.hs[i.Index()], demuxerHandlerData{
-		h:         h,
-		inStream:  i,
-		outStream: o,
-		pkt:       pkt,
+		h:   h,
+		pkt: pkt,
 	})
 
 	// Connect nodes
@@ -142,7 +132,7 @@ func (d *Demuxer) handlePkt(pkt *avcodec.Packet, r *astisync.Regulator) {
 		go func(h demuxerHandlerData) {
 			defer p.SubprocessIsDone()
 			defer h.pkt.AvPacketUnref()
-			h.h.HandlePkt(h.pkt, h.inStream, h.outStream)
+			h.h.HandlePkt(h.pkt)
 		}(h)
 	}
 

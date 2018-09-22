@@ -44,27 +44,6 @@ func NewMuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *astie
 	}
 }
 
-// AddStream adds a stream to the format ctx
-func (m *Muxer) AddStream() *avformat.Stream {
-	return m.ctxFormat.AvformatNewStream(nil)
-}
-
-// CloneStream clones a stream and add it to the format ctx
-func (m *Muxer) CloneStream(i *avformat.Stream) (o *avformat.Stream, err error) {
-	// Add stream
-	o = m.AddStream()
-
-	// Copy codec parameters
-	if ret := avcodec.AvcodecParametersCopy(o.CodecParameters(), i.CodecParameters()); ret < 0 {
-		err = errors.Wrapf(newAvError(ret), "astilibav: avcodec.AvcodecParametersCopy from %+v to %+v failed", i.CodecParameters(), o.CodecParameters())
-		return
-	}
-
-	// Reset codec tag as shown in https://github.com/FFmpeg/FFmpeg/blob/n4.0.2/doc/examples/remuxing.c#L122
-	o.CodecParameters().SetCodecTag(0)
-	return
-}
-
 // Start starts the muxer
 func (m *Muxer) Start(ctx context.Context, o astiencoder.WorkflowStartOptions, t astiencoder.CreateTaskFunc) {
 	m.BaseNode.Start(ctx, o, t, func(t *astiworker.Task) {
@@ -101,12 +80,7 @@ func (m *Muxer) Start(ctx context.Context, o astiencoder.WorkflowStartOptions, t
 	})
 }
 
-// MuxHandler represents a mux handler
-type MuxHandler interface {
-	HandlePkt(pkt *avcodec.Packet)
-}
-
-// HandlePkt implements the MuxHandler interface
+// HandlePkt implements the PktHandler interface
 func (m *Muxer) HandlePkt(pkt *avcodec.Packet) {
 	m.q.Send(pkt, true)
 }

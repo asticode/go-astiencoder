@@ -24,9 +24,11 @@ const (
 
 // JobOperation represents a job operation
 type JobOperation struct {
-	Inputs  []JobOperationInput  `json:"inputs"`
-	Outputs []JobOperationOutput `json:"outputs"`
-	Type    string               `json:"type"`
+	// Frame rate is a per-operation value since we may have different frame rate operations for a similar output
+	FrameRate float64              `json:"frame_rate"`
+	Inputs    []JobOperationInput  `json:"inputs"`
+	Outputs   []JobOperationOutput `json:"outputs"`
+	Type      string               `json:"type"`
 }
 
 // JobOperationInput represents a job operation input

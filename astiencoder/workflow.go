@@ -2,13 +2,23 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astiencoder/libav"
-	"github.com/asticode/go-astilog"
 	"github.com/asticode/goav/avformat"
 	"github.com/pkg/errors"
 )
+
+type nodePktHandler interface {
+	astiencoder.Node
+	astilibav.PktHandler
+}
+
+type nodePktWriter interface {
+	astiencoder.Node
+	astilibav.PktWriter
+}
 
 type builder struct{}
 
@@ -17,19 +27,38 @@ func newBuilder() *builder {
 }
 
 type openedInput struct {
+	c         astiencoder.JobInput
 	ctxFormat *avformat.Context
 	d         *astilibav.Demuxer
-	i         astiencoder.JobInput
+	name      string
 }
 
 type openedOutput struct {
+	c         astiencoder.JobOutput
 	ctxFormat *avformat.Context
-	m         *astilibav.Muxer
-	o         astiencoder.JobOutput
+	h         nodePktHandler
+	name      string
+}
+
+type buildData struct {
+	decoders map[*astilibav.Demuxer]map[*avformat.Stream]*astilibav.Decoder
+	inputs   map[string]openedInput
+	outputs  map[string]openedOutput
+	w        *astiencoder.Workflow
+}
+
+func newBuildData(w *astiencoder.Workflow) *buildData {
+	return &buildData{
+		decoders: make(map[*astilibav.Demuxer]map[*avformat.Stream]*astilibav.Decoder),
+		w:        w,
+	}
 }
 
 // BuildWorkflow implements the astiencoder.WorkflowBuilder interface
 func (b *builder) BuildWorkflow(j astiencoder.Job, w *astiencoder.Workflow) (err error) {
+	// Create build data
+	bd := newBuildData(w)
+
 	// Create opener
 	o := astilibav.NewOpener(w.Closer())
 
@@ -40,8 +69,7 @@ func (b *builder) BuildWorkflow(j astiencoder.Job, w *astiencoder.Workflow) (err
 	}
 
 	// Open inputs
-	var is map[string]openedInput
-	if is, err = b.openInputs(j, o, w.EmitEventFunc(), w.Closer()); err != nil {
+	if bd.inputs, err = b.openInputs(j, o, w.EmitEventFunc(), w.Closer()); err != nil {
 		err = errors.Wrap(err, "main: opening inputs failed")
 		return
 	}
@@ -53,8 +81,7 @@ func (b *builder) BuildWorkflow(j astiencoder.Job, w *astiencoder.Workflow) (err
 	}
 
 	// Open outputs
-	var os map[string]openedOutput
-	if os, err = b.openOutputs(j, o, w.EmitEventFunc(), w.Closer()); err != nil {
+	if bd.outputs, err = b.openOutputs(j, o, w.EmitEventFunc(), w.Closer()); err != nil {
 		err = errors.Wrap(err, "main: opening outputs failed")
 		return
 	}
@@ -68,7 +95,7 @@ func (b *builder) BuildWorkflow(j astiencoder.Job, w *astiencoder.Workflow) (err
 	// Loop through operations
 	for n, o := range j.Operations {
 		// Add operation to workflow
-		if err = b.addOperationToWorkflow(w, n, o, is, os); err != nil {
+		if err = b.addOperationToWorkflow(n, o, bd); err != nil {
 			err = errors.Wrapf(err, "main: adding operation %s with conf %+v to workflow failed", n, o)
 			return
 		}
@@ -79,19 +106,20 @@ func (b *builder) BuildWorkflow(j astiencoder.Job, w *astiencoder.Workflow) (err
 func (b *builder) openInputs(j astiencoder.Job, o *astilibav.Opener, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (is map[string]openedInput, err error) {
 	// Loop through inputs
 	is = make(map[string]openedInput)
-	for n, i := range j.Inputs {
+	for n, cfg := range j.Inputs {
 		// Open
 		var ctxFormat *avformat.Context
-		if ctxFormat, err = o.OpenInput(n, i); err != nil {
-			err = errors.Wrapf(err, "main: opening input %s with conf %+v failed", n, i)
+		if ctxFormat, err = o.OpenInput(n, cfg); err != nil {
+			err = errors.Wrapf(err, "main: opening input %s with conf %+v failed", n, cfg)
 			return
 		}
 
 		// Index
 		is[n] = openedInput{
+			c:         cfg,
 			ctxFormat: ctxFormat,
 			d:         astilibav.NewDemuxer(ctxFormat, e, c, 10),
-			i:         i,
+			name:      n,
 		}
 	}
 	return
@@ -100,25 +128,57 @@ func (b *builder) openInputs(j astiencoder.Job, o *astilibav.Opener, e astiencod
 func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (os map[string]openedOutput, err error) {
 	// Loop through outputs
 	os = make(map[string]openedOutput)
-	for n, out := range j.Outputs {
-		// Open
-		var ctxFormat *avformat.Context
-		if ctxFormat, err = o.OpenOutput(n, out); err != nil {
-			err = errors.Wrapf(err, "main: opening output %s with conf %+v failed", n, out)
-			return
+	for n, cfg := range j.Outputs {
+		// Create output
+		oo := openedOutput{
+			c:    cfg,
+			name: n,
+		}
+
+		// Switch on extension
+		switch filepath.Ext(cfg.URL) {
+		case ".jpg", ".jpeg":
+			// Create file writer
+			if oo.h, err = newFileWriter(astilibav.NewFileWriter(e), cfg.URL, e); err != nil {
+				err = errors.Wrapf(err, "main: creating snapshot writer for output %s with conf %+v failed", n, cfg)
+				return
+			}
+		default:
+			// Open
+			if oo.ctxFormat, err = o.OpenOutput(n, cfg); err != nil {
+				err = errors.Wrapf(err, "main: opening output %s with conf %+v failed", n, cfg)
+				return
+			}
+
+			// Create muxer
+			oo.h = astilibav.NewMuxer(oo.ctxFormat, e, c)
 		}
 
 		// Index
-		os[n] = openedOutput{
-			ctxFormat: ctxFormat,
-			m:         astilibav.NewMuxer(ctxFormat, e, c),
-			o:         out,
-		}
+		os[n] = oo
 	}
 	return
 }
 
-func (b *builder) addOperationToWorkflow(w *astiencoder.Workflow, name string, o astiencoder.JobOperation, ois map[string]openedInput, oos map[string]openedOutput) (err error) {
+func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation, bd *buildData) (err error) {
+	// Get inputs and outputs
+	var ois []openedInput
+	var oos []openedOutput
+	if ois, oos, err = bd.operationInputsOutputs(o); err != nil {
+		return
+	}
+
+	// Switch on operation type
+	switch o.Type {
+	case astiencoder.JobOperationTypeRemux:
+		err = b.addRemuxToWorkflow(name, o, bd, ois, oos)
+	default:
+		err = b.addEncodeToWorkflow(name, o, bd, ois, oos)
+	}
+	return
+}
+
+func (bd *buildData) operationInputsOutputs(o astiencoder.JobOperation) (is []openedInput, os []openedOutput, err error) {
 	// No inputs
 	if len(o.Inputs) == 0 {
 		err = errors.New("main: no operation inputs provided")
@@ -126,10 +186,9 @@ func (b *builder) addOperationToWorkflow(w *astiencoder.Workflow, name string, o
 	}
 
 	// Loop through inputs
-	var is []openedInput
 	for _, pi := range o.Inputs {
 		// Retrieve opened input
-		i, ok := ois[pi.Name]
+		i, ok := bd.inputs[pi.Name]
 		if !ok {
 			err = fmt.Errorf("main: opened input %s not found", pi.Name)
 			return
@@ -146,10 +205,9 @@ func (b *builder) addOperationToWorkflow(w *astiencoder.Workflow, name string, o
 	}
 
 	// Loop through outputs
-	var os []openedOutput
 	for _, po := range o.Outputs {
 		// Retrieve opened output
-		o, ok := oos[po.Name]
+		o, ok := bd.outputs[po.Name]
 		if !ok {
 			err = fmt.Errorf("main: opened output %s not found", po.Name)
 			return
@@ -157,14 +215,6 @@ func (b *builder) addOperationToWorkflow(w *astiencoder.Workflow, name string, o
 
 		// Append output
 		os = append(os, o)
-	}
-
-	// Switch on operation type
-	switch o.Type {
-	case astiencoder.JobOperationTypeRemux:
-		err = b.addRemuxToWorkflow(w, is, os)
-	default:
-		astilog.Warnf("main: unhandled job operation type %s", o.Type)
 	}
 	return
 }

@@ -6,11 +6,12 @@
   },
   "outputs": {
     "default": {
-      "url": "examples/tmp/remux.ts"
+      "url": "examples/tmp/thumbnail-{{ .idx }}.jpeg"
     }
   },
   "operations": {
     "default": {
+      "frame_rate": 1,
       "inputs": [
         {
           "name": "default"
@@ -20,8 +21,7 @@
         {
           "name": "default"
         }
-      ],
-      "type": "remux"
+      ]
     }
   }
 }
