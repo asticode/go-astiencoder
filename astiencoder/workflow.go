@@ -204,15 +204,15 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 				return
 			}
 
+			// Create options
+			oo := b.operationOptions(is, o)
+
 			// TODO Add scale + pix_fmt + timebase + pixel_aspect
 			// TODO Add interpolate
 
-			// Create encoder options
-			eo := b.createEncoderOptions(is, o)
-
 			// Create encoder
 			var e *astilibav.Encoder
-			if e, err = astilibav.NewEncoderFromOptions(eo, bd.w.EmitEventFunc(), bd.w.Closer(), 10); err != nil {
+			if e, err = astilibav.NewEncoderFromOptions(oo.encoderOptions(), bd.w.EmitEventFunc(), bd.w.Closer(), 10); err != nil {
 				err = errors.Wrapf(err, "main: creating encoder for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
 				return
 			}
@@ -304,6 +304,77 @@ func (b *builder) createTransmuxers(i operationInput, oos []operationOutput, is 
 	return
 }
 
+type operationOptions struct {
+	codecID     avcodec.CodecId
+	codecName   string
+	codecType   avcodec.MediaType
+	frameRate   avutil.Rational
+	height      int
+	pixelFormat avutil.PixelFormat
+	timeBase    avutil.Rational
+	width       int
+}
+
+func (b *builder) operationOptions(s *avformat.Stream, o astiencoder.JobOperation) (oo operationOptions) {
+	// Create options
+	oo = operationOptions{
+		codecID:   s.CodecParameters().CodecId(),
+		codecName: o.Codec,
+		codecType: s.CodecParameters().CodecType(),
+	}
+
+	// Get stream codec context
+	ctxCodec := (*avcodec.Context)(unsafe.Pointer(s.Codec()))
+
+	// Set frame rate
+	oo.frameRate = s.AvgFrameRate()
+	if o.FrameRate != nil {
+		oo.frameRate = avutil.NewRational(o.FrameRate.Num, o.FrameRate.Den)
+	}
+
+	// Set time base
+	oo.timeBase = s.TimeBase()
+	if o.TimeBase != nil {
+		oo.timeBase = avutil.NewRational(o.TimeBase.Num, o.TimeBase.Den)
+	} else if o.FrameRate != nil {
+		oo.timeBase = avutil.NewRational(o.FrameRate.Den, o.FrameRate.Num)
+	}
+
+	// Set pixel format
+	oo.pixelFormat = ctxCodec.PixFmt()
+	if len(o.PixelFormat) > 0 {
+		oo.pixelFormat = avutil.PixelFormatFromString(o.PixelFormat)
+	} else if o.Codec == "mjpeg" {
+		oo.pixelFormat = avutil.AV_PIX_FMT_YUVJ420P
+	}
+
+	// Set height
+	oo.height = ctxCodec.Height()
+	if o.Height != nil {
+		oo.height = *o.Height
+	}
+
+	// Set width
+	oo.width = ctxCodec.Width()
+	if o.Width != nil {
+		oo.width = *o.Width
+	}
+	return
+}
+
+func (oo operationOptions) encoderOptions() astilibav.EncoderOptions {
+	return astilibav.EncoderOptions{
+		CodecID:     oo.codecID,
+		CodecName:   oo.codecName,
+		CodecType:   oo.codecType,
+		FrameRate:   oo.frameRate,
+		Height:      oo.height,
+		PixelFormat: oo.pixelFormat,
+		TimeBase:    oo.timeBase,
+		Width:       oo.width,
+	}
+}
+
 func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.Stream) (d *astilibav.Decoder, err error) {
 	// Get decoder
 	var okD, okS bool
@@ -326,53 +397,6 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 
 		// Index decoder
 		bd.decoders[i.o.d][is] = d
-	}
-	return
-}
-
-func (b *builder) createEncoderOptions(s *avformat.Stream, o astiencoder.JobOperation) (eo astilibav.EncoderOptions) {
-	// Create options
-	eo = astilibav.EncoderOptions{
-		CodecID:   s.CodecParameters().CodecId(),
-		CodecName: o.Codec,
-		CodecType: s.CodecParameters().CodecType(),
-	}
-
-	// Get stream codec context
-	ctxCodec := (*avcodec.Context)(unsafe.Pointer(s.Codec()))
-
-	// Set frame rate
-	eo.FrameRate = s.AvgFrameRate()
-	if o.FrameRate != nil {
-		eo.FrameRate = avutil.NewRational(o.FrameRate.Num, o.FrameRate.Den)
-	}
-
-	// Set time base
-	eo.TimeBase = s.TimeBase()
-	if o.TimeBase != nil {
-		eo.TimeBase = avutil.NewRational(o.TimeBase.Num, o.TimeBase.Den)
-	} else if o.FrameRate != nil {
-		eo.TimeBase = avutil.NewRational(o.FrameRate.Den, o.FrameRate.Num)
-	}
-
-	// Set pixel format
-	eo.PixelFormat = ctxCodec.PixFmt()
-	if len(o.PixelFormat) > 0 {
-		eo.PixelFormat = avutil.PixelFormatFromString(o.PixelFormat)
-	} else if o.Codec == "mjpeg" {
-		eo.PixelFormat = avutil.AV_PIX_FMT_YUVJ420P
-	}
-
-	// Set height
-	eo.Height = ctxCodec.Height()
-	if o.Height != nil {
-		eo.Height = *o.Height
-	}
-
-	// Set width
-	eo.Width = ctxCodec.Width()
-	if o.Width != nil {
-		eo.Width = *o.Width
 	}
 	return
 }
