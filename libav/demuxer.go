@@ -3,7 +3,6 @@ package astilibav
 import (
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiencoder"
@@ -19,17 +18,10 @@ var countDemuxer uint64
 // Demuxer represents an object capable of demuxing packets out of an input
 type Demuxer struct {
 	*astiencoder.BaseNode
-	c                   *astiencoder.Closer
 	ctxFormat           *avformat.Context
+	d                   *pktDispatcher
 	e                   astiencoder.EmitEventFunc
-	hs                  map[int][]demuxerHandlerData // Indexed by stream index
-	m                   *sync.Mutex
 	packetsBufferLength int
-}
-
-type demuxerHandlerData struct {
-	h   PktHandler
-	pkt *avcodec.Packet
 }
 
 // NewDemuxer creates a new demuxer
@@ -41,32 +33,18 @@ func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *ast
 			Label:       fmt.Sprintf("Demuxer #%d", count),
 			Name:        fmt.Sprintf("demuxer_%d", count),
 		}),
-		c:                   c,
 		ctxFormat:           ctxFormat,
+		d:                   newPktDispatcher(c),
 		e:                   e,
-		hs:                  make(map[int][]demuxerHandlerData),
 		packetsBufferLength: packetsBufferLength,
-		m:                   &sync.Mutex{},
 	}
 }
 
 // Connect connects the demuxer to a PktHandler for a specific stream index
 func (d *Demuxer) Connect(i *avformat.Stream, h PktHandler) {
-	// Lock
-	d.m.Lock()
-	defer d.m.Unlock()
-
-	// Create pkt
-	pkt := avcodec.AvPacketAlloc()
-	d.c.Add(func() error {
-		avcodec.AvPacketFree(pkt)
-		return nil
-	})
-
-	// Append handler
-	d.hs[i.Index()] = append(d.hs[i.Index()], demuxerHandlerData{
-		h:   h,
-		pkt: pkt,
+	// Add handler
+	d.d.addHandler(h, func(pkt *avcodec.Packet) bool {
+		return pkt.StreamIndex() == i.Index()
 	})
 
 	// Connect nodes
@@ -82,18 +60,17 @@ func (d *Demuxer) Start(ctx context.Context, o astiencoder.WorkflowStartOptions,
 		defer r.Wait()
 
 		// Loop
-		var pkt = &avcodec.Packet{}
 		for {
 			// Read frame
-			if ret := d.ctxFormat.AvReadFrame(pkt); ret < 0 {
+			if ret := d.ctxFormat.AvReadFrame(d.d.pkt); ret < 0 {
 				if ret != avutil.AVERROR_EOF {
 					emitAvError(d.e, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
 				}
 				return
 			}
 
-			// Handle packet
-			d.handlePkt(pkt, r)
+			// Dispatch pkt
+			d.d.dispatch(r)
 
 			// Check context
 			if d.Context().Err() != nil {
@@ -101,41 +78,4 @@ func (d *Demuxer) Start(ctx context.Context, o astiencoder.WorkflowStartOptions,
 			}
 		}
 	})
-}
-
-func (d *Demuxer) handlePkt(pkt *avcodec.Packet, r *astisync.Regulator) {
-	// Lock
-	d.m.Lock()
-	defer d.m.Unlock()
-
-	// Make sure the pkt is unref
-	defer pkt.AvPacketUnref()
-
-	// Retrieve handlers
-	hs, ok := d.hs[pkt.StreamIndex()]
-	if !ok {
-		return
-	}
-
-	// Create new process
-	p := r.NewProcess()
-
-	// Add subprocesses
-	p.AddSubprocesses(len(hs))
-
-	// Loop through handlers
-	for _, h := range hs {
-		// Copy pkt
-		h.pkt.AvPacketRef(pkt)
-
-		// Handle pkt
-		go func(h demuxerHandlerData) {
-			defer p.SubprocessIsDone()
-			defer h.pkt.AvPacketUnref()
-			h.h.HandlePkt(h.pkt)
-		}(h)
-	}
-
-	// Wait for one of the subprocess to be done
-	p.Wait()
 }

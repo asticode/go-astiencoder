@@ -1,5 +1,7 @@
 package astiencoder
 
+import "github.com/asticode/go-astitools/float"
+
 // Job represents a job
 type Job struct {
 	Inputs     map[string]JobInput     `json:"inputs"`
@@ -14,47 +16,50 @@ type JobInput struct {
 
 // Job output types
 const (
-	// The packet data is dumped directly somewhere without any mux
+	// The packet data is dumped directly to the url without any mux
 	JobOutputTypePktDump = "pkt_dump"
 )
 
 // JobOutput represents a job output
 type JobOutput struct {
-	// Default is "default". Possible values are "default" and "pkt_dump"
-	Type string `json:"type"`
+	// Possible values are "default" and "pkt_dump"
+	Type string `json:"type,omitempty"`
 	URL  string `json:"url"`
 }
 
-// Job operation formats
+// Job operation codecs
 const (
-	JobOperationFormatJpeg = "jpeg"
-)
-
-// Job operation types
-const (
-	JobOperationTypeRemux = "remux"
+	JobOperationCodecCopy = "copy"
 )
 
 // JobOperation represents a job operation
+// This can usually be compared to an encoding
+// We need to refrain from using a dict here as we want to parse each and every attribute in order to provide detailed
+// processing
 type JobOperation struct {
-	// Default is "auto". Possible values are "auto" and "jpeg"
-	Format string `json:"format"`
+	// Possible values are "copy" and all libav codec names.
+	Codec string `json:"codec,omitempty"`
 	// Frame rate is a per-operation value since we may have different frame rate operations for a similar output
-	FrameRate float64              `json:"frame_rate"`
-	Inputs    []JobOperationInput  `json:"inputs"`
-	Outputs   []JobOperationOutput `json:"outputs"`
-	// Default is "default". Possible values are "default" and "remux"
-	Type string `json:"type"`
+	FrameRate   *astifloat.Rational  `json:"frame_rate,omitempty"`
+	Height      *int                 `json:"height,omitempty"`
+	Inputs      []JobOperationInput  `json:"inputs"`
+	Outputs     []JobOperationOutput `json:"outputs"`
+	PixelFormat string               `json:"pixel_format,omitempty"`
+	// Since frame rate is a per-operation value, time base is as well
+	TimeBase *astifloat.Rational `json:"time_base,omitempty"`
+	Width    *int                `json:"width,omitempty"`
 }
 
 // JobOperationInput represents a job operation input
 type JobOperationInput struct {
-	Name string `json:"name"`
-	PID  string `json:"pid"`
+	// Possible values are "audio", "subtitle" and "video"
+	MediaType string `json:"media_type,omitempty"`
+	Name      string `json:"name"`
+	PID       *int   `json:"pid,omitempty"`
 }
 
 // JobOperationOutput represents a job operation output
 type JobOperationOutput struct {
 	Name string `json:"name"`
-	PID  string `json:"pid"`
+	PID  *int   `json:"pid,omitempty"`
 }

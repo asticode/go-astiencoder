@@ -6,13 +6,17 @@
   },
   "outputs": {
     "default": {
-      "url": "examples/tmp/remux.ts"
+      "type": "pkt_dump",
+      "url": "examples/tmp/{{.input}}-{{.stream_idx}}-{{.pts}}-{{.count}}.jpeg"
     }
   },
   "operations": {
     "default": {
+      "codec": "mjpeg",
+      "frame_rate": "1",
       "inputs": [
         {
+          "media_type": "video",
           "name": "default"
         }
       ],
@@ -20,8 +24,7 @@
         {
           "name": "default"
         }
-      ],
-      "type": "remux"
+      ]
     }
   }
 }

@@ -6,14 +6,12 @@
   },
   "outputs": {
     "default": {
-      "type": "pkt_dump",
-      "url": "examples/tmp/{{.input}}-{{.stream_idx}}-{{.pts}}-{{.count}}.jpeg"
+      "url": "examples/tmp/copy.ts"
     }
   },
   "operations": {
     "default": {
-      "format": "jpeg",
-      "frame_rate": 1,
+      "codec": "copy",
       "inputs": [
         {
           "name": "default"

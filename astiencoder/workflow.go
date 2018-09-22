@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"unsafe"
 
 	"github.com/asticode/goav/avcodec"
+	"github.com/asticode/goav/avutil"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astiencoder/libav"
@@ -21,14 +23,12 @@ type openedInput struct {
 	c         astiencoder.JobInput
 	ctxFormat *avformat.Context
 	d         *astilibav.Demuxer
-	name      string
 }
 
 type openedOutput struct {
 	c         astiencoder.JobOutput
 	ctxFormat *avformat.Context
 	h         nodePktHandler
-	name      string
 }
 
 type nodePktHandler interface {
@@ -115,7 +115,6 @@ func (b *builder) openInputs(j astiencoder.Job, o *astilibav.Opener, e astiencod
 			c:         cfg,
 			ctxFormat: ctxFormat,
 			d:         astilibav.NewDemuxer(ctxFormat, e, c, 10),
-			name:      n,
 		}
 	}
 	return
@@ -127,8 +126,7 @@ func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener, e astienco
 	for n, cfg := range j.Outputs {
 		// Create output
 		oo := openedOutput{
-			c:    cfg,
-			name: n,
+			c: cfg,
 		}
 
 		// Switch on type
@@ -153,35 +151,47 @@ func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener, e astienco
 	return
 }
 
+type operationInput struct {
+	c astiencoder.JobOperationInput
+	o openedInput
+}
+
+type operationOutput struct {
+	c astiencoder.JobOperationOutput
+	o openedOutput
+}
+
 func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation, bd *buildData) (err error) {
 	// Get operation inputs and outputs
-	var ois []openedInput
-	var oos []openedOutput
+	var ois []operationInput
+	var oos []operationOutput
 	if ois, oos, err = b.operationInputsOutputs(o, bd); err != nil {
 		err = errors.Wrapf(err, "main: getting inputs and outputs of operation %s failed", name)
 		return
 	}
 
-	// Get media type whitelist
-	w := b.operationMediaTypes(o)
-
 	// Loop through inputs
 	for _, i := range ois {
 		// Loop through streams
-		for _, is := range i.ctxFormat.Streams() {
-			// Only process some media types
-			if _, ok := w[is.CodecParameters().CodecType()]; !ok {
+		for _, is := range i.o.ctxFormat.Streams() {
+			// Only process a specific PID
+			if i.c.PID != nil && is.Id() != *i.c.PID {
+				continue
+			}
+
+			// Only process a specific media type
+			if t := avutil.MediaTypeFromString(i.c.MediaType); t > -1 && is.CodecParameters().CodecType() != avcodec.MediaType(t) {
 				continue
 			}
 
 			// Add demuxer as root node of the workflow
-			bd.w.AddChild(i.d)
+			bd.w.AddChild(i.o.d)
 
-			// In case of remux we only want to connect the demuxer to the muxer through a transmuxer
-			if o.Type == astiencoder.JobOperationTypeRemux {
+			// In case of copy we only want to connect the demuxer to the muxer through a transmuxer
+			if o.Codec == astiencoder.JobOperationCodecCopy {
 				// Create transmuxers
 				if err = b.createTransmuxers(i, oos, is); err != nil {
-					err = errors.Wrapf(err, "main: creating transmuxers for stream #%d of input %s failed", is.Index(), i.name)
+					err = errors.Wrapf(err, "main: creating transmuxers for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
 					return
 				}
 				continue
@@ -190,34 +200,42 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 			// Create decoder
 			var d *astilibav.Decoder
 			if d, err = b.createDecoder(bd, i, is); err != nil {
-				err = errors.Wrapf(err, "main: creating decoder for stream #%d of input %s failed", is.Index(), i.name)
+				err = errors.Wrapf(err, "main: creating decoder for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
 				return
 			}
 
-			_ = d
+			// Create encoder options
+			eo := b.createEncoderOptions(is, o)
 
-			// TODO Create encoder
+			// Create encoder
+			var e *astilibav.Encoder
+			if e, err = astilibav.NewEncoderFromOptions(eo, bd.w.EmitEventFunc(), bd.w.Closer(), 10); err != nil {
+				err = errors.Wrapf(err, "main: creating encoder for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
+				return
+			}
 
-			// TODO Connect decoder to encoder
+			// Connect decoder to encoder
+			d.Connect(e)
 
 			// Loop through outputs
 			for _, o := range oos {
 				// Create pkt dumper
-				if o.c.Type == astiencoder.JobOutputTypePktDump {
-					if o.h, err = astilibav.NewPktDumper(o.c.URL, astilibav.PktDumpFile, map[string]interface{}{"input": i.name}, bd.w.EmitEventFunc()); err != nil {
-						err = errors.Wrapf(err, "main: creating pkt dumper for output %s with conf %+v failed", o.name, o.c)
+				if o.o.c.Type == astiencoder.JobOutputTypePktDump {
+					if o.o.h, err = astilibav.NewPktDumper(o.o.c.URL, astilibav.PktDumpFile, map[string]interface{}{"input": i.c.Name}, bd.w.EmitEventFunc()); err != nil {
+						err = errors.Wrapf(err, "main: creating pkt dumper for output %s with conf %+v failed", o.c.Name, o.c)
 						return
 					}
 				}
 
-				// TODO Connect encoder to handler
+				// Connect encoder to handler
+				e.Connect(o.o.h)
 			}
 		}
 	}
 	return
 }
 
-func (b *builder) operationInputsOutputs(o astiencoder.JobOperation, bd *buildData) (is []openedInput, os []openedOutput, err error) {
+func (b *builder) operationInputsOutputs(o astiencoder.JobOperation, bd *buildData) (is []operationInput, os []operationOutput, err error) {
 	// No inputs
 	if len(o.Inputs) == 0 {
 		err = errors.New("main: no operation inputs provided")
@@ -234,7 +252,10 @@ func (b *builder) operationInputsOutputs(o astiencoder.JobOperation, bd *buildDa
 		}
 
 		// Append input
-		is = append(is, i)
+		is = append(is, operationInput{
+			c: pi,
+			o: i,
+		})
 	}
 
 	// No outputs
@@ -253,73 +274,102 @@ func (b *builder) operationInputsOutputs(o astiencoder.JobOperation, bd *buildDa
 		}
 
 		// Append output
-		os = append(os, o)
+		os = append(os, operationOutput{
+			c: po,
+			o: o,
+		})
 	}
 	return
 }
 
-func (b *builder) operationMediaTypes(o astiencoder.JobOperation) (w map[avcodec.MediaType]bool) {
-	switch {
-	case o.Format == astiencoder.JobOperationFormatJpeg:
-		w = map[avcodec.MediaType]bool{
-			avcodec.AVMEDIA_TYPE_VIDEO: true,
-		}
-	case o.Type == astiencoder.JobOperationTypeRemux:
-		w = map[avcodec.MediaType]bool{
-			avcodec.AVMEDIA_TYPE_AUDIO: true,
-			avcodec.AVMEDIA_TYPE_VIDEO: true,
-		}
-	default:
-		w = map[avcodec.MediaType]bool{
-			avcodec.AVMEDIA_TYPE_AUDIO:    true,
-			avcodec.AVMEDIA_TYPE_SUBTITLE: true,
-			avcodec.AVMEDIA_TYPE_VIDEO:    true,
-		}
-	}
-	return
-}
-
-func (b *builder) createTransmuxers(i openedInput, oos []openedOutput, is *avformat.Stream) (err error) {
+func (b *builder) createTransmuxers(i operationInput, oos []operationOutput, is *avformat.Stream) (err error) {
 	// Loop through outputs
 	for _, o := range oos {
 		// Clone stream
 		var os *avformat.Stream
-		if os, err = astilibav.CloneStream(is, o.ctxFormat); err != nil {
-			err = errors.Wrapf(err, "main: cloning stream %+v of %s failed", is, i.ctxFormat.Filename())
+		if os, err = astilibav.CloneStream(is, o.o.ctxFormat); err != nil {
+			err = errors.Wrapf(err, "main: cloning stream 0x%x(%d) of %s failed", is.Id(), is.Id(), i.c.Name)
 			return
 		}
 
 		// Create transmuxer
-		t := newTransmuxer(o.h, is, os)
+		t := newTransmuxer(o.o.h, is, os)
 
 		// Connect demuxer to transmuxer
-		i.d.Connect(is, t)
+		i.o.d.Connect(is, t)
 	}
 	return
 }
 
-func (b *builder) createDecoder(bd *buildData, i openedInput, is *avformat.Stream) (d *astilibav.Decoder, err error) {
+func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.Stream) (d *astilibav.Decoder, err error) {
 	// Get decoder
 	var okD, okS bool
-	if _, okD = bd.decoders[i.d]; okD {
-		d, okS = bd.decoders[i.d][is]
+	if _, okD = bd.decoders[i.o.d]; okD {
+		d, okS = bd.decoders[i.o.d][is]
 	} else {
-		bd.decoders[i.d] = make(map[*avformat.Stream]*astilibav.Decoder)
+		bd.decoders[i.o.d] = make(map[*avformat.Stream]*astilibav.Decoder)
 	}
 
 	// Decoder doesn't exist
 	if !okD || !okS {
 		// Create decoder
-		if d, err = astilibav.NewDecoder(is, bd.w.EmitEventFunc(), bd.w.Closer(), 1); err != nil {
-			err = errors.Wrapf(err, "main: creating decoder for stream #%d of %s failed", is.Index(), i.c.URL)
+		if d, err = astilibav.NewDecoderFromCodecParams(is.CodecParameters(), bd.w.EmitEventFunc(), bd.w.Closer(), 10); err != nil {
+			err = errors.Wrapf(err, "main: creating decoder for stream 0x%x(%d) of %s failed", is.Id(), is.Id(), i.c.Name)
 			return
 		}
 
 		// Connect demuxer to decoder
-		i.d.Connect(is, d)
+		i.o.d.Connect(is, d)
 
 		// Index decoder
-		bd.decoders[i.d][is] = d
+		bd.decoders[i.o.d][is] = d
+	}
+	return
+}
+
+func (b *builder) createEncoderOptions(s *avformat.Stream, o astiencoder.JobOperation) (eo astilibav.EncoderOptions) {
+	// Create options
+	eo = astilibav.EncoderOptions{
+		CodecID:   s.CodecParameters().CodecId(),
+		CodecName: o.Codec,
+		CodecType: s.CodecParameters().CodecType(),
+	}
+
+	// Get stream codec context
+	ctxCodec := (*avcodec.Context)(unsafe.Pointer(s.Codec()))
+
+	// Set frame rate
+	eo.FrameRate = s.AvgFrameRate()
+	if o.FrameRate != nil {
+		eo.FrameRate = avutil.NewRational(o.FrameRate.Num, o.FrameRate.Den)
+	}
+
+	// Set time base
+	eo.TimeBase = s.TimeBase()
+	if o.TimeBase != nil {
+		eo.TimeBase = avutil.NewRational(o.TimeBase.Num, o.TimeBase.Den)
+	} else if o.FrameRate != nil {
+		eo.TimeBase = avutil.NewRational(o.FrameRate.Den, o.FrameRate.Num)
+	}
+
+	// Set pixel format
+	eo.PixelFormat = ctxCodec.PixFmt()
+	if len(o.PixelFormat) > 0 {
+		eo.PixelFormat = avutil.PixelFormatFromString(o.PixelFormat)
+	} else if o.Codec == "mjpeg" {
+		eo.PixelFormat = avutil.AV_PIX_FMT_YUVJ420P
+	}
+
+	// Set height
+	eo.Height = ctxCodec.Height()
+	if o.Height != nil {
+		eo.Height = *o.Height
+	}
+
+	// Set width
+	eo.Width = ctxCodec.Width()
+	if o.Width != nil {
+		eo.Width = *o.Width
 	}
 	return
 }

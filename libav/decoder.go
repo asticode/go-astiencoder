@@ -3,14 +3,12 @@ package astilibav
 import (
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avcodec"
-	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
 	"github.com/pkg/errors"
 )
@@ -20,100 +18,75 @@ var countDecoder uint64
 // Decoder represents an object capable of decoding packets
 type Decoder struct {
 	*astiencoder.BaseNode
-	c                   *astiencoder.Closer
 	ctxCodec            *avcodec.Context
+	d                   *frameDispatcher
 	e                   astiencoder.EmitEventFunc
-	f                   *avutil.Frame
-	hs                  []decoderHandlerData
-	m                   *sync.Mutex
 	packetsBufferLength int
 	q                   *astisync.CtxQueue
-	s                   *avformat.Stream
-}
-
-type decoderHandlerData struct {
-	f *avutil.Frame
-	h FrameHandler
 }
 
 // NewDecoder creates a new decoder
-func NewDecoder(s *avformat.Stream, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (d *Decoder, err error) {
-	// Create decoder
+func NewDecoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) *Decoder {
 	count := atomic.AddUint64(&countDecoder, uint64(1))
-	d = &Decoder{
+	return &Decoder{
 		BaseNode: astiencoder.NewBaseNode(astiencoder.NodeMetadata{
 			Description: "Decodes",
 			Label:       fmt.Sprintf("Decoder #%d", count),
 			Name:        fmt.Sprintf("decoder_%d", count),
 		}),
-		c:                   c,
+		ctxCodec:            ctxCodec,
+		d:                   newFrameDispatcher(c, e),
 		e:                   e,
-		f:                   avutil.AvFrameAlloc(),
-		m:                   &sync.Mutex{},
 		packetsBufferLength: packetsBufferLength,
 		q:                   astisync.NewCtxQueue(),
-		s:                   s,
 	}
+}
 
-	// Make sure the frame is freed
-	c.Add(func() error {
-		avutil.AvFrameFree(d.f)
-		return nil
-	})
-
+// NewDecoderFromCodecParams creates a new decoder from codec params
+func NewDecoderFromCodecParams(codecParams *avcodec.CodecParameters, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (d *Decoder, err error) {
 	// Find decoder
 	var cdc *avcodec.Codec
-	if cdc = avcodec.AvcodecFindDecoder(s.CodecParameters().CodecId()); c == nil {
-		err = fmt.Errorf("astilibav: no decoder found for codec id %+v", s.CodecParameters().CodecId())
+	if cdc = avcodec.AvcodecFindDecoder(codecParams.CodecId()); cdc == nil {
+		err = fmt.Errorf("astilibav: no decoder found for codec id %+v", codecParams.CodecId())
 		return
 	}
 
 	// Alloc context
-	if d.ctxCodec = cdc.AvcodecAllocContext3(); d.ctxCodec == nil {
-		err = fmt.Errorf("astilibav: no context allocated for codec %+v", c)
+	var ctxCodec *avcodec.Context
+	if ctxCodec = cdc.AvcodecAllocContext3(); ctxCodec == nil {
+		err = fmt.Errorf("astilibav: no context allocated for codec %+v", cdc)
 		return
 	}
 
 	// Copy codec parameters
-	if ret := avcodec.AvcodecParametersToContext(d.ctxCodec, s.CodecParameters()); ret < 0 {
-		err = errors.Wrapf(newAvError(ret), "astilibav: avcodec.AvcodecParametersToContext on ctx %+v and codec params %+v failed", d.ctxCodec, s.CodecParameters())
+	if ret := avcodec.AvcodecParametersToContext(ctxCodec, codecParams); ret < 0 {
+		err = errors.Wrapf(newAvError(ret), "astilibav: avcodec.AvcodecParametersToContext on ctx %+v and codec params %+v failed", ctxCodec, codecParams)
 		return
 	}
 
 	// Open codec
-	if ret := d.ctxCodec.AvcodecOpen2(cdc, nil); ret < 0 {
-		err = errors.Wrapf(newAvError(ret), "astilibav: d.ctxCodec.AvcodecOpen2 on ctx %+v and codec %+v failed", d.ctxCodec, cdc)
+	if ret := ctxCodec.AvcodecOpen2(cdc, nil); ret < 0 {
+		err = errors.Wrapf(newAvError(ret), "astilibav: d.ctxCodec.AvcodecOpen2 on ctx %+v and codec %+v failed", ctxCodec, cdc)
 		return
 	}
 
 	// Make sure the codec is closed
 	c.Add(func() error {
-		if ret := d.ctxCodec.AvcodecClose(); ret < 0 {
-			emitAvError(e, ret, "d.ctxCodec.AvcodecClose on %+v failed", d.ctxCodec)
+		if ret := ctxCodec.AvcodecClose(); ret < 0 {
+			emitAvError(e, ret, "d.ctxCodec.AvcodecClose on %+v failed", ctxCodec)
 		}
 		return nil
 	})
+
+	// Create decoder
+	d = NewDecoder(ctxCodec, e, c, packetsBufferLength)
 	return
 }
 
 // Connect connects the decoder to a FrameHandler
 func (d *Decoder) Connect(h FrameHandler) {
-	// Lock
-	d.m.Lock()
-	defer d.m.Unlock()
-
-	// Create frame
-	f := avutil.AvFrameAlloc()
-	d.c.Add(func() error {
-		avutil.AvFrameFree(f)
-		return nil
-	})
-
-	// Append handler
-	d.hs = append(d.hs, decoderHandlerData{
-		f: f,
-		h: h,
-	})
+	// Add handler
+	d.d.addHandler(h)
 
 	// Connect nodes
 	n := h.(astiencoder.Node)
@@ -144,15 +117,15 @@ func (d *Decoder) Start(ctx context.Context, o astiencoder.WorkflowStartOptions,
 			// Loop
 			for {
 				// Receive frame
-				if ret := avcodec.AvcodecReceiveFrame(d.ctxCodec, d.f); ret < 0 {
+				if ret := avcodec.AvcodecReceiveFrame(d.ctxCodec, d.d.f); ret < 0 {
 					if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
 						emitAvError(d.e, ret, "avcodec.AvcodecReceiveFrame failed")
 					}
 					return
 				}
 
-				// Handle frame
-				d.handleFrame(r)
+				// Dispatch frame
+				d.d.dispatch(r)
 			}
 		})
 	})
@@ -161,36 +134,4 @@ func (d *Decoder) Start(ctx context.Context, o astiencoder.WorkflowStartOptions,
 // HandlePkt implements the PktHandler interface
 func (d *Decoder) HandlePkt(pkt *avcodec.Packet) {
 	d.q.Send(pkt, true)
-}
-
-func (d *Decoder) handleFrame(r *astisync.Regulator) {
-	// Lock
-	d.m.Lock()
-	defer d.m.Unlock()
-
-	// Create new process
-	p := r.NewProcess()
-
-	// Add subprocesses
-	p.AddSubprocesses(len(d.hs))
-
-	// Loop through handlers
-	for _, h := range d.hs {
-		// Copy frame
-		if ret := avutil.AvFrameRef(h.f, d.f); ret < 0 {
-			emitAvError(d.e, ret, "avutil.AvFrameRef of %+v to %+v failed", d.f, h.f)
-			p.SubprocessIsDone()
-			continue
-		}
-
-		// Handle frame
-		go func(h decoderHandlerData) {
-			defer p.SubprocessIsDone()
-			defer avutil.AvFrameUnref(h.f)
-			h.h.HandleFrame(h.f)
-		}(h)
-	}
-
-	// Wait for one of the subprocess to be done
-	p.Wait()
 }

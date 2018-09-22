@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/asticode/go-astilog"
 	"sync/atomic"
 	"text/template"
 
@@ -19,7 +20,7 @@ var countPktDumper uint64
 // PktDumper represents an object capable of dumping packets
 type PktDumper struct {
 	*astiencoder.BaseNode
-	count   uint64
+	count   uint32
 	data    map[string]interface{}
 	e       astiencoder.EmitEventFunc
 	fn      PktDumpFunc
@@ -68,7 +69,7 @@ func (d *PktDumper) Start(ctx context.Context, o astiencoder.WorkflowStartOption
 			pkt := p.(*avcodec.Packet)
 
 			// Increment count
-			c := atomic.AddUint64(&d.count, 1)
+			c := atomic.AddUint32(&d.count, 1)
 
 			// Create data
 			d.data["count"] = c
@@ -96,5 +97,6 @@ func (d *PktDumper) HandlePkt(pkt *avcodec.Packet) {
 // PktDumpFunc is a PktDumpFunc that dumps the packet to a file
 var PktDumpFile = func(pkt *avcodec.Packet, pattern string) {
 	// TODO Write to file
+	astilog.Warnf("writing pkt to %s", pattern)
 	// http://www.cplusplus.com/reference/cstdio/fwrite/
 }
