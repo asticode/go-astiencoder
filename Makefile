@@ -17,6 +17,6 @@ install-ffmpeg:
 	mkdir -p vendor_c/src
 	git clone https://github.com/FFmpeg/FFmpeg vendor_c/src/ffmpeg
 	cd vendor_c/src/ffmpeg && git checkout n4.0.2
-	cd vendor_c/src/ffmpeg && ./configure --prefix=../..
+	cd vendor_c/src/ffmpeg && ./configure --prefix=../.. $(configure)
 	cd vendor_c/src/ffmpeg && make
 	cd vendor_c/src/ffmpeg && make install
