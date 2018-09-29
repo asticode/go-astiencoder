@@ -8,7 +8,7 @@ type Configuration struct {
 
 // ConfigurationExec represents an exec configuration
 type ConfigurationExec struct {
-	StopWhenWorkflowsAreDone bool `toml:"stop_when_workflows_are_done"`
+	StopWhenWorkflowsAreStopped bool `toml:"stop_when_workflows_are_stopped"`
 }
 
 // ConfigurationServer represents a server configuration

@@ -73,22 +73,14 @@ func (w *Workflow) Start() {
 			Payload: w.name,
 		})
 
-		// Workflow is done only when:
-		//  - root ctx has been cancelled
-		//  - ctx has not been cancelled
+		// Close the workflow only when:
+		//  - root ctx has been cancelled (user has requested to stop the workflow)
+		//  - ctx has not been cancelled (children have all stopped even though the user has not requested to stop the workflow)
 		if w.rootCtx.Err() != nil || w.Context().Err() == nil {
 			// Close
 			astilog.Debugf("astiencoder: closing workflow %s", w.name)
 			if err := w.c.Close(); err != nil {
 				w.e(EventError(errors.Wrapf(err, "astiencoder: closing workflow %s failed", w.name)))
-			}
-
-			// Send event
-			if w.rootCtx.Err() == nil {
-				w.e(Event{
-					Name:    EventNameWorkflowDone,
-					Payload: w.name,
-				})
 			}
 		}
 	})

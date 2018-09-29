@@ -86,9 +86,6 @@ let menu = {
     },
     websocketFunc: function(eventName, payload) {
         switch (eventName) {
-            case "workflow.done":
-                this.updateToggle(payload, "stopped")
-                break
             case "workflow.started":
                 this.updateToggle(payload, "started")
                 break

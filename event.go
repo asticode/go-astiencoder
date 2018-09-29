@@ -11,7 +11,6 @@ var (
 	EventNameError           = "error"
 	EventNameNodeStarted     = "node.started"
 	EventNameNodeStopped     = "node.stopped"
-	EventNameWorkflowDone    = "workflow.done"
 	EventNameWorkflowStarted = "workflow.started"
 	EventNameWorkflowStopped = "workflow.stopped"
 )
@@ -43,8 +42,6 @@ var LoggerHandleEventFunc = func() (isBlocking bool, fn func(e Event)) {
 			astilog.Debugf("astiencoder: node %s is started", e.Payload.(string))
 		case EventNameNodeStopped:
 			astilog.Debugf("astiencoder: node %s is stopped", e.Payload.(string))
-		case EventNameWorkflowDone:
-			astilog.Debugf("astiencoder: workflow %s is done", e.Payload.(string))
 		case EventNameWorkflowStarted:
 			astilog.Debugf("astiencoder: workflow %s is started", e.Payload.(string))
 		case EventNameWorkflowStopped:

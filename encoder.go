@@ -11,14 +11,14 @@ import (
 
 // Encoder represents an encoder
 type Encoder struct {
-	b      WorkflowBuilder
-	cfg    *Configuration
-	e      *exposer
-	ee     *eventEmitter
-	m      *sync.Mutex
-	w      *astiworker.Worker
-	ws     map[string]*Workflow
-	wsDone map[string]bool
+	b         WorkflowBuilder
+	cfg       *Configuration
+	e         *exposer
+	ee        *eventEmitter
+	m         *sync.Mutex
+	w         *astiworker.Worker
+	ws        map[string]*Workflow
+	wsStarted map[string]bool
 }
 
 // WorkflowBuilder represents an object that can build a workflow based on a job
@@ -31,12 +31,12 @@ func NewEncoder(cfg *Configuration) (e *Encoder) {
 	aw := astiworker.NewWorker()
 	ee := newEventEmitter()
 	e = &Encoder{
-		cfg:    cfg,
-		ee:     ee,
-		m:      &sync.Mutex{},
-		w:      aw,
-		ws:     make(map[string]*Workflow),
-		wsDone: make(map[string]bool),
+		cfg:       cfg,
+		ee:        ee,
+		m:         &sync.Mutex{},
+		w:         aw,
+		ws:        make(map[string]*Workflow),
+		wsStarted: make(map[string]bool),
 	}
 	e.e = newExposer(e)
 	ee.addHandler(e.handleEvent)
@@ -124,14 +124,18 @@ func (e *Encoder) NewWorkflow(name string, j Job) (w *Workflow, err error) {
 func (e *Encoder) handleEvent() (bool, func(Event)) {
 	return false, func(evt Event) {
 		switch evt.Name {
-		case EventNameWorkflowDone:
+		case EventNameWorkflowStarted:
 			e.m.Lock()
 			defer e.m.Unlock()
 			if _, ok := e.ws[evt.Payload.(string)]; !ok {
 				return
 			}
-			e.wsDone[evt.Payload.(string)] = true
-			if e.cfg.Exec.StopWhenWorkflowsAreDone && len(e.ws) == len(e.wsDone) {
+			e.wsStarted[evt.Payload.(string)] = true
+		case EventNameWorkflowStopped:
+			e.m.Lock()
+			defer e.m.Unlock()
+			delete(e.wsStarted, evt.Payload.(string))
+			if e.cfg.Exec.StopWhenWorkflowsAreStopped && len(e.wsStarted) == 0 {
 				e.Stop()
 			}
 		}
