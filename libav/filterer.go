@@ -33,7 +33,7 @@ func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Grap
 	// Create filterer
 	count := atomic.AddUint64(&countFilterer, uint64(1))
 	return &Filterer{
-		BaseNode: astiencoder.NewBaseNode(astiencoder.NodeMetadata{
+		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
 			Description: "Filters",
 			Label:       fmt.Sprintf("Filterer #%d", count),
 			Name:        fmt.Sprintf("filterer_%d", count),
@@ -143,14 +143,17 @@ func (f *Filterer) Connect(h FrameHandler) {
 }
 
 // Start starts the filterer
-func (f *Filterer) Start(ctx context.Context, o astiencoder.WorkflowStartOptions, t astiencoder.CreateTaskFunc) {
-	f.BaseNode.Start(ctx, o, t, func(t *astiworker.Task) {
+func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
+	f.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
 		// Handle context
 		go f.q.HandleCtx(f.Context())
 
 		// Create regulator
 		r := astisync.NewRegulator(f.Context(), f.packetsBufferLength)
 		defer r.Wait()
+
+		// Make sure to stop the queue properly
+		defer f.q.Stop()
 
 		// Start queue
 		f.q.Start(func(p interface{}) {

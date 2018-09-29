@@ -86,7 +86,7 @@ func main() {
 		c.Encoder.Exec.StopWhenWorkflowsAreDone = true
 
 		// Start workflow
-		w.Start(astiencoder.WorkflowStartOptions{StopWhenNodesAreDone: true})
+		w.Start()
 	}
 
 	// Wait

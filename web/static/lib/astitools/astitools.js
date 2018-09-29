@@ -55,4 +55,62 @@ asticode.tools = {
             rootSelector.append(data.html.wrapper);
         }
     },
+    removeClass: function(node, name) {
+        // Get class name funcs
+        let classNameFuncs = this.classNameFuncs(node)
+
+        // No class name funcs
+        if (!classNameFuncs) return
+
+        // Remove
+        let names = classNameFuncs[0]().split(" ")
+        for (let idx = 0; idx < names.length; idx++) {
+            if (names[idx] === name) {
+                names.splice(idx, 1)
+                idx--
+            }
+        }
+
+        // Set class name
+        classNameFuncs[1](names.join(" "))
+    },
+    addClass: function(node, name) {
+        // Get class name funcs
+        let classNameFuncs = this.classNameFuncs(node)
+
+        // No class name funcs
+        if (!classNameFuncs) return
+
+        // Set class name
+        classNameFuncs[1](classNameFuncs[0]() + " " + name)
+    },
+    classNameFuncs: function(node) {
+        switch (typeof node.className) {
+            case "string":
+                return [
+                    function() {
+                        return node.className
+                    },
+                    function(name) {
+                        node.className = name
+                    },
+                ]
+            case "object":
+                switch (node.className.constructor.name) {
+                    case "SVGAnimatedString":
+                        return [
+                            function() {
+                                return node.className.baseVal
+                            },
+                            function(name) {
+                                node.className.baseVal = name
+                            }
+                        ]
+                    default:
+                        return false
+                }
+            default:
+                return false
+        }
+    }
 }

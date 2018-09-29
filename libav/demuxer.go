@@ -28,7 +28,7 @@ type Demuxer struct {
 func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) *Demuxer {
 	count := atomic.AddUint64(&countDemuxer, uint64(1))
 	return &Demuxer{
-		BaseNode: astiencoder.NewBaseNode(astiencoder.NodeMetadata{
+		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
 			Description: fmt.Sprintf("Demuxes %s", ctxFormat.Filename()),
 			Label:       fmt.Sprintf("Demuxer #%d", count),
 			Name:        fmt.Sprintf("demuxer_%d", count),
@@ -52,8 +52,8 @@ func (d *Demuxer) Connect(i *avformat.Stream, h PktHandler) {
 }
 
 // Start starts the demuxer
-func (d *Demuxer) Start(ctx context.Context, o astiencoder.WorkflowStartOptions, t astiencoder.CreateTaskFunc) {
-	d.BaseNode.Start(ctx, o, t, func(t *astiworker.Task) {
+func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
+	d.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
 		// Create regulator
 		r := astisync.NewRegulator(d.Context(), d.packetsBufferLength)
 		defer r.Wait()

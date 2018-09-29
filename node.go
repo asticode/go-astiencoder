@@ -32,21 +32,29 @@ type NodeMetadata struct {
 // NodeChild represents an object with parent nodes
 type NodeChild interface {
 	AddParent(n Node)
-	ParentIsDone(m NodeMetadata)
+	ParentIsStarted(m NodeMetadata)
+	ParentIsStopped(m NodeMetadata)
 	Parents() []Node
 }
 
 // NodeParent represents an object with child nodes
 type NodeParent interface {
 	AddChild(n Node)
-	ChildIsDone(m NodeMetadata)
+	ChildIsStarted(m NodeMetadata)
+	ChildIsStopped(m NodeMetadata)
 	Children() []Node
 }
 
+// Node statuses
+const (
+	NodeStatusStarted = "started"
+	NodeStatusStopped = "stopped"
+)
+
 // Starter represents an object that can start/stop
 type Starter interface {
-	IsStopped() bool
-	Start(ctx context.Context, o WorkflowStartOptions, t CreateTaskFunc)
+	Start(ctx context.Context, t CreateTaskFunc)
+	Status() string
 	Stop()
 }
 
@@ -58,30 +66,31 @@ func ConnectNodes(parent, child Node) {
 
 // BaseNode represents a base node
 type BaseNode struct {
-	cancel       context.CancelFunc
-	children     map[string]Node
-	childrenDone map[string]bool
-	ctx          context.Context
-	m            *sync.Mutex
-	md           NodeMetadata
-	o            WorkflowStartOptions
-	oStart       *sync.Once
-	oStop        *sync.Once
-	parents      map[string]Node
-	parentsDone  map[string]bool
+	cancel          context.CancelFunc
+	children        map[string]Node
+	childrenStarted map[string]bool
+	ctx             context.Context
+	e               EmitEventFunc
+	m               *sync.Mutex
+	md              NodeMetadata
+	oStart          *sync.Once
+	oStop           *sync.Once
+	parents         map[string]Node
+	parentsStarted  map[string]bool
 }
 
 // NewBaseNode creates a new base node
-func NewBaseNode(m NodeMetadata) *BaseNode {
+func NewBaseNode(e EmitEventFunc, m NodeMetadata) *BaseNode {
 	return &BaseNode{
-		children:     make(map[string]Node),
-		childrenDone: make(map[string]bool),
-		m:            &sync.Mutex{},
-		md:           m,
-		oStart:       &sync.Once{},
-		oStop:        &sync.Once{},
-		parents:      make(map[string]Node),
-		parentsDone:  make(map[string]bool),
+		children:        make(map[string]Node),
+		childrenStarted: make(map[string]bool),
+		m:               &sync.Mutex{},
+		e:               e,
+		md:              m,
+		oStart:          &sync.Once{},
+		oStop:           &sync.Once{},
+		parents:         make(map[string]Node),
+		parentsStarted:  make(map[string]bool),
 	}
 }
 
@@ -99,18 +108,19 @@ type BaseNodeStartFunc func()
 // BaseNodeExecFunc represents a node exec func
 type BaseNodeExecFunc func(t *astiworker.Task)
 
-// IsStopped implements the Starter interface
-func (n *BaseNode) IsStopped() bool {
-	return n.Context() == nil || n.Context().Err() != nil
+// Status implements the Starter interface
+func (n *BaseNode) Status() string {
+	if n.Context() != nil && n.Context().Err() == nil {
+		return NodeStatusStarted
+	} else {
+		return NodeStatusStopped
+	}
 }
 
 // Start starts the node
-func (n *BaseNode) Start(ctx context.Context, o WorkflowStartOptions, tc CreateTaskFunc, execFunc BaseNodeExecFunc) {
+func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNodeExecFunc) {
 	// Make sure the node can only be started once
 	n.oStart.Do(func() {
-		// Store options
-		n.o = o
-
 		// Check context
 		if ctx.Err() != nil {
 			return
@@ -125,26 +135,55 @@ func (n *BaseNode) Start(ctx context.Context, o WorkflowStartOptions, tc CreateT
 		// Reset once
 		n.oStop = &sync.Once{}
 
+		// Loop through children
+		for _, c := range n.Children() {
+			c.ParentIsStarted(n.md)
+		}
+
+		// Loop through parents
+		for _, p := range n.Parents() {
+			p.ChildIsStarted(n.md)
+		}
+
+		// Send event
+		if n.e != nil {
+			n.e(Event{
+				Name:    EventNameNodeStarted,
+				Payload: n.md.Name,
+			})
+		}
+
 		// Execute the rest in a goroutine
 		go func() {
 			// Task is done
 			defer t.Done()
+
+			// Send event
+			if n.e != nil {
+				defer n.e(Event{
+					Name:    EventNameNodeStopped,
+					Payload: n.md.Name,
+				})
+			}
+
+			// Let children and parents know the node is stopped
+			defer func() {
+				// Loop through children
+				for _, c := range n.Children() {
+					c.ParentIsStopped(n.md)
+				}
+
+				// Loop through parents
+				for _, p := range n.Parents() {
+					p.ChildIsStopped(n.md)
+				}
+			}()
 
 			// Make sure the node is stopped properly
 			defer n.Stop()
 
 			// Exec func
 			execFunc(t)
-
-			// Loop through children
-			for _, c := range n.Children() {
-				c.ParentIsDone(n.md)
-			}
-
-			// Loop through parents
-			for _, p := range n.Parents() {
-				p.ChildIsDone(n.md)
-			}
 		}()
 	})
 }
@@ -173,15 +212,25 @@ func (n *BaseNode) AddChild(i Node) {
 	n.children[i.Metadata().Name] = i
 }
 
-// ChildIsDone implements the NodeParent interface
-func (n *BaseNode) ChildIsDone(m NodeMetadata) {
+// ChildIsStarted implements the NodeParent interface
+func (n *BaseNode) ChildIsStarted(m NodeMetadata) {
 	n.m.Lock()
 	defer n.m.Unlock()
 	if _, ok := n.children[m.Name]; !ok {
 		return
 	}
-	n.childrenDone[m.Name] = true
-	if n.o.StopWhenNodesAreDone && len(n.childrenDone) == len(n.children) {
+	n.childrenStarted[m.Name] = true
+}
+
+// ChildIsStopped implements the NodeParent interface
+func (n *BaseNode) ChildIsStopped(m NodeMetadata) {
+	n.m.Lock()
+	defer n.m.Unlock()
+	if _, ok := n.children[m.Name]; !ok {
+		return
+	}
+	delete(n.childrenStarted, m.Name)
+	if len(n.childrenStarted) == 0 {
 		n.Stop()
 	}
 }
@@ -211,15 +260,25 @@ func (n *BaseNode) AddParent(i Node) {
 	n.parents[i.Metadata().Name] = i
 }
 
-// ParentIsDone implements the NodeChild interface
-func (n *BaseNode) ParentIsDone(m NodeMetadata) {
+// ParentIsStarted implements the NodeChild interface
+func (n *BaseNode) ParentIsStarted(m NodeMetadata) {
 	n.m.Lock()
 	defer n.m.Unlock()
 	if _, ok := n.parents[m.Name]; !ok {
 		return
 	}
-	n.parentsDone[m.Name] = true
-	if n.o.StopWhenNodesAreDone && len(n.parentsDone) == len(n.parents) {
+	n.parentsStarted[m.Name] = true
+}
+
+// ParentIsStopped implements the NodeChild interface
+func (n *BaseNode) ParentIsStopped(m NodeMetadata) {
+	n.m.Lock()
+	defer n.m.Unlock()
+	if _, ok := n.parents[m.Name]; !ok {
+		return
+	}
+	delete(n.parentsStarted, m.Name)
+	if len(n.parentsStarted) == 0 {
 		n.Stop()
 	}
 }

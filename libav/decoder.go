@@ -29,7 +29,7 @@ type Decoder struct {
 func NewDecoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) *Decoder {
 	count := atomic.AddUint64(&countDecoder, uint64(1))
 	return &Decoder{
-		BaseNode: astiencoder.NewBaseNode(astiencoder.NodeMetadata{
+		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
 			Description: "Decodes",
 			Label:       fmt.Sprintf("Decoder #%d", count),
 			Name:        fmt.Sprintf("decoder_%d", count),
@@ -93,14 +93,17 @@ func (d *Decoder) Connect(h FrameHandler) {
 }
 
 // Start starts the decoder
-func (d *Decoder) Start(ctx context.Context, o astiencoder.WorkflowStartOptions, t astiencoder.CreateTaskFunc) {
-	d.BaseNode.Start(ctx, o, t, func(t *astiworker.Task) {
+func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
+	d.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
 		// Handle context
 		go d.q.HandleCtx(d.Context())
 
 		// Create regulator
 		r := astisync.NewRegulator(d.Context(), d.packetsBufferLength)
 		defer r.Wait()
+
+		// Make sure to stop the queue properly
+		defer d.q.Stop()
 
 		// Start queue
 		d.q.Start(func(p interface{}) {

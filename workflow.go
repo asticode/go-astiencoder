@@ -24,18 +24,18 @@ type Workflow struct {
 
 func newWorkflow(name string, j Job, rootCtx context.Context, e EmitEventFunc, t CreateTaskFunc, c *Closer) *Workflow {
 	return &Workflow{
-		BaseNode: NewBaseNode(NodeMetadata{
+		BaseNode: NewBaseNode(nil, NodeMetadata{
 			Description: "root",
 			Label:       "root",
 			Name:        "root",
 		}),
-		c:        c,
-		e:        e,
-		j:        j,
-		m:        &sync.Mutex{},
-		name:     name,
-		rootCtx:  rootCtx,
-		t:        t,
+		c:       c,
+		e:       e,
+		j:       j,
+		m:       &sync.Mutex{},
+		name:    name,
+		rootCtx: rootCtx,
+		t:       t,
 	}
 }
 
@@ -49,22 +49,29 @@ func (w *Workflow) EmitEventFunc() EmitEventFunc {
 	return w.e
 }
 
-// WorkflowStartOptions represents workflow start options
-type WorkflowStartOptions struct {
-	StopWhenNodesAreDone bool
-}
-
 // Start starts the workflow
-func (w *Workflow) Start(o WorkflowStartOptions) {
-	w.BaseNode.Start(w.rootCtx, WorkflowStartOptions{}, w.t, func(t *astiworker.Task) {
+func (w *Workflow) Start() {
+	w.BaseNode.Start(w.rootCtx, w.t, func(t *astiworker.Task) {
 		// Log
 		astilog.Debugf("astiencoder: starting workflow %s", w.name)
 
 		// Start nodes
-		w.startNodes(w.Children(), o, t.NewSubTask)
+		w.startNodes(w.Children(), t.NewSubTask)
+
+		// Send event
+		w.e(Event{
+			Name:    EventNameWorkflowStarted,
+			Payload: w.name,
+		})
 
 		// Wait for task to be done
 		t.Wait()
+
+		// Send event
+		w.e(Event{
+			Name:    EventNameWorkflowStopped,
+			Payload: w.name,
+		})
 
 		// Workflow is done only when:
 		//  - root ctx has been cancelled
@@ -87,14 +94,14 @@ func (w *Workflow) Start(o WorkflowStartOptions) {
 	})
 }
 
-func (w *Workflow) startNodes(ns []Node, o WorkflowStartOptions, t CreateTaskFunc) {
+func (w *Workflow) startNodes(ns []Node, t CreateTaskFunc) {
 	// Loop through nodes
 	for _, n := range ns {
 		// Start node
-		n.Start(w.Context(), o, t)
+		n.Start(w.Context(), t)
 
 		// Start children nodes
-		w.startNodes(n.Children(), o, t)
+		w.startNodes(n.Children(), t)
 	}
 }
 

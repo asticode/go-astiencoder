@@ -8,8 +8,12 @@ import (
 
 // Default event names
 var (
-	EventNameError        = "error"
-	EventNameWorkflowDone = "workflow.done"
+	EventNameError           = "error"
+	EventNameNodeStarted     = "node.started"
+	EventNameNodeStopped     = "node.stopped"
+	EventNameWorkflowDone    = "workflow.done"
+	EventNameWorkflowStarted = "workflow.started"
+	EventNameWorkflowStopped = "workflow.stopped"
 )
 
 // Event is an event coming out of the encoder
@@ -35,8 +39,16 @@ var LoggerHandleEventFunc = func() (isBlocking bool, fn func(e Event)) {
 		switch e.Name {
 		case EventNameError:
 			astilog.Error(e.Payload.(error))
+		case EventNameNodeStarted:
+			astilog.Debugf("astiencoder: node %s is started", e.Payload.(string))
+		case EventNameNodeStopped:
+			astilog.Debugf("astiencoder: node %s is stopped", e.Payload.(string))
 		case EventNameWorkflowDone:
 			astilog.Debugf("astiencoder: workflow %s is done", e.Payload.(string))
+		case EventNameWorkflowStarted:
+			astilog.Debugf("astiencoder: workflow %s is started", e.Payload.(string))
+		case EventNameWorkflowStopped:
+			astilog.Debugf("astiencoder: workflow %s is stopped", e.Payload.(string))
 		}
 	}
 }

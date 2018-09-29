@@ -12,7 +12,7 @@ However, this project could be useful to you if you want to:
 
 - integrate your video encoder in a GO ecosystem
 - visualize your encoding workflow and statuses/stats of nodes in real time
-- communicate with the encoder through a web socket to tweak behaviours in real time
+- communicate with the encoder through an HTTP API + websocket to tweak behaviours in real time
 - build your own video encoder and take control of its workflow
 
 # How do I install this project?

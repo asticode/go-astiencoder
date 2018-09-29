@@ -31,7 +31,7 @@ type Muxer struct {
 func NewMuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer) *Muxer {
 	count := atomic.AddUint64(&countMuxer, uint64(1))
 	return &Muxer{
-		BaseNode: astiencoder.NewBaseNode(astiencoder.NodeMetadata{
+		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
 			Description: fmt.Sprintf("Muxes to %s", ctxFormat.Filename()),
 			Label:       fmt.Sprintf("Muxer #%d", count),
 			Name:        fmt.Sprintf("muxer_%d", count),
@@ -45,8 +45,8 @@ func NewMuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *astie
 }
 
 // Start starts the muxer
-func (m *Muxer) Start(ctx context.Context, o astiencoder.WorkflowStartOptions, t astiencoder.CreateTaskFunc) {
-	m.BaseNode.Start(ctx, o, t, func(t *astiworker.Task) {
+func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
+	m.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
 		// Handle context
 		go m.q.HandleCtx(m.Context())
 
@@ -65,6 +65,9 @@ func (m *Muxer) Start(ctx context.Context, o astiencoder.WorkflowStartOptions, t
 			}
 			return nil
 		})
+
+		// Make sure to stop the queue properly
+		defer m.q.Stop()
 
 		// Start queue
 		m.q.Start(func(p interface{}) {

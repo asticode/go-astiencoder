@@ -37,7 +37,7 @@ func testJob(t *testing.T, jobPath string, assertPaths func(j astiencoder.Job) m
 	}
 
 	// Start workflow
-	w.Start(astiencoder.WorkflowStartOptions{StopWhenNodesAreDone: true})
+	w.Start()
 
 	// Wait
 	e.Wait()

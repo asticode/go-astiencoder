@@ -39,7 +39,7 @@ func NewPktDumper(pattern string, fn PktDumpFunc, data map[string]interface{}, e
 	// Create pkt dumper
 	count := atomic.AddUint64(&countPktDumper, uint64(1))
 	d = &PktDumper{
-		BaseNode: astiencoder.NewBaseNode(astiencoder.NodeMetadata{
+		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
 			Description: "Dump packets",
 			Label:       fmt.Sprintf("Pkt dumper #%d", count),
 			Name:        fmt.Sprintf("pkt_dumper_%d", count),
@@ -60,10 +60,13 @@ func NewPktDumper(pattern string, fn PktDumpFunc, data map[string]interface{}, e
 }
 
 // Start starts the pkt dumper
-func (d *PktDumper) Start(ctx context.Context, o astiencoder.WorkflowStartOptions, t astiencoder.CreateTaskFunc) {
-	d.BaseNode.Start(ctx, o, t, func(t *astiworker.Task) {
+func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
+	d.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
 		// Handle context
 		go d.q.HandleCtx(d.Context())
+
+		// Make sure to stop the queue properly
+		defer d.q.Stop()
 
 		// Start queue
 		d.q.Start(func(p interface{}) {

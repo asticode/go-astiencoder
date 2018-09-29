@@ -1,5 +1,7 @@
 package astiencoder
 
+import "fmt"
+
 type exposer struct {
 	e *Encoder
 }
@@ -57,14 +59,14 @@ func (w *ExposedWorkflow) parseNode(p Node) {
 
 // ExposedWorkflowBase represents a base exposed encoder workflow
 type ExposedWorkflowBase struct {
-	IsStopped bool   `json:"is_stopped"`
-	Name      string `json:"name"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
 }
 
 func newExposedWorkflowBase(w *Workflow) ExposedWorkflowBase {
 	return ExposedWorkflowBase{
-		IsStopped: w.IsStopped(),
-		Name:      w.name,
+		Name:   w.name,
+		Status: w.Status(),
 	}
 }
 
@@ -84,17 +86,17 @@ func newExposedWorkflowEdge(parent, child Node) ExposedWorkflowEdge {
 // ExposedWorkflowNode represents an exposed workflow node
 type ExposedWorkflowNode struct {
 	Description string `json:"description"`
-	IsStopped   bool `json:"is_stopped"`
 	Label       string `json:"label"`
 	Name        string `json:"name"`
+	Status      string `json:"status"`
 }
 
 func newExposedWorkflowNode(n Node) ExposedWorkflowNode {
 	return ExposedWorkflowNode{
 		Description: n.Metadata().Description,
-		IsStopped:   n.IsStopped(),
 		Label:       n.Metadata().Label,
 		Name:        n.Metadata().Name,
+		Status:      n.Status(),
 	}
 }
 
@@ -124,5 +126,29 @@ func (e *exposer) workflow(name string) (ew ExposedWorkflow, ok bool) {
 		return
 	}
 	ew = newExposedWorkflow(w)
+	return
+}
+
+func (e *exposer) startWorkflow(name string) (err error) {
+	e.e.m.Lock()
+	defer e.e.m.Unlock()
+	w, ok := e.e.ws[name]
+	if !ok {
+		err = fmt.Errorf("astiencoder: workflow %s doesn't exist", name)
+		return
+	}
+	w.Start()
+	return
+}
+
+func (e *exposer) stopWorkflow(name string) (err error) {
+	e.e.m.Lock()
+	defer e.e.m.Unlock()
+	w, ok := e.e.ws[name]
+	if !ok {
+		err = fmt.Errorf("astiencoder: workflow %s doesn't exist", name)
+		return
+	}
+	w.Stop()
 	return
 }

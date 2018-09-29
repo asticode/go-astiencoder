@@ -1,6 +1,6 @@
 const page = {
     init: function(name) {
-        base.init(null, function() {
+        base.init(this.websocketFunc, function() {
             asticode.tools.sendHttp({
                 method: "GET",
                 url: "/api/workflows/" + name,
@@ -26,7 +26,7 @@ const page = {
         // Add nodes
         for (let idx = 0; idx < data.nodes.length; idx++) {
             desc += "    " + data.nodes[idx].name + "(" + data.nodes[idx].label + ")\n"
-            desc += "    class " + data.nodes[idx].name + " " + (data.nodes[idx].is_stopped ? "stopped" : "started") + ";"
+            desc += "    class " + data.nodes[idx].name + " " + data.nodes[idx].status + ";"
         }
 
         // Add edges
@@ -42,5 +42,21 @@ const page = {
     },
     initJob: function(data) {
         document.getElementById("job").innerText = JSON.stringify(data.job, null, 4)
+    },
+    websocketFunc: function(eventName, payload) {
+        switch (eventName) {
+            case "node.started":
+            case "node.stopped":
+                // Get node
+                const node = document.getElementById(payload)
+
+                // Node doesn't exist
+                if (typeof node === "undefined") return
+
+                // Update class
+                asticode.tools.removeClass(node, eventName === "node.started" ? "stopped" : "started")
+                asticode.tools.addClass(node, eventName === "node.started" ? "started" : "stopped")
+                break;
+        }
     },
 }

@@ -23,9 +23,11 @@ const base = {
                     pingPeriod: data.responseJSON.ws_ping_period,
                     offline: function() { asticode.notifier.error("Encoder is offline") },
                     message: function (eventName, payload) {
-                        // TODO Handle menu events
+                        // Handle menu events
+                        menu.websocketFunc(eventName, payload)
 
-                        if (typeof websocketFunc !== "undefined" && websocketFunc !== null) websocketFunc(data.event_name, data.payload)
+                        // Custom function
+                        if (typeof websocketFunc !== "undefined" && websocketFunc !== null) websocketFunc(eventName, payload)
                     },
                     open: function() {
                         asticode.tools.sendHttp({
@@ -89,7 +91,10 @@ const base = {
     },
     initButtonStopEncoder: function() {
         document.getElementById("btn-encoder-stop").onclick = function() {
-            asticode.tools.sendHttp("/api/encoder/stop", "GET")
+            asticode.tools.sendHttp({
+                method: "GET",
+                url: "/api/encoder/stop",
+            })
         }
     },
     defaultHttpError: function(data) {

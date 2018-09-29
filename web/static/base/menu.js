@@ -46,8 +46,8 @@ let menu = {
         // Init
         let r = {
             html: {},
-            is_stopped: data.is_stopped,
             name: data.name,
+            status: data.status,
         }
 
         // Create wrapper
@@ -68,16 +68,47 @@ let menu = {
 
         // Create toggle
         r.html.toggle = document.createElement("label")
-        r.html.toggle.className = "toggle " + (data.is_stopped ? "off": "on")
-        r.html.toggle.onclick = function() {
-            // TODO Handle toggle click
-        }
+        r.html.toggle.className = "toggle " + (data.status === "started" ? "on": "off")
         toggleCell.appendChild(r.html.toggle)
 
         // Create slider
         const slider = document.createElement("span")
         slider.className = "slider"
+        slider.onclick = function() {
+            asticode.tools.sendHttp({
+                method: "GET",
+                url: "/api/workflows/" + data.name + "/" + (menu.workflows.pool[data.name].status === "started" ? "stop" : "start"),
+                error: base.defaultHttpError,
+            })
+        }
         r.html.toggle.appendChild(slider)
         return r
+    },
+    websocketFunc: function(eventName, payload) {
+        switch (eventName) {
+            case "workflow.done":
+                this.updateToggle(payload, "stopped")
+                break
+            case "workflow.started":
+                this.updateToggle(payload, "started")
+                break
+            case "workflow.stopped":
+                this.updateToggle(payload, "stopped")
+                break
+        }
+    },
+    updateToggle: function(name, status) {
+        // Fetch workflow
+        const workflow = this.workflows.pool[name];
+
+        // Workflow doesn't exist
+        if (typeof workflow === "undefined") return
+
+        // Update class
+        asticode.tools.removeClass(workflow.html.toggle, status === "started" ? "off" : "on")
+        asticode.tools.addClass(workflow.html.toggle, status === "started" ? "on" : "off")
+
+        // Update attribute
+        workflow.status = status
     },
 }

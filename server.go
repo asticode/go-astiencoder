@@ -18,11 +18,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Websocket event names
-const (
-	websocketEventNamePing = "ping"
-)
-
 type server struct {
 	c ConfigurationServer
 	e *exposer
@@ -65,6 +60,8 @@ func (s *server) handler() http.Handler {
 	r.GET("/api/encoder/stop", s.handleEncoderStop())
 	r.POST("/api/workflows", s.handleAddWorkflow())
 	r.GET("/api/workflows/:name", s.handleWorkflow())
+	r.GET("/api/workflows/:name/start", s.handleWorkflowStart())
+	r.GET("/api/workflows/:name/stop", s.handleWorkflowStop())
 
 	// Chain middlewares
 	var h = astihttp.ChainMiddlewares(r, astihttp.MiddlewareBasicAuth(s.c.Username, s.c.Password))
@@ -236,6 +233,26 @@ func (s *server) handleWorkflow() httprouter.Handle {
 	}
 }
 
+func (s *server) handleWorkflowStart() httprouter.Handle {
+	return func(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		// Start workflow
+		if err := s.e.startWorkflow(p.ByName("name")); err != nil {
+			s.writeJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: starting workflow %s failed", p.ByName("name")))
+			return
+		}
+	}
+}
+
+func (s *server) handleWorkflowStop() httprouter.Handle {
+	return func(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		// Stop workflow
+		if err := s.e.stopWorkflow(p.ByName("name")); err != nil {
+			s.writeJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: stopping workflow %s failed", p.ByName("name")))
+			return
+		}
+	}
+}
+
 func (s *server) handleWebsocket() httprouter.Handle {
 	return func(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		if err := s.m.ServeHTTP(rw, r, s.adaptWebsocketClient); err != nil {
@@ -246,6 +263,10 @@ func (s *server) handleWebsocket() httprouter.Handle {
 		}
 	}
 }
+
+const (
+	websocketEventNamePing = "ping"
+)
 
 func (s *server) adaptWebsocketClient(c *astiws.Client) {
 	// Register client
@@ -270,6 +291,20 @@ func (s *server) handleWebsocketPing(c *astiws.Client, eventName string, payload
 
 func (s *server) handleEvent() (isBlocking bool, fn func(e Event)) {
 	return false, func(e Event) {
-		// TODO Do stuff with the event
+		switch e.Name {
+		case EventNameError:
+			s.sendEventToWebsocket(e.Name, errors.Cause(e.Payload.(error)))
+		default:
+			s.sendEventToWebsocket(e.Name, e.Payload)
+		}
 	}
+}
+
+func (s *server) sendEventToWebsocket(eventName string, payload interface{}) {
+	s.m.Loop(func(_ interface{}, c *astiws.Client) {
+		if err := c.Write(eventName, payload); err != nil {
+			astilog.Error(errors.Wrapf(err, "astiencoder: writing event %s with payload %+v to websocket client %p failed", eventName, payload, c))
+			return
+		}
+	})
 }
