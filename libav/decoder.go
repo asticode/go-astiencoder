@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
+
+	"github.com/asticode/go-astitools/stat"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astitools/sync"
@@ -18,28 +21,53 @@ var countDecoder uint64
 // Decoder represents an object capable of decoding packets
 type Decoder struct {
 	*astiencoder.BaseNode
-	ctxCodec            *avcodec.Context
-	d                   *frameDispatcher
-	e                   astiencoder.EmitEventFunc
-	packetsBufferLength int
-	q                   *astisync.CtxQueue
+	ctxCodec        *avcodec.Context
+	d               *frameDispatcher
+	e               astiencoder.EmitEventFunc
+	q               *astisync.CtxQueue
+	r               *astisync.Regulator
+	statsFrameCount uint32
 }
 
 // NewDecoder creates a new decoder
-func NewDecoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) *Decoder {
+func NewDecoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (d *Decoder) {
 	count := atomic.AddUint64(&countDecoder, uint64(1))
-	return &Decoder{
+	d = &Decoder{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
 			Description: "Decodes",
 			Label:       fmt.Sprintf("Decoder #%d", count),
 			Name:        fmt.Sprintf("decoder_%d", count),
 		}),
-		ctxCodec:            ctxCodec,
-		d:                   newFrameDispatcher(c, e),
-		e:                   e,
-		packetsBufferLength: packetsBufferLength,
-		q:                   astisync.NewCtxQueue(),
+		ctxCodec: ctxCodec,
+		d:        newFrameDispatcher(c, e),
+		e:        e,
+		q:        astisync.NewCtxQueue(),
+		r:        astisync.NewRegulator(packetsBufferLength),
 	}
+	d.addStats()
+	return
+}
+
+func (d *Decoder) addStats() {
+	// Add frames per second
+	d.Stater().AddStat(astistat.StatMetadata{
+		Description: "Number of frames decoded per second",
+		Label:       "Frames per second",
+		Unit:        "fps",
+	}, func(delta time.Duration) interface{} {
+		return float64(atomic.SwapUint32(&d.statsFrameCount, 0)) / float64(delta) * float64(time.Second)
+	}, func() {
+		atomic.StoreUint32(&d.statsFrameCount, 0)
+	})
+
+	// Add dispatcher stats
+	d.d.addStats(d.Stater())
+
+	// Add queue stats
+	d.q.AddStats(d.Stater())
+
+	// Add regulator stats
+	d.r.AddStats(d.Stater())
 }
 
 // NewDecoderFromCodecParams creates a new decoder from codec params
@@ -98,9 +126,9 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Handle context
 		go d.q.HandleCtx(d.Context())
 
-		// Create regulator
-		r := astisync.NewRegulator(d.Context(), d.packetsBufferLength)
-		defer r.Wait()
+		// Set up regulator
+		d.r.HandleCtx(d.Context())
+		defer d.r.Wait()
 
 		// Make sure to stop the queue properly
 		defer d.q.Stop()
@@ -126,8 +154,11 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 					return
 				}
 
+				// Increment frame count
+				atomic.AddUint32(&d.statsFrameCount, 1)
+
 				// Dispatch frame
-				d.d.dispatch(r)
+				d.d.dispatch(d.r)
 			}
 		})
 	})

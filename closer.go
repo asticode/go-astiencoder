@@ -2,6 +2,7 @@ package astiencoder
 
 import (
 	"sync"
+
 	"github.com/asticode/go-astitools/error"
 )
 

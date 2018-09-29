@@ -21,11 +21,19 @@ const page = {
     },
     initNetwork: function(data) {
         // Create graph description
-        let desc = "graph LR\n"
+        let desc = "graph TB\n"
 
         // Add nodes
         for (let idx = 0; idx < data.nodes.length; idx++) {
-            desc += "    " + data.nodes[idx].name + "(" + data.nodes[idx].label + ")\n"
+            let stats = ""
+            if (data.nodes[idx].stats.length > 0) {
+                stats += "<br><br><table>"
+                for (let idxStat = 0; idxStat < data.nodes[idx].stats.length; idxStat++) {
+                    stats += "<tr><td>" + data.nodes[idx].stats[idxStat].label + ":</td><td><span></span>" + data.nodes[idx].stats[idxStat].unit + "</td>"
+                }
+                stats += "</table>"
+            }
+            desc += "    " + data.nodes[idx].name + "(\"" + data.nodes[idx].label + stats + "\")\n"
             desc += "    class " + data.nodes[idx].name + " " + data.nodes[idx].status + ";"
         }
 
@@ -56,7 +64,32 @@ const page = {
                 // Update class
                 asticode.tools.removeClass(node, eventName === "node.started" ? "stopped" : "started")
                 asticode.tools.addClass(node, eventName === "node.started" ? "started" : "stopped")
-                break;
+                break
+            case "stats":
+                // Get element
+                const el = document.getElementById(payload.name)
+
+                // Element doesn't exist
+                if (typeof el === "undefined") return
+
+                // Get lines
+                const trs = el.querySelectorAll("tr")
+
+                // Loop through stats
+                for (let idx = 0; idx < payload.stats.length; idx ++) {
+                    // Line doesn't exist
+                    if (trs.length <= idx) break
+
+                    // Get rows
+                    const tds = trs[idx].querySelectorAll("td")
+
+                    // Not enough rows
+                    if (tds.length < 2) continue
+
+                    // Set value
+                    tds[1].querySelector("span").innerText = payload.stats[idx].value.toFixed(2)
+                }
+                break
         }
     },
 }

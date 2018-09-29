@@ -176,3 +176,15 @@ input[type="text"]:focus {
     fill:#5cb85c;
     stroke:#5cb85c;
 }
+
+#content .network svg table {
+    text-align: left;
+}
+
+#content .network svg table td:first-child {
+    padding-right: 4px;
+}
+
+#content .network svg table td:last-child {
+    min-width: 80px;
+}

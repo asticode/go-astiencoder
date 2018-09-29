@@ -2,8 +2,9 @@ package astiencoder
 
 import (
 	"testing"
-	"github.com/stretchr/testify/assert"
+
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 )
 
 type mockedEventHandler struct {

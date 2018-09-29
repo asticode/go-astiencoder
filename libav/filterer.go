@@ -19,13 +19,13 @@ var countFilterer uint64
 // Filterer represents an object capable of applying a filter to frames
 type Filterer struct {
 	*astiencoder.BaseNode
-	bufferSinkCtx       *avfilter.Context
-	bufferSrcCtx        *avfilter.Context
-	d                   *frameDispatcher
-	e                   astiencoder.EmitEventFunc
-	g                   *avfilter.Graph
-	packetsBufferLength int
-	q                   *astisync.CtxQueue
+	bufferSinkCtx *avfilter.Context
+	bufferSrcCtx  *avfilter.Context
+	d             *frameDispatcher
+	e             astiencoder.EmitEventFunc
+	g             *avfilter.Graph
+	q             *astisync.CtxQueue
+	r             *astisync.Regulator
 }
 
 // NewFilterer creates a new filterer
@@ -38,13 +38,13 @@ func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Grap
 			Label:       fmt.Sprintf("Filterer #%d", count),
 			Name:        fmt.Sprintf("filterer_%d", count),
 		}),
-		bufferSinkCtx:       bufferSinkCtx,
-		bufferSrcCtx:        bufferSrcCtx,
-		d:                   newFrameDispatcher(c, e),
-		e:                   e,
-		g:                   g,
-		packetsBufferLength: packetsBufferLength,
-		q:                   astisync.NewCtxQueue(),
+		bufferSinkCtx: bufferSinkCtx,
+		bufferSrcCtx:  bufferSrcCtx,
+		d:             newFrameDispatcher(c, e),
+		e:             e,
+		g:             g,
+		q:             astisync.NewCtxQueue(),
+		r:             astisync.NewRegulator(packetsBufferLength),
 	}
 }
 
@@ -148,9 +148,9 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Handle context
 		go f.q.HandleCtx(f.Context())
 
-		// Create regulator
-		r := astisync.NewRegulator(f.Context(), f.packetsBufferLength)
-		defer r.Wait()
+		// Set up regulator
+		f.r.HandleCtx(f.Context())
+		defer f.r.Wait()
 
 		// Make sure to stop the queue properly
 		defer f.q.Stop()
@@ -177,7 +177,7 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 				}
 
 				// Dispatch frame
-				f.d.dispatch(r)
+				f.d.dispatch(f.r)
 			}
 		})
 	})

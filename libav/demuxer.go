@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avcodec"
@@ -18,26 +20,48 @@ var countDemuxer uint64
 // Demuxer represents an object capable of demuxing packets out of an input
 type Demuxer struct {
 	*astiencoder.BaseNode
-	ctxFormat           *avformat.Context
-	d                   *pktDispatcher
-	e                   astiencoder.EmitEventFunc
-	packetsBufferLength int
+	ctxFormat        *avformat.Context
+	d                *pktDispatcher
+	e                astiencoder.EmitEventFunc
+	r                *astisync.Regulator
+	statsPacketCount uint32
 }
 
 // NewDemuxer creates a new demuxer
-func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) *Demuxer {
+func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (d *Demuxer) {
 	count := atomic.AddUint64(&countDemuxer, uint64(1))
-	return &Demuxer{
+	d = &Demuxer{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
 			Description: fmt.Sprintf("Demuxes %s", ctxFormat.Filename()),
 			Label:       fmt.Sprintf("Demuxer #%d", count),
 			Name:        fmt.Sprintf("demuxer_%d", count),
 		}),
-		ctxFormat:           ctxFormat,
-		d:                   newPktDispatcher(c),
-		e:                   e,
-		packetsBufferLength: packetsBufferLength,
+		ctxFormat: ctxFormat,
+		d:         newPktDispatcher(c),
+		e:         e,
+		r:         astisync.NewRegulator(packetsBufferLength),
 	}
+	d.addStats()
+	return
+}
+
+func (d *Demuxer) addStats() {
+	// Add packets per second
+	d.Stater().AddStat(astistat.StatMetadata{
+		Description: "Number of packets read per second",
+		Label:       "Packets per second",
+		Unit:        "pps",
+	}, func(delta time.Duration) interface{} {
+		return float64(atomic.SwapUint32(&d.statsPacketCount, 0)) / float64(delta) * float64(time.Second)
+	}, func() {
+		atomic.StoreUint32(&d.statsPacketCount, 0)
+	})
+
+	// Add dispatcher stats
+	d.d.addStats(d.Stater())
+
+	// Add regulator stats
+	d.r.AddStats(d.Stater())
 }
 
 // Connect connects the demuxer to a PktHandler for a specific stream index
@@ -54,9 +78,9 @@ func (d *Demuxer) Connect(i *avformat.Stream, h PktHandler) {
 // Start starts the demuxer
 func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	d.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
-		// Create regulator
-		r := astisync.NewRegulator(d.Context(), d.packetsBufferLength)
-		defer r.Wait()
+		// Set up regulator
+		d.r.HandleCtx(d.Context())
+		defer d.r.Wait()
 
 		// Loop
 		for {
@@ -68,8 +92,11 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 				return
 			}
 
+			// Increment packet count
+			atomic.AddUint32(&d.statsPacketCount, 1)
+
 			// Dispatch pkt
-			d.d.dispatch(r)
+			d.d.dispatch(d.r)
 
 			// Check context
 			if d.Context().Err() != nil {

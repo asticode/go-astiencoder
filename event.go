@@ -11,6 +11,7 @@ var (
 	EventNameError           = "error"
 	EventNameNodeStarted     = "node.started"
 	EventNameNodeStopped     = "node.stopped"
+	EventNameStats           = "stats"
 	EventNameWorkflowStarted = "workflow.started"
 	EventNameWorkflowStopped = "workflow.stopped"
 )

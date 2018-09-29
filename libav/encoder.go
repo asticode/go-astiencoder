@@ -19,11 +19,11 @@ var countEncoder uint64
 // Encoder represents an object capable of encoding frames
 type Encoder struct {
 	*astiencoder.BaseNode
-	ctxCodec            *avcodec.Context
-	d                   *pktDispatcher
-	e                   astiencoder.EmitEventFunc
-	packetsBufferLength int
-	q                   *astisync.CtxQueue
+	ctxCodec *avcodec.Context
+	d        *pktDispatcher
+	e        astiencoder.EmitEventFunc
+	q        *astisync.CtxQueue
+	r        *astisync.Regulator
 }
 
 // NewEncoder creates a new encoder
@@ -35,11 +35,11 @@ func NewEncoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astie
 			Label:       fmt.Sprintf("Encoder #%d", count),
 			Name:        fmt.Sprintf("encoder_%d", count),
 		}),
-		ctxCodec:            ctxCodec,
-		d:                   newPktDispatcher(c),
-		e:                   e,
-		packetsBufferLength: packetsBufferLength,
-		q:                   astisync.NewCtxQueue(),
+		ctxCodec: ctxCodec,
+		d:        newPktDispatcher(c),
+		e:        e,
+		q:        astisync.NewCtxQueue(),
+		r:        astisync.NewRegulator(packetsBufferLength),
 	}
 }
 
@@ -124,11 +124,9 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Handle context
 		go e.q.HandleCtx(e.Context())
 
-		// TODO Add stats
-
-		// Create regulator
-		r := astisync.NewRegulator(e.Context(), e.packetsBufferLength)
-		defer r.Wait()
+		// Set up regulator
+		e.r.HandleCtx(e.Context())
+		defer e.r.Wait()
 
 		// Make sure to stop the queue properly
 		defer e.q.Stop()
@@ -155,7 +153,7 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 				}
 
 				// Dispatch pkt
-				e.d.dispatch(r)
+				e.d.dispatch(e.r)
 			}
 		})
 	})

@@ -85,19 +85,38 @@ func newExposedWorkflowEdge(parent, child Node) ExposedWorkflowEdge {
 
 // ExposedWorkflowNode represents an exposed workflow node
 type ExposedWorkflowNode struct {
-	Description string `json:"description"`
-	Label       string `json:"label"`
-	Name        string `json:"name"`
-	Status      string `json:"status"`
+	Description string                `json:"description"`
+	Label       string                `json:"label"`
+	Name        string                `json:"name"`
+	Stats       []ExposedStatMetadata `json:"stats"`
+	Status      string                `json:"status"`
 }
 
-func newExposedWorkflowNode(n Node) ExposedWorkflowNode {
-	return ExposedWorkflowNode{
+// ExposedStatMetadata represents exposed stat metadata
+type ExposedStatMetadata struct {
+	Description string `json:"description"`
+	Label       string `json:"label"`
+	Unit        string `json:"unit"`
+}
+
+func newExposedWorkflowNode(n Node) (w ExposedWorkflowNode) {
+	w = ExposedWorkflowNode{
 		Description: n.Metadata().Description,
 		Label:       n.Metadata().Label,
 		Name:        n.Metadata().Name,
+		Stats:       []ExposedStatMetadata{},
 		Status:      n.Status(),
 	}
+	if s := n.Stater(); s != nil {
+		for _, v := range s.StatsMetadata() {
+			w.Stats = append(w.Stats, ExposedStatMetadata{
+				Description: v.Description,
+				Label:       v.Label,
+				Unit:        v.Unit,
+			})
+		}
+	}
+	return
 }
 
 func (e *exposer) encoder() (o ExposedEncoder) {

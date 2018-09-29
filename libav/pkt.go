@@ -5,6 +5,7 @@ import (
 
 	"github.com/asticode/go-astiencoder"
 
+	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/goav/avcodec"
 )
@@ -15,10 +16,11 @@ type PktHandler interface {
 }
 
 type pktDispatcher struct {
-	c   *astiencoder.Closer
-	hs  []pktDispatcherHandler
-	m   *sync.Mutex
-	pkt *avcodec.Packet
+	c        *astiencoder.Closer
+	hs       []pktDispatcherHandler
+	m        *sync.Mutex
+	pkt      *avcodec.Packet
+	waitStat *astistat.WaitStat
 }
 
 type pktDispatcherHandler struct {
@@ -30,8 +32,9 @@ type pktDispatcherHandler struct {
 func newPktDispatcher(c *astiencoder.Closer) (d *pktDispatcher) {
 	// Create dispatcher
 	d = &pktDispatcher{
-		c: c,
-		m: &sync.Mutex{},
+		c:        c,
+		m:        &sync.Mutex{},
+		waitStat: astistat.NewWaitStat(),
 	}
 
 	// Create pkt
@@ -101,5 +104,16 @@ func (d *pktDispatcher) dispatch(r *astisync.Regulator) {
 	}
 
 	// Wait for one of the subprocess to be done
+	d.waitStat.Add(d.pkt)
 	p.Wait()
+	d.waitStat.Done(d.pkt)
+}
+
+func (d *pktDispatcher) addStats(s *astistat.Stater) {
+	// Add wait time
+	s.AddStat(astistat.StatMetadata{
+		Description: "Percentage of time spent waiting for first child to finish processing dispatched packet",
+		Label:       "Dispatch wait",
+		Unit:        "%",
+	}, d.waitStat.StatValueFunc, d.waitStat.Reset)
 }

@@ -2,10 +2,11 @@ package astiencoder
 
 import (
 	"context"
-	"sync"
-
 	"sort"
+	"sync"
+	"time"
 
+	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/worker"
 )
 
@@ -15,6 +16,7 @@ type Node interface {
 	NodeDescriptor
 	NodeParent
 	Starter
+	Stater
 }
 
 // NodeDescriptor represents an object that can describe a node
@@ -58,6 +60,11 @@ type Starter interface {
 	Stop()
 }
 
+// Stater represents an object that can return its stater
+type Stater interface {
+	Stater() *astistat.Stater
+}
+
 // ConnectNodes connects 2 nodes
 func ConnectNodes(parent, child Node) {
 	parent.AddChild(child)
@@ -77,11 +84,12 @@ type BaseNode struct {
 	oStop           *sync.Once
 	parents         map[string]Node
 	parentsStarted  map[string]bool
+	s               *astistat.Stater
 }
 
 // NewBaseNode creates a new base node
-func NewBaseNode(e EmitEventFunc, m NodeMetadata) *BaseNode {
-	return &BaseNode{
+func NewBaseNode(e EmitEventFunc, m NodeMetadata) (n *BaseNode) {
+	n = &BaseNode{
 		children:        make(map[string]Node),
 		childrenStarted: make(map[string]bool),
 		m:               &sync.Mutex{},
@@ -92,6 +100,10 @@ func NewBaseNode(e EmitEventFunc, m NodeMetadata) *BaseNode {
 		parents:         make(map[string]Node),
 		parentsStarted:  make(map[string]bool),
 	}
+	if e != nil {
+		n.s = astistat.NewStater(2*time.Second, n.statsHandleFunc)
+	}
+	return
 }
 
 // Context returns the node context
@@ -181,6 +193,15 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 
 			// Make sure the node is stopped properly
 			defer n.Stop()
+
+			// Handle the stater
+			if n.s != nil {
+				// Make sure the stater is stopped properly
+				defer n.s.Stop()
+
+				// Start stater
+				n.s.Start(n.ctx)
+			}
 
 			// Exec func
 			execFunc(t)
@@ -301,4 +322,52 @@ func (n *BaseNode) Parents() (ns []Node) {
 // Metadata implements the Node interface
 func (n *BaseNode) Metadata() NodeMetadata {
 	return n.md
+}
+
+// Stater returns the node stater
+func (n *BaseNode) Stater() *astistat.Stater {
+	return n.s
+}
+
+// EventStats represents stats event
+type EventStats struct {
+	Name  string      `json:"name"`
+	Stats []EventStat `json:"stats"`
+}
+
+// EventStat represents a stat event
+type EventStat struct {
+	Description string      `json:"description"`
+	Label       string      `json:"label"`
+	Unit        string      `json:"unit"`
+	Value       interface{} `json:"value"`
+}
+
+func (n *BaseNode) statsHandleFunc(stats []astistat.Stat) {
+	// No stats
+	if len(stats) == 0 {
+		return
+	}
+
+	// Create event
+	e := EventStats{
+		Name:  n.md.Name,
+		Stats: []EventStat{},
+	}
+
+	// Loop through stats
+	for _, s := range stats {
+		e.Stats = append(e.Stats, EventStat{
+			Description: s.Description,
+			Label:       s.Label,
+			Unit:        s.Unit,
+			Value:       s.Value,
+		})
+	}
+
+	// Send event
+	n.e(Event{
+		Name:    EventNameStats,
+		Payload: e,
+	})
 }

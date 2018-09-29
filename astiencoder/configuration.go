@@ -16,7 +16,7 @@ var (
 
 // Configuration represents a configuration
 type Configuration struct {
-	Logger  astilog.Configuration     `toml:"logger"`
+	Logger  astilog.Configuration      `toml:"logger"`
 	Encoder *astiencoder.Configuration `toml:"encoder"`
 }
 

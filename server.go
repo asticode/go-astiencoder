@@ -82,7 +82,7 @@ func (s *server) handleWeb() httprouter.Handle {
 		name := p.ByName("page")
 		if len(name) == 0 || name == "/" {
 			if e := s.e.encoder(); len(e.Workflows) == 1 {
-				http.Redirect(rw, r, "/web/workflow?name=" + url.QueryEscape(e.Workflows[0].Name), http.StatusTemporaryRedirect)
+				http.Redirect(rw, r, "/web/workflow?name="+url.QueryEscape(e.Workflows[0].Name), http.StatusTemporaryRedirect)
 				return
 			}
 			name = "/index"
