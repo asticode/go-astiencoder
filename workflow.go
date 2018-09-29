@@ -24,7 +24,11 @@ type Workflow struct {
 
 func newWorkflow(name string, j Job, rootCtx context.Context, e EmitEventFunc, t CreateTaskFunc, c *Closer) *Workflow {
 	return &Workflow{
-		BaseNode: NewBaseNode(NodeMetadata{}),
+		BaseNode: NewBaseNode(NodeMetadata{
+			Description: "root",
+			Label:       "root",
+			Name:        "root",
+		}),
 		c:        c,
 		e:        e,
 		j:        j,
@@ -62,8 +66,10 @@ func (w *Workflow) Start(o WorkflowStartOptions) {
 		// Wait for task to be done
 		t.Wait()
 
-		// Workflow is done
-		if w.done() {
+		// Workflow is done only when:
+		//  - root ctx has been cancelled
+		//  - ctx has not been cancelled
+		if w.rootCtx.Err() != nil || w.Context().Err() == nil {
 			// Close
 			astilog.Debugf("astiencoder: closing workflow %s", w.name)
 			if err := w.c.Close(); err != nil {
@@ -96,21 +102,4 @@ func (w *Workflow) startNodes(ns []Node, o WorkflowStartOptions, t CreateTaskFun
 func (w *Workflow) Stop() {
 	astilog.Debugf("astiencoder: stopping workflow %s", w.name)
 	w.BaseNode.Stop()
-}
-
-// Workflow is done only when:
-//  - root ctx has been cancelled
-//  - ctx has not been cancelled
-func (w *Workflow) done() bool {
-	return (w.rootCtx != nil && w.rootCtx.Err() != nil) || (w.Context() != nil && w.Context().Err() == nil)
-}
-
-func (w *Workflow) status() string {
-	if w.done() {
-		return "done"
-	} else if w.Context() == nil || w.Context().Err() != nil {
-		return "stopped"
-	} else {
-		return "started"
-	}
 }

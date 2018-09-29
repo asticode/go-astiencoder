@@ -50,7 +50,7 @@ asticode.tools = {
 
         // Update html
         if (typeof key !== "undefined") {
-            map[key].html.wrapper.prepend(data.html.wrapper);
+            rootSelector.insertBefore(data.html.wrapper, map[key].html.wrapper);
         } else {
             rootSelector.append(data.html.wrapper);
         }

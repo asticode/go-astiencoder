@@ -12,16 +12,21 @@ import (
 // Node represents a node
 type Node interface {
 	NodeChild
+	NodeDescriptor
 	NodeParent
 	Starter
+}
+
+// NodeDescriptor represents an object that can describe a node
+type NodeDescriptor interface {
 	Metadata() NodeMetadata
 }
 
 // NodeMetadata represents node metadata
 type NodeMetadata struct {
 	Description string
-	Name        string
 	Label       string
+	Name        string
 }
 
 // NodeChild represents an object with parent nodes
@@ -40,6 +45,7 @@ type NodeParent interface {
 
 // Starter represents an object that can start/stop
 type Starter interface {
+	IsStopped() bool
 	Start(ctx context.Context, o WorkflowStartOptions, t CreateTaskFunc)
 	Stop()
 }
@@ -92,6 +98,11 @@ type BaseNodeStartFunc func()
 
 // BaseNodeExecFunc represents a node exec func
 type BaseNodeExecFunc func(t *astiworker.Task)
+
+// IsStopped implements the Starter interface
+func (n *BaseNode) IsStopped() bool {
+	return n.Context() == nil || n.Context().Err() != nil
+}
 
 // Start starts the node
 func (n *BaseNode) Start(ctx context.Context, o WorkflowStartOptions, tc CreateTaskFunc, execFunc BaseNodeExecFunc) {

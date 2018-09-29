@@ -2,8 +2,10 @@ package astiencoder
 
 import (
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"time"
 
@@ -62,6 +64,7 @@ func (s *server) handler() http.Handler {
 	r.GET("/api/encoder", s.handleEncoder())
 	r.GET("/api/encoder/stop", s.handleEncoderStop())
 	r.POST("/api/workflows", s.handleAddWorkflow())
+	r.GET("/api/workflows/:name", s.handleWorkflow())
 
 	// Chain middlewares
 	var h = astihttp.ChainMiddlewares(r, astihttp.MiddlewareBasicAuth(s.c.Username, s.c.Password))
@@ -81,6 +84,10 @@ func (s *server) handleWeb() httprouter.Handle {
 		// Get page
 		name := p.ByName("page")
 		if len(name) == 0 || name == "/" {
+			if e := s.e.encoder(); len(e.Workflows) == 1 {
+				http.Redirect(rw, r, "/web/workflow?name=" + url.QueryEscape(e.Workflows[0].Name), http.StatusTemporaryRedirect)
+				return
+			}
 			name = "/index"
 		}
 
@@ -89,6 +96,13 @@ func (s *server) handleWeb() httprouter.Handle {
 		name += ".html"
 		if _, ok := s.t.Template(name); !ok {
 			code = http.StatusNotFound
+		}
+
+		// Get data
+		d := s.templateData(name, r, &code)
+
+		// Handle not found
+		if code == http.StatusNotFound {
 			name = "/errors/404.html"
 		}
 
@@ -97,11 +111,24 @@ func (s *server) handleWeb() httprouter.Handle {
 
 		// Execute template
 		tpl, _ := s.t.Template(name)
-		if err := tpl.Execute(rw, nil); err != nil {
-			astilog.Error(errors.Wrapf(err, "astiencoder: executing template %s failed", name))
+		if err := tpl.Execute(rw, d); err != nil {
+			astilog.Error(errors.Wrapf(err, "astiencoder: executing template %s with data %+v failed", name, d))
 			return
 		}
 	}
+}
+
+func (s *server) templateData(name string, r *http.Request, code *int) (d interface{}) {
+	switch name {
+	case "/workflow.html":
+		w, ok := s.e.workflow(r.URL.Query().Get("name"))
+		if !ok {
+			*code = http.StatusNotFound
+			return
+		}
+		d = w
+	}
+	return
 }
 
 // APIError represents an API error.
@@ -187,6 +214,23 @@ func (s *server) handleAddWorkflow() httprouter.Handle {
 		// Add workflow
 		if err := s.e.addWorkflow(name, j); err != nil {
 			s.writeJSONError(rw, http.StatusBadRequest, errors.Wrapf(err, "astiencoder: adding workflow %s failed", name))
+			return
+		}
+	}
+}
+
+func (s *server) handleWorkflow() httprouter.Handle {
+	return func(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		// Get workflow
+		w, ok := s.e.workflow(p.ByName("name"))
+		if !ok {
+			s.writeJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("name")))
+			return
+		}
+
+		// Write
+		if err := json.NewEncoder(rw).Encode(w); err != nil {
+			s.writeJSONError(rw, http.StatusInternalServerError, errors.Wrap(err, "astiencoder: writing failed"))
 			return
 		}
 	}

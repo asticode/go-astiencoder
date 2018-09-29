@@ -55,6 +55,10 @@ input[type="text"], select, input[type="file"] {
     padding: 5px 5px;
 }
 
+input[type="text"] {
+    border: solid 1px #dedee0;
+}
+
 input[type="text"]:focus {
     outline: none;
 }
@@ -123,4 +127,52 @@ input[type="text"]:focus {
 #menu {
     padding: 30px;
     vertical-align: top;
+}
+
+.menu-title {
+    border-bottom: solid 1px #e7e7e7;
+    margin-bottom: 10px;
+}
+
+/* content */
+
+#content {
+    padding: 20px;
+    vertical-align: top;
+}
+
+#content .header {
+    border-bottom: solid 1px #333;
+    margin-bottom: 10px;
+}
+
+#content pre {
+    background-color: #fff;
+    border: solid 1px #dedee0;
+    border-radius: 4px;
+    color: #5E6668;
+    padding: 20px;
+}
+
+#content .network {
+    text-align: center;
+}
+
+#content .network svg {
+    margin: auto;
+}
+
+#content .network svg .label {
+    color: #fff;
+    font-family: inherit;
+}
+
+#content .network svg .stopped > rect {
+    fill:#d9534f;
+    stroke:#d9534f;
+}
+
+#content .network svg .started > rect {
+    fill:#5cb85c;
+    stroke:#5cb85c;
 }

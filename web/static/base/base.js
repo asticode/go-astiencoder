@@ -78,7 +78,7 @@ const base = {
                         if (typeof data.responseJSON.message !== "undefined") m.setError(data.responseJSON.message)
                     },
                     success: function() {
-                        window.location = "/web/workflows?name=" + encodeURIComponent(name.value)
+                        window.location = "/web/workflow?name=" + encodeURIComponent(name.value)
                     }
                 })
             })
@@ -92,14 +92,8 @@ const base = {
             asticode.tools.sendHttp("/api/encoder/stop", "GET")
         }
     },
-    initModal: function() {
-        const wrapper = document.createElement("div")
-        wrapper.className = "modal-wrapper"
-        return wrapper
-    },
-    addModalError: function() {
-        const error = document.createElement("div")
-        error.className = "modal-error color-danger-text"
-
+    defaultHttpError: function(data) {
+        asticode.notifier.error(data.responseJSON.message)
+        asticode.loader.hide()
     }
 }
