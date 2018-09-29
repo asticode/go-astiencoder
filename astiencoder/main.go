@@ -58,7 +58,9 @@ func main() {
 	e.HandleSignals()
 
 	// Serve
-	e.Serve()
+	if err := e.Serve(); err != nil {
+		astilog.Fatal(errors.Wrap(err, "main: serving failed"))
+	}
 
 	// Job has been provided
 	if len(*job) > 0 {

@@ -13,6 +13,7 @@ import (
 type Encoder struct {
 	b      WorkflowBuilder
 	cfg    *Configuration
+	e      *exposer
 	ee     *eventEmitter
 	m      *sync.Mutex
 	w      *astiworker.Worker
@@ -37,6 +38,7 @@ func NewEncoder(cfg *Configuration) (e *Encoder) {
 		ws:     make(map[string]*Workflow),
 		wsDone: make(map[string]bool),
 	}
+	e.e = newExposer(e)
 	ee.addHandler(e.handleEvent)
 	return
 }
@@ -72,10 +74,15 @@ func (e *Encoder) SetWorkflowBuilder(b WorkflowBuilder) {
 }
 
 // Serve creates and starts the server
-func (e *Encoder) Serve() {
-	s := newServer(e.cfg.Server, e.ee)
+func (e *Encoder) Serve() (err error) {
+	var s *server
+	if s, err = newServer(e.cfg.Server, e.e); err != nil {
+		err = errors.Wrap(err, "astiencoder: creating new server failed")
+		return
+	}
 	e.AddEventHandler(s.handleEvent)
 	e.w.Serve(e.cfg.Server.Addr, s.handler())
+	return
 }
 
 // NewWorkflow creates a new workflow based on a job
@@ -99,7 +106,7 @@ func (e *Encoder) NewWorkflow(name string, j Job) (w *Workflow, err error) {
 	c := newCloser()
 
 	// Create workflow
-	w = newWorkflow(name, e.w.Context(), e.ee.emit, e.w.NewTask, c)
+	w = newWorkflow(name, j, e.w.Context(), e.ee.emit, e.w.NewTask, c)
 
 	// Build workflow
 	if err = e.b.BuildWorkflow(j, w); err != nil {
