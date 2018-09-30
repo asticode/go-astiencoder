@@ -115,5 +115,5 @@ func (d *pktDispatcher) addStats(s *astistat.Stater) {
 		Description: "Percentage of time spent waiting for first child to finish processing dispatched packet",
 		Label:       "Dispatch wait",
 		Unit:        "%",
-	}, d.waitStat.StatValueFunc, d.waitStat.Reset)
+	}, d.waitStat)
 }

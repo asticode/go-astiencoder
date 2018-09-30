@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
-	"time"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astitools/stat"
@@ -20,12 +19,12 @@ var countDecoder uint64
 // Decoder represents an object capable of decoding packets
 type Decoder struct {
 	*astiencoder.BaseNode
-	ctxCodec        *avcodec.Context
-	d               *frameDispatcher
-	e               astiencoder.EmitEventFunc
-	q               *astisync.CtxQueue
-	r               *astisync.Regulator
-	statsFrameCount uint32
+	ctxCodec       *avcodec.Context
+	d              *frameDispatcher
+	e              astiencoder.EmitEventFunc
+	q              *astisync.CtxQueue
+	r              *astisync.Regulator
+	statFrameCount *astistat.IncrementStat
 }
 
 // NewDecoder creates a new decoder
@@ -37,11 +36,12 @@ func NewDecoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astie
 			Label:       fmt.Sprintf("Decoder #%d", count),
 			Name:        fmt.Sprintf("decoder_%d", count),
 		}),
-		ctxCodec: ctxCodec,
-		d:        newFrameDispatcher(c, e),
-		e:        e,
-		q:        astisync.NewCtxQueue(),
-		r:        astisync.NewRegulator(packetsBufferLength),
+		ctxCodec:       ctxCodec,
+		d:              newFrameDispatcher(c, e),
+		e:              e,
+		q:              astisync.NewCtxQueue(),
+		r:              astisync.NewRegulator(packetsBufferLength),
+		statFrameCount: astistat.NewIncrementStat(),
 	}
 	d.addStats()
 	return
@@ -53,11 +53,7 @@ func (d *Decoder) addStats() {
 		Description: "Number of frames decoded per second",
 		Label:       "Frames per second",
 		Unit:        "fps",
-	}, func(delta time.Duration) interface{} {
-		return float64(atomic.SwapUint32(&d.statsFrameCount, 0)) / float64(delta) * float64(time.Second)
-	}, func() {
-		atomic.StoreUint32(&d.statsFrameCount, 0)
-	})
+	}, d.statFrameCount)
 
 	// Add dispatcher stats
 	d.d.addStats(d.Stater())
@@ -154,7 +150,7 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 				}
 
 				// Increment frame count
-				atomic.AddUint32(&d.statsFrameCount, 1)
+				d.statFrameCount.Add(1)
 
 				// Dispatch frame
 				d.d.dispatch(d.r)

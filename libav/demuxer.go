@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
-	"time"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astitools/stat"
@@ -20,11 +19,11 @@ var countDemuxer uint64
 // Demuxer represents an object capable of demuxing packets out of an input
 type Demuxer struct {
 	*astiencoder.BaseNode
-	ctxFormat        *avformat.Context
-	d                *pktDispatcher
-	e                astiencoder.EmitEventFunc
-	r                *astisync.Regulator
-	statsPacketCount uint32
+	ctxFormat       *avformat.Context
+	d               *pktDispatcher
+	e               astiencoder.EmitEventFunc
+	r               *astisync.Regulator
+	statPacketCount *astistat.IncrementStat
 }
 
 // NewDemuxer creates a new demuxer
@@ -36,10 +35,11 @@ func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *ast
 			Label:       fmt.Sprintf("Demuxer #%d", count),
 			Name:        fmt.Sprintf("demuxer_%d", count),
 		}),
-		ctxFormat: ctxFormat,
-		d:         newPktDispatcher(c),
-		e:         e,
-		r:         astisync.NewRegulator(packetsBufferLength),
+		ctxFormat:       ctxFormat,
+		d:               newPktDispatcher(c),
+		e:               e,
+		r:               astisync.NewRegulator(packetsBufferLength),
+		statPacketCount: astistat.NewIncrementStat(),
 	}
 	d.addStats()
 	return
@@ -51,11 +51,7 @@ func (d *Demuxer) addStats() {
 		Description: "Number of packets read per second",
 		Label:       "Packets per second",
 		Unit:        "pps",
-	}, func(delta time.Duration) interface{} {
-		return float64(atomic.SwapUint32(&d.statsPacketCount, 0)) / float64(delta) * float64(time.Second)
-	}, func() {
-		atomic.StoreUint32(&d.statsPacketCount, 0)
-	})
+	}, d.statPacketCount)
 
 	// Add dispatcher stats
 	d.d.addStats(d.Stater())
@@ -93,7 +89,7 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			}
 
 			// Increment packet count
-			atomic.AddUint32(&d.statsPacketCount, 1)
+			d.statPacketCount.Add(1)
 
 			// Dispatch pkt
 			d.d.dispatch(d.r)
