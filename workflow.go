@@ -25,8 +25,8 @@ type Workflow struct {
 	name    string
 	ns      map[string]Node
 	rootCtx context.Context
-	t *astiworker.Task
-	tf       CreateTaskFunc
+	t       *astiworker.Task
+	tf      CreateTaskFunc
 }
 
 func newWorkflow(name string, j Job, rootCtx context.Context, e EmitEventFunc, tf CreateTaskFunc, c *Closer) *Workflow {
@@ -43,7 +43,7 @@ func newWorkflow(name string, j Job, rootCtx context.Context, e EmitEventFunc, t
 		name:    name,
 		ns:      make(map[string]Node),
 		rootCtx: rootCtx,
-		tf:       tf,
+		tf:      tf,
 	}
 }
 
@@ -104,22 +104,16 @@ func (w *Workflow) start(ns ...Node) {
 		// Wait for task to be done
 		t.Wait()
 
+		// Close
+		if err := w.c.Close(); err != nil {
+			w.e(EventError(errors.Wrapf(err, "astiencoder: closing workflow %s failed", w.name)))
+		}
+
 		// Send event
 		w.e(Event{
 			Name:    EventNameWorkflowStopped,
 			Payload: w.name,
 		})
-
-		// Close the workflow only when:
-		//  - root ctx has been cancelled (user has requested to stop the workflow)
-		//  - ctx has not been cancelled (children have all stopped even though the user has not requested to stop the workflow)
-		if w.rootCtx.Err() != nil || w.bn.Context().Err() == nil {
-			// Close
-			astilog.Debugf("astiencoder: closing workflow %s", w.name)
-			if err := w.c.Close(); err != nil {
-				w.e(EventError(errors.Wrapf(err, "astiencoder: closing workflow %s failed", w.name)))
-			}
-		}
 	})
 }
 
@@ -131,6 +125,56 @@ func (w *Workflow) startNode(n Node) {
 func (w *Workflow) Stop() {
 	astilog.Debugf("astiencoder: stopping workflow %s", w.name)
 	w.bn.Stop()
+}
+
+// Pause pauses the workflow
+func (w *Workflow) Pause() {
+	// Workflow is not running
+	if w.bn.Status() != StatusRunning {
+		return
+	}
+
+	// Pause
+	astilog.Debugf("astiencoder: pausing workflow %s", w.name)
+	for _, n := range w.nodes() {
+		n.Pause()
+	}
+
+	// Update status
+	w.bn.m.Lock()
+	w.bn.status = StatusPaused
+	w.bn.m.Unlock()
+
+	// Send event
+	w.e(Event{
+		Name:    EventNameWorkflowPaused,
+		Payload: w.name,
+	})
+}
+
+// Continue continues the workflow
+func (w *Workflow) Continue() {
+	// Workflow is not paused
+	if w.bn.Status() != StatusPaused {
+		return
+	}
+
+	// Continue
+	astilog.Debugf("astiencoder: continuing workflow %s", w.name)
+	for _, n := range w.nodes() {
+		n.Continue()
+	}
+
+	// Update status
+	w.bn.m.Lock()
+	w.bn.status = StatusRunning
+	w.bn.m.Unlock()
+
+	// Send event
+	w.e(Event{
+		Name:    EventNameWorkflowStarted,
+		Payload: w.name,
+	})
 }
 
 // AddChild adds a child to the workflow

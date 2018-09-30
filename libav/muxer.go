@@ -71,6 +71,9 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 		// Start queue
 		m.q.Start(func(p interface{}) {
+			// Handle pause
+			defer m.HandlePause()
+
 			// Assert payload
 			pkt := p.(*avcodec.Packet)
 

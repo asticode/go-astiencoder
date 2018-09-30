@@ -70,6 +70,9 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 		// Start queue
 		d.q.Start(func(p interface{}) {
+			// Handle pause
+			defer d.HandlePause()
+
 			// Assert payload
 			pkt := p.(*avcodec.Packet)
 

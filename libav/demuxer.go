@@ -94,6 +94,9 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Dispatch pkt
 			d.d.dispatch(d.r)
 
+			// Handle pause
+			d.HandlePause()
+
 			// Check context
 			if d.Context().Err() != nil {
 				return

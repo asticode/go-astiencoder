@@ -133,6 +133,9 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 		// Start queue
 		e.q.Start(func(p interface{}) {
+			// Handle pause
+			defer e.HandlePause()
+
 			// Assert payload
 			f := p.(*avutil.Frame)
 

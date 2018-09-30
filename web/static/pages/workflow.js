@@ -32,13 +32,22 @@ const page = {
             // Node doesn't exist
             if (typeof node === "undefined") return
 
+            // Get action
+            let action = "start"
+            switch (node.status) {
+                case "running":
+                    action = "pause"
+                    break
+                case "paused":
+                    action = "continue"
+                    break
+            }
+
             // Send order to API
-            asticode.loader.show()
             asticode.tools.sendHttp({
                 method: "GET",
-                url: "/api/workflows/" + page.workflow + "/nodes/" + name + "/" + (node.status === "started" ? "stop" : "start"),
+                url: "/api/workflows/" + page.workflow + "/nodes/" + name + "/" + action,
                 error: base.defaultHttpError,
-                success: base.defaultHttpSuccess,
             })
         }
 
@@ -84,6 +93,8 @@ const page = {
     },
     websocketFunc: function(eventName, payload) {
         switch (eventName) {
+            case "node.continued":
+            case "node.paused":
             case "node.started":
             case "node.stopped":
                 // Get node
@@ -93,11 +104,32 @@ const page = {
                 if (typeof node === "undefined") return
 
                 // Update class
-                asticode.tools.removeClass(node, eventName === "node.started" ? "stopped" : "started")
-                asticode.tools.addClass(node, eventName === "node.started" ? "started" : "stopped")
+                let status
+                switch (eventName) {
+                    case "node.continued":
+                        status = "running"
+                        asticode.tools.removeClass(node, "paused")
+                        asticode.tools.addClass(node, status)
+                        break
+                    case "node.paused":
+                        status = "paused"
+                        asticode.tools.removeClass(node, "running")
+                        asticode.tools.addClass(node, status)
+                        break
+                    case "node.started":
+                        status = "running"
+                        asticode.tools.removeClass(node, "stopped")
+                        asticode.tools.addClass(node, status)
+                        break
+                    case "node.stopped":
+                        status = "stopped"
+                        asticode.tools.removeClass(node, "running")
+                        asticode.tools.addClass(node, status)
+                        break
+                }
 
                 // Update status
-                if (typeof page.nodes[payload] !== "undefined") page.nodes[payload].status = (eventName === "node.started" ? "started" : "stopped")
+                if (typeof page.nodes[payload] !== "undefined") page.nodes[payload].status = status
                 break
             case "stats":
                 // Get element

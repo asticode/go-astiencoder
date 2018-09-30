@@ -171,12 +171,17 @@ input[type="text"]:focus {
     font-family: inherit;
 }
 
+#content .network svg .paused > rect {
+    fill:#f0ad4e;
+    stroke:#f0ad4e;
+}
+
 #content .network svg .stopped > rect {
     fill:#d9534f;
     stroke:#d9534f;
 }
 
-#content .network svg .started > rect {
+#content .network svg .running > rect {
     fill:#5cb85c;
     stroke:#5cb85c;
 }

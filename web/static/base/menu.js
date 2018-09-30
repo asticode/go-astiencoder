@@ -68,16 +68,25 @@ let menu = {
 
         // Create toggle
         r.html.toggle = document.createElement("label")
-        r.html.toggle.className = "toggle " + (data.status === "started" ? "on": "off")
+        r.html.toggle.className = "toggle " + (data.status === "running" ? "on": "off")
         toggleCell.appendChild(r.html.toggle)
 
         // Create slider
         const slider = document.createElement("span")
         slider.className = "slider"
         slider.onclick = function() {
+            let action = "start"
+            switch (menu.workflows.pool[data.name].status) {
+                case "running":
+                    action = "pause"
+                    break
+                case "paused":
+                    action = "continue"
+                    break
+            }
             asticode.tools.sendHttp({
                 method: "GET",
-                url: "/api/workflows/" + data.name + "/" + (menu.workflows.pool[data.name].status === "started" ? "stop" : "start"),
+                url: "/api/workflows/" + data.name + "/" + action,
                 error: base.defaultHttpError,
             })
         }
@@ -86,8 +95,14 @@ let menu = {
     },
     websocketFunc: function(eventName, payload) {
         switch (eventName) {
+            case "workflow.continued":
+                this.updateToggle(payload, "running")
+                break
+            case "workflow.paused":
+                this.updateToggle(payload, "paused")
+                break
             case "workflow.started":
-                this.updateToggle(payload, "started")
+                this.updateToggle(payload, "running")
                 break
             case "workflow.stopped":
                 this.updateToggle(payload, "stopped")
@@ -102,8 +117,8 @@ let menu = {
         if (typeof workflow === "undefined") return
 
         // Update class
-        asticode.tools.removeClass(workflow.html.toggle, status === "started" ? "off" : "on")
-        asticode.tools.addClass(workflow.html.toggle, status === "started" ? "on" : "off")
+        asticode.tools.removeClass(workflow.html.toggle, status === "running" ? "off" : "on")
+        asticode.tools.addClass(workflow.html.toggle, status === "running" ? "on" : "off")
 
         // Update attribute
         workflow.status = status

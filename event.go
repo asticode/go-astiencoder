@@ -8,12 +8,16 @@ import (
 
 // Default event names
 var (
-	EventNameError           = "error"
-	EventNameNodeStarted     = "node.started"
-	EventNameNodeStopped     = "node.stopped"
-	EventNameStats           = "stats"
-	EventNameWorkflowStarted = "workflow.started"
-	EventNameWorkflowStopped = "workflow.stopped"
+	EventNameError             = "error"
+	EventNameNodeContinued     = "node.continued"
+	EventNameNodePaused        = "node.paused"
+	EventNameNodeStarted       = "node.started"
+	EventNameNodeStopped       = "node.stopped"
+	EventNameStats             = "stats"
+	EventNameWorkflowContinued = "workflow.continued"
+	EventNameWorkflowPaused    = "workflow.paused"
+	EventNameWorkflowStarted   = "workflow.started"
+	EventNameWorkflowStopped   = "workflow.stopped"
 )
 
 // Event is an event coming out of the encoder

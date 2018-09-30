@@ -157,6 +157,9 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 		// Start queue
 		f.q.Start(func(p interface{}) {
+			// Handle pause
+			defer f.HandlePause()
+
 			// Assert payload
 			fm := p.(*avutil.Frame)
 

@@ -143,6 +143,30 @@ func (e *exposer) workflow(name string) (ew ExposedWorkflow, err error) {
 	return
 }
 
+func (e *exposer) continueWorkflow(name string) (err error) {
+	// Retrieve workflow
+	var w *Workflow
+	if w, err = e.e.Workflow(name); err != nil {
+		return
+	}
+
+	// Continue workflow
+	w.Continue()
+	return
+}
+
+func (e *exposer) pauseWorkflow(name string) (err error) {
+	// Retrieve workflow
+	var w *Workflow
+	if w, err = e.e.Workflow(name); err != nil {
+		return
+	}
+
+	// Pause workflow
+	w.Pause()
+	return
+}
+
 func (e *exposer) startWorkflow(name string) (err error) {
 	// Retrieve workflow
 	var w *Workflow
@@ -155,15 +179,39 @@ func (e *exposer) startWorkflow(name string) (err error) {
 	return
 }
 
-func (e *exposer) stopWorkflow(name string) (err error) {
+func (e *exposer) continueNode(workflow, node string) (err error) {
 	// Retrieve workflow
 	var w *Workflow
-	if w, err = e.e.Workflow(name); err != nil {
+	if w, err = e.e.Workflow(workflow); err != nil {
 		return
 	}
 
-	// Stop workflow
-	w.Stop()
+	// Retrieve node
+	var n Node
+	if n, err = w.Node(node); err != nil {
+		return
+	}
+
+	// Continue node
+	n.Continue()
+	return
+}
+
+func (e *exposer) pauseNode(workflow, node string) (err error) {
+	// Retrieve workflow
+	var w *Workflow
+	if w, err = e.e.Workflow(workflow); err != nil {
+		return
+	}
+
+	// Retrieve node
+	var n Node
+	if n, err = w.Node(node); err != nil {
+		return
+	}
+
+	// Pause node
+	n.Pause()
 	return
 }
 
@@ -181,30 +229,12 @@ func (e *exposer) startNode(workflow, node string) (err error) {
 	}
 
 	// Check workflow status
-	if w.Status() == StatusStarted {
-		// Workflow is already started, we only start the desired node
+	if w.Status() == StatusRunning {
+		// Workflow is running, we only start the desired node
 		w.startNode(n)
 	} else {
 		// Workflow is stopped, we start it as well as the desired node
 		w.start(n)
 	}
-	return
-}
-
-func (e *exposer) stopNode(workflow, node string) (err error) {
-	// Retrieve workflow
-	var w *Workflow
-	if w, err = e.e.Workflow(workflow); err != nil {
-		return
-	}
-
-	// Retrieve node
-	var n Node
-	if n, err = w.Node(node); err != nil {
-		return
-	}
-
-	// Stop node
-	n.Stop()
 	return
 }
