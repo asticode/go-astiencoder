@@ -1,4 +1,5 @@
 const page = {
+    nodes: {},
     init: function(name) {
         base.init(this.websocketFunc, function() {
             asticode.tools.sendHttp({
@@ -6,6 +7,9 @@ const page = {
                 url: "/api/workflows/" + name,
                 error: base.defaultHttpError,
                 success: function(data) {
+                    // Store workflow name
+                    page.workflow = name
+
                     // Init network
                     page.initNetwork(data.responseJSON)
 
@@ -20,11 +24,30 @@ const page = {
         })
     },
     initNetwork: function(data) {
+        // Handle node click
+        window.handleNodeClick = function(name) {
+            // Get node
+            const node = page.nodes[name]
+
+            // Node doesn't exist
+            if (typeof node === "undefined") return
+
+            // Send order to API
+            asticode.loader.show()
+            asticode.tools.sendHttp({
+                method: "GET",
+                url: "/api/workflows/" + page.workflow + "/nodes/" + name + "/" + (node.status === "started" ? "stop" : "start"),
+                error: base.defaultHttpError,
+                success: base.defaultHttpSuccess,
+            })
+        }
+
         // Create graph description
         let desc = "graph TB\n"
 
         // Add nodes
         for (let idx = 0; idx < data.nodes.length; idx++) {
+            // Get stats
             let stats = ""
             if (data.nodes[idx].stats.length > 0) {
                 stats += "<br><br><table>"
@@ -33,8 +56,16 @@ const page = {
                 }
                 stats += "</table>"
             }
+
+            // Add node graph description
             desc += "    " + data.nodes[idx].name + "(\"" + data.nodes[idx].label + stats + "\")\n"
             desc += "    class " + data.nodes[idx].name + " " + data.nodes[idx].status + ";"
+            desc += "    click " + data.nodes[idx].name + " handleNodeClick;"
+
+            // Add node to pool
+            page.nodes[data.nodes[idx].name] = {
+                status: data.nodes[idx].status
+            }
         }
 
         // Add edges
@@ -64,6 +95,9 @@ const page = {
                 // Update class
                 asticode.tools.removeClass(node, eventName === "node.started" ? "stopped" : "started")
                 asticode.tools.addClass(node, eventName === "node.started" ? "started" : "stopped")
+
+                // Update status
+                if (typeof page.nodes[payload] !== "undefined") page.nodes[payload].status = (eventName === "node.started" ? "started" : "stopped")
                 break
             case "stats":
                 // Get element

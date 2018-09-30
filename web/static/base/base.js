@@ -72,6 +72,7 @@ const base = {
                 if (job.files.length > 0) {
                     form.append("job", job.files[0])
                 }
+                asticode.loader.show()
                 asticode.tools.sendHttp({
                     method: "POST",
                     url: "/api/workflows",
@@ -91,14 +92,18 @@ const base = {
     },
     initButtonStopEncoder: function() {
         document.getElementById("btn-encoder-stop").onclick = function() {
+            asticode.loader.show()
             asticode.tools.sendHttp({
                 method: "GET",
                 url: "/api/encoder/stop",
+                error: base.defaultHttpError,
+                success: base.defaultHttpSuccess,
             })
         }
     },
     defaultHttpError: function(data) {
         asticode.notifier.error(data.responseJSON.message)
         asticode.loader.hide()
-    }
+    },
+    defaultHttpSuccess: function() { asticode.loader.hide() }
 }

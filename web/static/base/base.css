@@ -162,6 +162,10 @@ input[type="text"]:focus {
     margin: auto;
 }
 
+#content .network svg .node {
+    cursor: pointer;
+}
+
 #content .network svg .label {
     color: #fff;
     font-family: inherit;

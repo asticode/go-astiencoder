@@ -9,6 +9,11 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Errors
+var (
+	ErrWorkflowNotFound = errors.New("workflow.not.found")
+)
+
 // Encoder represents an encoder
 type Encoder struct {
 	b         WorkflowBuilder
@@ -114,10 +119,25 @@ func (e *Encoder) NewWorkflow(name string, j Job) (w *Workflow, err error) {
 		return
 	}
 
+	// Index nodes in workflow
+	w.indexNodes()
+
 	// Store workflow
 	e.m.Lock()
 	e.ws[name] = w
 	e.m.Unlock()
+	return
+}
+
+// Workflow returns a specific workflow
+func (e *Encoder) Workflow(name string) (w *Workflow, err error) {
+	e.m.Lock()
+	defer e.m.Unlock()
+	var ok bool
+	if w, ok = e.ws[name]; !ok {
+		err = ErrWorkflowNotFound
+		return
+	}
 	return
 }
 

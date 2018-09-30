@@ -1,7 +1,5 @@
 package astiencoder
 
-import "fmt"
-
 type exposer struct {
 	e *Encoder
 }
@@ -37,7 +35,7 @@ func newExposedWorkflow(w *Workflow) (o ExposedWorkflow) {
 	}
 
 	// Loop through children
-	for _, n := range w.Children() {
+	for _, n := range w.bn.Children() {
 		o.parseNode(n)
 	}
 	return
@@ -136,12 +134,9 @@ func (e *exposer) addWorkflow(name string, j Job) (err error) {
 	return
 }
 
-func (e *exposer) workflow(name string) (ew ExposedWorkflow, ok bool) {
-	e.e.m.Lock()
-	defer e.e.m.Unlock()
+func (e *exposer) workflow(name string) (ew ExposedWorkflow, err error) {
 	var w *Workflow
-	w, ok = e.e.ws[name]
-	if !ok {
+	if w, err = e.e.Workflow(name); err != nil {
 		return
 	}
 	ew = newExposedWorkflow(w)
@@ -149,25 +144,67 @@ func (e *exposer) workflow(name string) (ew ExposedWorkflow, ok bool) {
 }
 
 func (e *exposer) startWorkflow(name string) (err error) {
-	e.e.m.Lock()
-	defer e.e.m.Unlock()
-	w, ok := e.e.ws[name]
-	if !ok {
-		err = fmt.Errorf("astiencoder: workflow %s doesn't exist", name)
+	// Retrieve workflow
+	var w *Workflow
+	if w, err = e.e.Workflow(name); err != nil {
 		return
 	}
+
+	// Start workflow
 	w.Start()
 	return
 }
 
 func (e *exposer) stopWorkflow(name string) (err error) {
-	e.e.m.Lock()
-	defer e.e.m.Unlock()
-	w, ok := e.e.ws[name]
-	if !ok {
-		err = fmt.Errorf("astiencoder: workflow %s doesn't exist", name)
+	// Retrieve workflow
+	var w *Workflow
+	if w, err = e.e.Workflow(name); err != nil {
 		return
 	}
+
+	// Stop workflow
 	w.Stop()
+	return
+}
+
+func (e *exposer) startNode(workflow, node string) (err error) {
+	// Retrieve workflow
+	var w *Workflow
+	if w, err = e.e.Workflow(workflow); err != nil {
+		return
+	}
+
+	// Retrieve node
+	var n Node
+	if n, err = w.Node(node); err != nil {
+		return
+	}
+
+	// Check workflow status
+	if w.Status() == StatusStarted {
+		// Workflow is already started, we only start the desired node
+		w.startNode(n)
+	} else {
+		// Workflow is stopped, we start it as well as the desired node
+		w.start(n)
+	}
+	return
+}
+
+func (e *exposer) stopNode(workflow, node string) (err error) {
+	// Retrieve workflow
+	var w *Workflow
+	if w, err = e.e.Workflow(workflow); err != nil {
+		return
+	}
+
+	// Retrieve node
+	var n Node
+	if n, err = w.Node(node); err != nil {
+		return
+	}
+
+	// Stop node
+	n.Stop()
 	return
 }

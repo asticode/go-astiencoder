@@ -47,10 +47,10 @@ type NodeParent interface {
 	Children() []Node
 }
 
-// Node statuses
+// Statuses
 const (
-	NodeStatusStarted = "started"
-	NodeStatusStopped = "stopped"
+	StatusStarted = "started"
+	StatusStopped = "stopped"
 )
 
 // Starter represents an object that can start/stop
@@ -123,9 +123,9 @@ type BaseNodeExecFunc func(t *astiworker.Task)
 // Status implements the Starter interface
 func (n *BaseNode) Status() string {
 	if n.Context() != nil && n.Context().Err() == nil {
-		return NodeStatusStarted
+		return StatusStarted
 	} else {
-		return NodeStatusStopped
+		return StatusStopped
 	}
 }
 
