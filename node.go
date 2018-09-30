@@ -266,6 +266,11 @@ func (n *BaseNode) Pause() {
 
 // Continue implements the Starter interface
 func (n *BaseNode) Continue() {
+	// Status is not paused
+	if n.Status() != StatusPaused {
+		return
+	}
+
 	// Cancel ctx
 	if n.cancelPause != nil {
 		n.cancelPause()

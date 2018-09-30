@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avcodec"
@@ -19,33 +20,38 @@ var countFilterer uint64
 // Filterer represents an object capable of applying a filter to frames
 type Filterer struct {
 	*astiencoder.BaseNode
-	bufferSinkCtx *avfilter.Context
-	bufferSrcCtx  *avfilter.Context
-	d             *frameDispatcher
-	e             astiencoder.EmitEventFunc
-	g             *avfilter.Graph
-	q             *astisync.CtxQueue
-	r             *astisync.Regulator
+	bufferSinkCtx    *avfilter.Context
+	bufferSrcCtx     *avfilter.Context
+	d                *frameDispatcher
+	e                astiencoder.EmitEventFunc
+	g                *avfilter.Graph
+	q                *astisync.CtxQueue
+	r                *astisync.Regulator
+	statIncomingRate *astistat.IncrementStat
+	statWorkRatio    *astistat.DurationRatioStat
 }
 
 // NewFilterer creates a new filterer
-func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) *Filterer {
-	// Create filterer
+func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (f *Filterer) {
 	count := atomic.AddUint64(&countFilterer, uint64(1))
-	return &Filterer{
+	f = &Filterer{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
 			Description: "Filters",
 			Label:       fmt.Sprintf("Filterer #%d", count),
 			Name:        fmt.Sprintf("filterer_%d", count),
 		}),
-		bufferSinkCtx: bufferSinkCtx,
-		bufferSrcCtx:  bufferSrcCtx,
-		d:             newFrameDispatcher(c, e),
-		e:             e,
-		g:             g,
-		q:             astisync.NewCtxQueue(),
-		r:             astisync.NewRegulator(packetsBufferLength),
+		bufferSinkCtx:    bufferSinkCtx,
+		bufferSrcCtx:     bufferSrcCtx,
+		d:                newFrameDispatcher(c, e),
+		e:                e,
+		g:                g,
+		q:                astisync.NewCtxQueue(),
+		r:                astisync.NewRegulator(packetsBufferLength),
+		statIncomingRate: astistat.NewIncrementStat(),
+		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
+	f.addStats()
+	return
 }
 
 // FiltererOptions represents filterer options
@@ -133,6 +139,28 @@ func NewFiltererFromOptions(o FiltererOptions, e astiencoder.EmitEventFunc, c *a
 	return NewFilterer(bufferSrcCtx, bufferSinkCtx, g, e, c, packetsBufferLength), nil
 }
 
+func (f *Filterer) addStats() {
+	// Add incoming rate
+	f.Stater().AddStat(astistat.StatMetadata{
+		Description: "Number of frames coming in the filter per second",
+		Label:       "Incoming rate",
+		Unit:        "fps",
+	}, f.statIncomingRate)
+
+	// Add work ratio
+	f.Stater().AddStat(astistat.StatMetadata{
+		Description: "Percentage of time spent doing some actual work",
+		Label:       "Work ratio",
+		Unit:        "%",
+	}, f.statWorkRatio)
+
+	// Add dispatcher stats
+	f.d.addStats(f.Stater())
+
+	// Add queue stats
+	f.q.AddStats(f.Stater())
+}
+
 // Connect connects the filterer to a FrameHandler
 func (f *Filterer) Connect(h FrameHandler) {
 	// Append handler
@@ -163,21 +191,30 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Assert payload
 			fm := p.(*avutil.Frame)
 
+			// Increment incoming rate
+			f.statIncomingRate.Add(1)
+
 			// Push frame in graph
+			f.statWorkRatio.Add(true)
 			if ret := f.g.AvBuffersrcAddFrameFlags(f.bufferSrcCtx, fm, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
+				f.statWorkRatio.Done(true)
 				emitAvError(f.e, ret, "f.g.AvBuffersrcAddFrameFlags failed")
 				return
 			}
+			f.statWorkRatio.Done(true)
 
 			// Loop
 			for {
 				// Pull filtered frame from graph
+				f.statWorkRatio.Add(true)
 				if ret := f.g.AvBuffersinkGetFrame(f.bufferSinkCtx, f.d.f); ret < 0 {
+					f.statWorkRatio.Done(true)
 					if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
 						emitAvError(f.e, ret, "f.g.AvBuffersinkGetFrame failed")
 					}
 					return
 				}
+				f.statWorkRatio.Done(true)
 
 				// Dispatch frame
 				f.d.dispatch(f.r)

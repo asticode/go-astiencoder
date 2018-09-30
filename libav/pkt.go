@@ -20,7 +20,7 @@ type pktDispatcher struct {
 	hs       []pktDispatcherHandler
 	m        *sync.Mutex
 	pkt      *avcodec.Packet
-	waitStat *astistat.WaitStat
+	statDispatch *astistat.DurationRatioStat
 }
 
 type pktDispatcherHandler struct {
@@ -34,7 +34,7 @@ func newPktDispatcher(c *astiencoder.Closer) (d *pktDispatcher) {
 	d = &pktDispatcher{
 		c:        c,
 		m:        &sync.Mutex{},
-		waitStat: astistat.NewWaitStat(),
+		statDispatch: astistat.NewDurationRatioStat(),
 	}
 
 	// Create pkt
@@ -104,16 +104,16 @@ func (d *pktDispatcher) dispatch(r *astisync.Regulator) {
 	}
 
 	// Wait for one of the subprocess to be done
-	d.waitStat.Add(d.pkt)
+	d.statDispatch.Add(d.pkt)
 	p.Wait()
-	d.waitStat.Done(d.pkt)
+	d.statDispatch.Done(d.pkt)
 }
 
 func (d *pktDispatcher) addStats(s *astistat.Stater) {
 	// Add wait time
 	s.AddStat(astistat.StatMetadata{
 		Description: "Percentage of time spent waiting for first child to finish processing dispatched packet",
-		Label:       "Dispatch wait",
+		Label:       "Dispatch ratio",
 		Unit:        "%",
-	}, d.waitStat)
+	}, d.statDispatch)
 }

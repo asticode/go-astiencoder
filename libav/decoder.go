@@ -19,12 +19,13 @@ var countDecoder uint64
 // Decoder represents an object capable of decoding packets
 type Decoder struct {
 	*astiencoder.BaseNode
-	ctxCodec       *avcodec.Context
-	d              *frameDispatcher
-	e              astiencoder.EmitEventFunc
-	q              *astisync.CtxQueue
-	r              *astisync.Regulator
-	statFrameCount *astistat.IncrementStat
+	ctxCodec         *avcodec.Context
+	d                *frameDispatcher
+	e                astiencoder.EmitEventFunc
+	q                *astisync.CtxQueue
+	r                *astisync.Regulator
+	statIncomingRate *astistat.IncrementStat
+	statWorkRatio    *astistat.DurationRatioStat
 }
 
 // NewDecoder creates a new decoder
@@ -36,33 +37,16 @@ func NewDecoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astie
 			Label:       fmt.Sprintf("Decoder #%d", count),
 			Name:        fmt.Sprintf("decoder_%d", count),
 		}),
-		ctxCodec:       ctxCodec,
-		d:              newFrameDispatcher(c, e),
-		e:              e,
-		q:              astisync.NewCtxQueue(),
-		r:              astisync.NewRegulator(packetsBufferLength),
-		statFrameCount: astistat.NewIncrementStat(),
+		ctxCodec:         ctxCodec,
+		d:                newFrameDispatcher(c, e),
+		e:                e,
+		q:                astisync.NewCtxQueue(),
+		r:                astisync.NewRegulator(packetsBufferLength),
+		statIncomingRate: astistat.NewIncrementStat(),
+		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
 	d.addStats()
 	return
-}
-
-func (d *Decoder) addStats() {
-	// Add frames per second
-	d.Stater().AddStat(astistat.StatMetadata{
-		Description: "Number of frames decoded per second",
-		Label:       "Frames per second",
-		Unit:        "fps",
-	}, d.statFrameCount)
-
-	// Add dispatcher stats
-	d.d.addStats(d.Stater())
-
-	// Add queue stats
-	d.q.AddStats(d.Stater())
-
-	// Add regulator stats
-	d.r.AddStats(d.Stater())
 }
 
 // NewDecoderFromCodecParams creates a new decoder from codec params
@@ -106,6 +90,28 @@ func NewDecoderFromCodecParams(codecParams *avcodec.CodecParameters, e astiencod
 	return
 }
 
+func (d *Decoder) addStats() {
+	// Add incoming rate
+	d.Stater().AddStat(astistat.StatMetadata{
+		Description: "Number of packets coming in the decoder per second",
+		Label:       "Incoming rate",
+		Unit:        "pps",
+	}, d.statIncomingRate)
+
+	// Add work ratio
+	d.Stater().AddStat(astistat.StatMetadata{
+		Description: "Percentage of time spent doing some actual work",
+		Label:       "Work ratio",
+		Unit:        "%",
+	}, d.statWorkRatio)
+
+	// Add dispatcher stats
+	d.d.addStats(d.Stater())
+
+	// Add queue stats
+	d.q.AddStats(d.Stater())
+}
+
 // Connect connects the decoder to a FrameHandler
 func (d *Decoder) Connect(h FrameHandler) {
 	// Add handler
@@ -136,24 +142,30 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Assert payload
 			pkt := p.(*avcodec.Packet)
 
+			// Increment incoming rate
+			d.statIncomingRate.Add(1)
+
 			// Send pkt to decoder
+			d.statWorkRatio.Add(true)
 			if ret := avcodec.AvcodecSendPacket(d.ctxCodec, pkt); ret < 0 {
+				d.statWorkRatio.Done(true)
 				emitAvError(d.e, ret, "avcodec.AvcodecSendPacket failed")
 				return
 			}
+			d.statWorkRatio.Done(true)
 
 			// Loop
 			for {
 				// Receive frame
+				d.statWorkRatio.Add(true)
 				if ret := avcodec.AvcodecReceiveFrame(d.ctxCodec, d.d.f); ret < 0 {
+					d.statWorkRatio.Done(true)
 					if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
 						emitAvError(d.e, ret, "avcodec.AvcodecReceiveFrame failed")
 					}
 					return
 				}
-
-				// Increment frame count
-				d.statFrameCount.Add(1)
+				d.statWorkRatio.Done(true)
 
 				// Dispatch frame
 				d.d.dispatch(d.r)

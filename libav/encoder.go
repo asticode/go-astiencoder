@@ -8,6 +8,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avcodec"
@@ -19,28 +20,34 @@ var countEncoder uint64
 // Encoder represents an object capable of encoding frames
 type Encoder struct {
 	*astiencoder.BaseNode
-	ctxCodec *avcodec.Context
-	d        *pktDispatcher
-	e        astiencoder.EmitEventFunc
-	q        *astisync.CtxQueue
-	r        *astisync.Regulator
+	ctxCodec         *avcodec.Context
+	d                *pktDispatcher
+	e                astiencoder.EmitEventFunc
+	q                *astisync.CtxQueue
+	r                *astisync.Regulator
+	statIncomingRate *astistat.IncrementStat
+	statWorkRatio    *astistat.DurationRatioStat
 }
 
 // NewEncoder creates a new encoder
-func NewEncoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) *Encoder {
+func NewEncoder(ctxCodec *avcodec.Context, ee astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (e *Encoder) {
 	count := atomic.AddUint64(&countEncoder, uint64(1))
-	return &Encoder{
-		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
+	e = &Encoder{
+		BaseNode: astiencoder.NewBaseNode(ee, astiencoder.NodeMetadata{
 			Description: "Encodes",
 			Label:       fmt.Sprintf("Encoder #%d", count),
 			Name:        fmt.Sprintf("encoder_%d", count),
 		}),
-		ctxCodec: ctxCodec,
-		d:        newPktDispatcher(c),
-		e:        e,
-		q:        astisync.NewCtxQueue(),
-		r:        astisync.NewRegulator(packetsBufferLength),
+		ctxCodec:         ctxCodec,
+		d:                newPktDispatcher(c),
+		e:                ee,
+		q:                astisync.NewCtxQueue(),
+		r:                astisync.NewRegulator(packetsBufferLength),
+		statIncomingRate: astistat.NewIncrementStat(),
+		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
+	e.addStats()
+	return
 }
 
 // EncoderOptions represents encoder options
@@ -109,6 +116,28 @@ func NewEncoderFromOptions(o EncoderOptions, e astiencoder.EmitEventFunc, c *ast
 	return NewEncoder(ctxCodec, e, c, packetsBufferLength), nil
 }
 
+func (e *Encoder) addStats() {
+	// Add incoming rate
+	e.Stater().AddStat(astistat.StatMetadata{
+		Description: "Number of frames coming in the encoder per second",
+		Label:       "Incoming rate",
+		Unit:        "fps",
+	}, e.statIncomingRate)
+
+	// Add work ratio
+	e.Stater().AddStat(astistat.StatMetadata{
+		Description: "Percentage of time spent doing some actual work",
+		Label:       "Work ratio",
+		Unit:        "%",
+	}, e.statWorkRatio)
+
+	// Add dispatcher stats
+	e.d.addStats(e.Stater())
+
+	// Add queue stats
+	e.q.AddStats(e.Stater())
+}
+
 // Connect connects the encoder to a PktHandler
 func (e *Encoder) Connect(h PktHandler) {
 	// Append handler
@@ -139,21 +168,30 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Assert payload
 			f := p.(*avutil.Frame)
 
+			// Increment incoming rate
+			e.statIncomingRate.Add(1)
+
 			// Send frame to encoder
+			e.statWorkRatio.Add(true)
 			if ret := avcodec.AvcodecSendFrame(e.ctxCodec, f); ret < 0 {
+				e.statWorkRatio.Done(true)
 				emitAvError(e.e, ret, "avcodec.AvcodecSendFrame failed")
 				return
 			}
+			e.statWorkRatio.Done(true)
 
 			// Loop
 			for {
 				// Receive pkt
+				e.statWorkRatio.Add(true)
 				if ret := avcodec.AvcodecReceivePacket(e.ctxCodec, e.d.pkt); ret < 0 {
+					e.statWorkRatio.Done(true)
 					if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
 						emitAvError(e.e, ret, "avcodec.AvcodecReceivePacket failed")
 					}
 					return
 				}
+				e.statWorkRatio.Done(true)
 
 				// Dispatch pkt
 				e.d.dispatch(e.r)

@@ -15,12 +15,12 @@ type FrameHandler interface {
 }
 
 type frameDispatcher struct {
-	c        *astiencoder.Closer
-	e        astiencoder.EmitEventFunc
-	f        *avutil.Frame
-	hs       []frameDispatcherHandler
-	m        *sync.Mutex
-	waitStat *astistat.WaitStat
+	c            *astiencoder.Closer
+	e            astiencoder.EmitEventFunc
+	f            *avutil.Frame
+	hs           []frameDispatcherHandler
+	m            *sync.Mutex
+	statDispatch *astistat.DurationRatioStat
 }
 
 type frameDispatcherHandler struct {
@@ -31,10 +31,10 @@ type frameDispatcherHandler struct {
 func newFrameDispatcher(c *astiencoder.Closer, e astiencoder.EmitEventFunc) (d *frameDispatcher) {
 	// Create dispatcher
 	d = &frameDispatcher{
-		c:        c,
-		e:        e,
-		m:        &sync.Mutex{},
-		waitStat: astistat.NewWaitStat(),
+		c:            c,
+		e:            e,
+		m:            &sync.Mutex{},
+		statDispatch: astistat.NewDurationRatioStat(),
 	}
 
 	// Create frame
@@ -105,16 +105,16 @@ func (d *frameDispatcher) dispatch(r *astisync.Regulator) {
 	}
 
 	// Wait for one of the subprocess to be done
-	d.waitStat.Add(d.f)
+	d.statDispatch.Add(d.f)
 	p.Wait()
-	d.waitStat.Done(d.f)
+	d.statDispatch.Done(d.f)
 }
 
 func (d *frameDispatcher) addStats(s *astistat.Stater) {
 	// Add wait time
 	s.AddStat(astistat.StatMetadata{
 		Description: "Percentage of time spent waiting for first child to finish processing dispatched frame",
-		Label:       "Dispatch wait",
+		Label:       "Dispatch ratio",
 		Unit:        "%",
-	}, d.waitStat)
+	}, d.statDispatch)
 }

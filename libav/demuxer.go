@@ -19,11 +19,11 @@ var countDemuxer uint64
 // Demuxer represents an object capable of demuxing packets out of an input
 type Demuxer struct {
 	*astiencoder.BaseNode
-	ctxFormat       *avformat.Context
-	d               *pktDispatcher
-	e               astiencoder.EmitEventFunc
-	r               *astisync.Regulator
-	statPacketCount *astistat.IncrementStat
+	ctxFormat        *avformat.Context
+	d                *pktDispatcher
+	e                astiencoder.EmitEventFunc
+	r                *astisync.Regulator
+	statWorkRatio    *astistat.DurationRatioStat
 }
 
 // NewDemuxer creates a new demuxer
@@ -35,29 +35,26 @@ func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *ast
 			Label:       fmt.Sprintf("Demuxer #%d", count),
 			Name:        fmt.Sprintf("demuxer_%d", count),
 		}),
-		ctxFormat:       ctxFormat,
-		d:               newPktDispatcher(c),
-		e:               e,
-		r:               astisync.NewRegulator(packetsBufferLength),
-		statPacketCount: astistat.NewIncrementStat(),
+		ctxFormat:        ctxFormat,
+		d:                newPktDispatcher(c),
+		e:                e,
+		r:                astisync.NewRegulator(packetsBufferLength),
+		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
 	d.addStats()
 	return
 }
 
 func (d *Demuxer) addStats() {
-	// Add packets per second
+	// Add work ratio
 	d.Stater().AddStat(astistat.StatMetadata{
-		Description: "Number of packets read per second",
-		Label:       "Packets per second",
-		Unit:        "pps",
-	}, d.statPacketCount)
+		Description: "Percentage of time spent doing some actual work",
+		Label:       "Work ratio",
+		Unit:        "%",
+	}, d.statWorkRatio)
 
 	// Add dispatcher stats
 	d.d.addStats(d.Stater())
-
-	// Add regulator stats
-	d.r.AddStats(d.Stater())
 }
 
 // Connect connects the demuxer to a PktHandler for a specific stream index
@@ -81,15 +78,15 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Loop
 		for {
 			// Read frame
+			d.statWorkRatio.Add(true)
 			if ret := d.ctxFormat.AvReadFrame(d.d.pkt); ret < 0 {
+				d.statWorkRatio.Done(true)
 				if ret != avutil.AVERROR_EOF {
 					emitAvError(d.e, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
 				}
 				return
 			}
-
-			// Increment packet count
-			d.statPacketCount.Add(1)
+			d.statWorkRatio.Done(true)
 
 			// Dispatch pkt
 			d.d.dispatch(d.r)

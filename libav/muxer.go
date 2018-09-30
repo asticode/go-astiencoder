@@ -8,6 +8,7 @@ import (
 	"unsafe"
 
 	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avcodec"
@@ -20,28 +21,53 @@ var countMuxer uint64
 // Muxer represents an object capable of muxing packets into an output
 type Muxer struct {
 	*astiencoder.BaseNode
-	c         *astiencoder.Closer
-	ctxFormat *avformat.Context
-	e         astiencoder.EmitEventFunc
-	o         *sync.Once
-	q         *astisync.CtxQueue
+	c                *astiencoder.Closer
+	ctxFormat        *avformat.Context
+	e                astiencoder.EmitEventFunc
+	o                *sync.Once
+	q                *astisync.CtxQueue
+	statIncomingRate *astistat.IncrementStat
+	statWorkRatio    *astistat.DurationRatioStat
 }
 
 // NewMuxer creates a new muxer
-func NewMuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer) *Muxer {
+func NewMuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (m *Muxer) {
 	count := atomic.AddUint64(&countMuxer, uint64(1))
-	return &Muxer{
+	m = &Muxer{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
 			Description: fmt.Sprintf("Muxes to %s", ctxFormat.Filename()),
 			Label:       fmt.Sprintf("Muxer #%d", count),
 			Name:        fmt.Sprintf("muxer_%d", count),
 		}),
-		c:         c,
-		ctxFormat: ctxFormat,
-		e:         e,
-		o:         &sync.Once{},
-		q:         astisync.NewCtxQueue(),
+		c:                c,
+		ctxFormat:        ctxFormat,
+		e:                e,
+		o:                &sync.Once{},
+		q:                astisync.NewCtxQueue(),
+		statIncomingRate: astistat.NewIncrementStat(),
+		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
+	m.addStats()
+	return
+}
+
+func (m *Muxer) addStats() {
+	// Add incoming rate
+	m.Stater().AddStat(astistat.StatMetadata{
+		Description: "Number of packets coming in the muxer per second",
+		Label:       "Incoming rate",
+		Unit:        "pps",
+	}, m.statIncomingRate)
+
+	// Add work ratio
+	m.Stater().AddStat(astistat.StatMetadata{
+		Description: "Percentage of time spent doing some actual work",
+		Label:       "Work ratio",
+		Unit:        "%",
+	}, m.statWorkRatio)
+
+	// Add queue stats
+	m.q.AddStats(m.Stater())
 }
 
 // Start starts the muxer
@@ -77,11 +103,17 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Assert payload
 			pkt := p.(*avcodec.Packet)
 
+			// Increment incoming rate
+			m.statIncomingRate.Add(1)
+
 			// Write frame
+			m.statWorkRatio.Add(true)
 			if ret := m.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(pkt))); ret < 0 {
+				m.statWorkRatio.Done(true)
 				emitAvError(m.e, ret, "m.ctxFormat.AvInterleavedWriteFrame on %+v failed", pkt)
 				return
 			}
+			m.statWorkRatio.Done(true)
 		})
 	})
 }

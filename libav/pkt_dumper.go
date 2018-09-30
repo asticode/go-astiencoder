@@ -11,6 +11,7 @@ import (
 	"unsafe"
 
 	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avcodec"
@@ -22,13 +23,15 @@ var countPktDumper uint64
 // PktDumper represents an object capable of dumping packets
 type PktDumper struct {
 	*astiencoder.BaseNode
-	count   uint32
-	data    map[string]interface{}
-	e       astiencoder.EmitEventFunc
-	fn      PktDumpFunc
-	pattern string
-	q       *astisync.CtxQueue
-	t       *template.Template
+	count            uint32
+	data             map[string]interface{}
+	e                astiencoder.EmitEventFunc
+	fn               PktDumpFunc
+	pattern          string
+	q                *astisync.CtxQueue
+	statIncomingRate *astistat.IncrementStat
+	statWorkRatio    *astistat.DurationRatioStat
+	t                *template.Template
 }
 
 // PktDumpFunc represents a pkt dump func
@@ -44,12 +47,15 @@ func NewPktDumper(pattern string, fn PktDumpFunc, data map[string]interface{}, e
 			Label:       fmt.Sprintf("Pkt dumper #%d", count),
 			Name:        fmt.Sprintf("pkt_dumper_%d", count),
 		}),
-		data:    data,
-		e:       e,
-		fn:      fn,
-		pattern: pattern,
-		q:       astisync.NewCtxQueue(),
+		data:             data,
+		e:                e,
+		fn:               fn,
+		pattern:          pattern,
+		q:                astisync.NewCtxQueue(),
+		statIncomingRate: astistat.NewIncrementStat(),
+		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
+	d.addStats()
 
 	// Parse pattern
 	if d.t, err = template.New("").Parse(pattern); err != nil {
@@ -57,6 +63,25 @@ func NewPktDumper(pattern string, fn PktDumpFunc, data map[string]interface{}, e
 		return
 	}
 	return
+}
+
+func (d *PktDumper) addStats() {
+	// Add incoming rate
+	d.Stater().AddStat(astistat.StatMetadata{
+		Description: "Number of packets coming in the pkt dumper per second",
+		Label:       "Incoming rate",
+		Unit:        "pps",
+	}, d.statIncomingRate)
+
+	// Add work ratio
+	d.Stater().AddStat(astistat.StatMetadata{
+		Description: "Percentage of time spent doing some actual work",
+		Label:       "Work ratio",
+		Unit:        "%",
+	}, d.statWorkRatio)
+
+	// Add queue stats
+	d.q.AddStats(d.Stater())
 }
 
 // Start starts the pkt dumper
@@ -76,6 +101,9 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Assert payload
 			pkt := p.(*avcodec.Packet)
 
+			// Increment incoming rate
+			d.statIncomingRate.Add(1)
+
 			// Increment count
 			c := atomic.AddUint32(&d.count, 1)
 
@@ -86,16 +114,22 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 			// Execute template
 			buf := &bytes.Buffer{}
+			d.statWorkRatio.Add(true)
 			if err := d.t.Execute(buf, d.data); err != nil {
+				d.statWorkRatio.Done(true)
 				d.e(astiencoder.EventError(errors.Wrapf(err, "astilibav: executing template %s with data %+v failed", d.pattern, d.data)))
 				return
 			}
+			d.statWorkRatio.Done(true)
 
 			// Dump
+			d.statWorkRatio.Add(true)
 			if err := d.fn(pkt, buf.String()); err != nil {
+				d.statWorkRatio.Done(true)
 				d.e(astiencoder.EventError(errors.Wrapf(err, "astilibav: pkt dump func with pattern %s failed", buf)))
 				return
 			}
+			d.statWorkRatio.Done(true)
 		})
 	})
 }

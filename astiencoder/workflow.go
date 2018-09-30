@@ -435,6 +435,7 @@ func (b *builder) createFilterer(bd *buildData, inCtx, outCtx operationCtx) (f *
 	var filters []string
 
 	// Framerate
+	// TODO Use select if inFramerate > outFramerate
 	if inCtx.frameRate.Num()/inCtx.frameRate.Den() != outCtx.frameRate.Num()/outCtx.frameRate.Den() {
 		filters = append(filters, fmt.Sprintf("minterpolate='fps=%d/%d'", outCtx.frameRate.Num(), outCtx.frameRate.Den()))
 	}

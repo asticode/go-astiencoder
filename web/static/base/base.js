@@ -79,6 +79,7 @@ const base = {
                     payload: form,
                     error: function(data) {
                         if (typeof data.responseJSON.message !== "undefined") m.setError(data.responseJSON.message)
+                        asticode.loader.hide()
                     },
                     success: function() {
                         window.location = "/web/workflow?name=" + encodeURIComponent(name.value)
