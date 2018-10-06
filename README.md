@@ -226,6 +226,7 @@ Let say the absolute path to your current dir is `/path/to`, here are their resp
 - [x] stats
 - [x] web ui
 - [ ] proper tests
+- [ ] [mosaic](https://trac.ffmpeg.org/wiki/Create%20a%20mosaic%20out%20of%20several%20input%20videos)
 - [ ] audio resampling
 - [ ] packaging (dash + hls + smooth)
 - [ ] add plugin in [snickers](https://github.com/snickers/snickers/tree/master/encoders)
