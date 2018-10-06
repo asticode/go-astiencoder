@@ -89,7 +89,7 @@ func NewFiltererFromOptions(o FiltererOptions, e astiencoder.EmitEventFunc, c *a
 	case avcodec.AVMEDIA_TYPE_VIDEO:
 		args = fmt.Sprintf("video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d", o.Input.Width, o.Input.Height, o.Input.PixelFormat, o.Input.TimeBase.Num(), o.Input.TimeBase.Den(), o.Input.SampleAspectRatio.Num(), o.Input.SampleAspectRatio.Den())
 	default:
-		err = fmt.Errorf("astilibav: codec type %d is not handled by filterer", o.Input.CodecType)
+		err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", o.Input.CodecType)
 		return
 	}
 

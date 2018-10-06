@@ -67,20 +67,20 @@ func NewDecoderFromCodecParams(codecParams *avcodec.CodecParameters, e astiencod
 
 	// Copy codec parameters
 	if ret := avcodec.AvcodecParametersToContext(ctxCodec, codecParams); ret < 0 {
-		err = errors.Wrapf(newAvError(ret), "astilibav: avcodec.AvcodecParametersToContext on ctx %+v and codec params %+v failed", ctxCodec, codecParams)
+		err = errors.Wrap(newAvError(ret), "astilibav: avcodec.AvcodecParametersToContext failed")
 		return
 	}
 
 	// Open codec
 	if ret := ctxCodec.AvcodecOpen2(cdc, nil); ret < 0 {
-		err = errors.Wrapf(newAvError(ret), "astilibav: d.ctxCodec.AvcodecOpen2 on ctx %+v and codec %+v failed", ctxCodec, cdc)
+		err = errors.Wrap(newAvError(ret), "astilibav: d.ctxCodec.AvcodecOpen2 failed")
 		return
 	}
 
 	// Make sure the codec is closed
 	c.Add(func() error {
 		if ret := ctxCodec.AvcodecClose(); ret < 0 {
-			emitAvError(e, ret, "d.ctxCodec.AvcodecClose on %+v failed", ctxCodec)
+			emitAvError(e, ret, "d.ctxCodec.AvcodecClose failed")
 		}
 		return nil
 	})

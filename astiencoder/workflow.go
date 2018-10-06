@@ -28,12 +28,7 @@ type openedInput struct {
 type openedOutput struct {
 	c         astiencoder.JobOutput
 	ctxFormat *avformat.Context
-	h         nodePktHandler
-}
-
-type nodePktHandler interface {
-	astiencoder.Node
-	astilibav.PktHandler
+	m         *astilibav.Muxer
 }
 
 type buildData struct {
@@ -142,7 +137,7 @@ func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener, e astienco
 			}
 
 			// Create muxer
-			oo.h = astilibav.NewMuxer(oo.ctxFormat, e, c)
+			oo.m = astilibav.NewMuxer(oo.ctxFormat, e, c)
 		}
 
 		// Index
@@ -189,10 +184,20 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 
 			// In case of copy we only want to connect the demuxer to the muxer through a transmuxer
 			if o.Codec == astiencoder.JobOperationCodecCopy {
-				// Create transmuxers
-				if err = b.createTransmuxers(i, oos, is); err != nil {
-					err = errors.Wrapf(err, "main: creating transmuxers for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
-					return
+				// Loop through outputs
+				for _, o := range oos {
+					// Clone stream
+					var os *avformat.Stream
+					if os, err = astilibav.CloneStream(is, o.o.ctxFormat); err != nil {
+						err = errors.Wrapf(err, "main: cloning stream 0x%x(%d) of %s failed", is.Id(), is.Id(), i.c.Name)
+						return
+					}
+
+					// Create muxer handler
+					h := o.o.m.NewPktHandler(os, is)
+
+					// Connect demuxer to handler
+					i.o.d.Connect(is, h)
 				}
 				continue
 			}
@@ -234,16 +239,29 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 
 			// Loop through outputs
 			for _, o := range oos {
-				// Create pkt dumper
-				if o.o.c.Type == astiencoder.JobOutputTypePktDump {
-					if o.o.h, err = astilibav.NewPktDumper(o.o.c.URL, astilibav.PktDumpFile, map[string]interface{}{"input": i.c.Name}, bd.w.EmitEventFunc()); err != nil {
+				// Switch on type
+				var h astilibav.PktHandler
+				switch o.o.c.Type {
+				case astiencoder.JobOutputTypePktDump:
+					// Create pkt dumper
+					if h, err = astilibav.NewPktDumper(o.o.c.URL, astilibav.PktDumpFile, map[string]interface{}{"input": i.c.Name}, bd.w.EmitEventFunc()); err != nil {
 						err = errors.Wrapf(err, "main: creating pkt dumper for output %s with conf %+v failed", o.c.Name, o.c)
 						return
 					}
+				default:
+					// Clone stream
+					var os *avformat.Stream
+					if os, err = astilibav.CloneStream(is, o.o.ctxFormat); err != nil {
+						err = errors.Wrapf(err, "main: cloning stream 0x%x(%d) of %s failed", is.Id(), is.Id(), i.c.Name)
+						return
+					}
+
+					// Create muxer handler
+					h = o.o.m.NewPktHandler(os, e.TimeBaser())
 				}
 
 				// Connect encoder to handler
-				e.Connect(o.o.h)
+				e.Connect(h)
 			}
 		}
 	}
@@ -293,25 +311,6 @@ func (b *builder) operationInputsOutputs(o astiencoder.JobOperation, bd *buildDa
 			c: po,
 			o: o,
 		})
-	}
-	return
-}
-
-func (b *builder) createTransmuxers(i operationInput, oos []operationOutput, is *avformat.Stream) (err error) {
-	// Loop through outputs
-	for _, o := range oos {
-		// Clone stream
-		var os *avformat.Stream
-		if os, err = astilibav.CloneStream(is, o.o.ctxFormat); err != nil {
-			err = errors.Wrapf(err, "main: cloning stream 0x%x(%d) of %s failed", is.Id(), is.Id(), i.c.Name)
-			return
-		}
-
-		// Create transmuxer
-		t := newTransmuxer(o.o.h, is, os)
-
-		// Connect demuxer to transmuxer
-		i.o.d.Connect(is, t)
 	}
 	return
 }
@@ -434,15 +433,19 @@ func (b *builder) createFilterer(bd *buildData, inCtx, outCtx operationCtx) (f *
 	// Create filters
 	var filters []string
 
-	// Framerate
-	// TODO Use select if inFramerate > outFramerate
-	if inCtx.frameRate.Num()/inCtx.frameRate.Den() != outCtx.frameRate.Num()/outCtx.frameRate.Den() {
-		filters = append(filters, fmt.Sprintf("minterpolate='fps=%d/%d'", outCtx.frameRate.Num(), outCtx.frameRate.Den()))
-	}
+	// Switch on media type
+	switch inCtx.codecType {
+	case avutil.AVMEDIA_TYPE_VIDEO:
+		// Frame rate
+		// TODO Use select if inFramerate > outFramerate
+		if inCtx.frameRate.Num()/inCtx.frameRate.Den() != outCtx.frameRate.Num()/outCtx.frameRate.Den() {
+			filters = append(filters, fmt.Sprintf("minterpolate='fps=%d/%d'", outCtx.frameRate.Num(), outCtx.frameRate.Den()))
+		}
 
-	// Scale
-	if inCtx.height != outCtx.height || inCtx.width != outCtx.width {
-		filters = append(filters, fmt.Sprintf("scale='w=%d:h=%d'", outCtx.width, outCtx.height))
+		// Scale
+		if inCtx.height != outCtx.height || inCtx.width != outCtx.width {
+			filters = append(filters, fmt.Sprintf("scale='w=%d:h=%d'", outCtx.width, outCtx.height))
+		}
 	}
 
 	// There are filters

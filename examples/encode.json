@@ -1,0 +1,28 @@
+{
+  "inputs": {
+    "default": {
+      "url": "examples/sample.mp4"
+    }
+  },
+  "outputs": {
+    "default": {
+      "url": "examples/tmp/encode.mp4"
+    }
+  },
+  "operations": {
+    "default": {
+      "codec": "libx264",
+      "inputs": [
+        {
+          "media_type": "video",
+          "name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    }
+  }
+}

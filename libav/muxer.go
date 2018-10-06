@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/asticode/goav/avutil"
+
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
@@ -118,7 +120,35 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	})
 }
 
+// MuxerPktHandler is an object that can handle a pkt for the muxer
+type MuxerPktHandler struct {
+	*Muxer
+	o *avformat.Stream
+	t TimeBaser
+}
+
+// TimeBaser is an object that can return a time base
+type TimeBaser interface {
+	TimeBase() avutil.Rational
+}
+
+// NewHandler creates
+func (m *Muxer) NewPktHandler(o *avformat.Stream, t TimeBaser) *MuxerPktHandler {
+	return &MuxerPktHandler{
+		Muxer: m,
+		o:     o,
+		t:     t,
+	}
+}
+
 // HandlePkt implements the PktHandler interface
-func (m *Muxer) HandlePkt(pkt *avcodec.Packet) {
-	m.q.Send(pkt, true)
+func (h *MuxerPktHandler) HandlePkt(pkt *avcodec.Packet) {
+	// Rescale timestamps
+	pkt.AvPacketRescaleTs(h.t.TimeBase(), h.o.TimeBase())
+
+	// Set stream index
+	pkt.SetStreamIndex(h.o.Index())
+
+	// Send pkt
+	h.q.Send(pkt, true)
 }

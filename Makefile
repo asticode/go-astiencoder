@@ -1,20 +1,23 @@
+libs = $(addprefix -l,$(subst .a,,$(subst vendor_c/lib/lib,,$(wildcard vendor_c/lib/*.a))))
+env = CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib $(libs)" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig"
+
 example:
-	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go run ./astiencoder -v -j examples/$(example).json
+	$(env) go run ./astiencoder -v -j examples/$(example).json
 
 dev:
-	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go run ./astiencoder -v -j examples/tmp/dev.json
+	$(env) go run ./astiencoder -v -j examples/tmp/dev.json
 
 build:
-	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go build -o $(GOPATH)/bin/astiencoder ./astiencoder
+	$(env) go build -o $(GOPATH)/bin/astiencoder ./astiencoder
 
 server:
-	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go run ./astiencoder -v
+	$(env) go run ./astiencoder -v
 
 test:
-	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go test -cover -v ./...
+	$(env) go test -cover -v ./...
 
 version:
-	CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_c/lib" PKG_CONFIG_PATH="$(CURDIR)/vendor_c/lib/pkgconfig" go run ./astiencoder version
+	$(env) go run ./astiencoder version
 
 install-ffmpeg:
 	mkdir -p vendor_c/src

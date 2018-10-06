@@ -84,7 +84,7 @@ func NewEncoderFromOptions(o EncoderOptions, e astiencoder.EmitEventFunc, c *ast
 	// Alloc context
 	var ctxCodec *avcodec.Context
 	if ctxCodec = cdc.AvcodecAllocContext3(); ctxCodec == nil {
-		err = fmt.Errorf("astilibav: no context allocated for codec %+v", cdc)
+		err = errors.New("astilibav: no context allocated")
 		return
 	}
 
@@ -100,14 +100,14 @@ func NewEncoderFromOptions(o EncoderOptions, e astiencoder.EmitEventFunc, c *ast
 
 	// Open codec
 	if ret := ctxCodec.AvcodecOpen2(cdc, nil); ret < 0 {
-		err = errors.Wrapf(newAvError(ret), "astilibav: d.ctxCodec.AvcodecOpen2 on ctx %+v and codec %+v failed", ctxCodec, cdc)
+		err = errors.Wrap(newAvError(ret), "astilibav: d.ctxCodec.AvcodecOpen2 failed")
 		return
 	}
 
 	// Make sure the codec is closed
 	c.Add(func() error {
 		if ret := ctxCodec.AvcodecClose(); ret < 0 {
-			emitAvError(e, ret, "d.ctxCodec.AvcodecClose on %+v failed", ctxCodec)
+			emitAvError(e, ret, "d.ctxCodec.AvcodecClose failed")
 		}
 		return nil
 	})
@@ -203,4 +203,9 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 // HandleFrame implements the FrameHandler interface
 func (e *Encoder) HandleFrame(f *avutil.Frame) {
 	e.q.Send(f, true)
+}
+
+// TimeBaser returns the encoder time baser
+func (e *Encoder) TimeBaser() TimeBaser {
+	return e.ctxCodec
 }
