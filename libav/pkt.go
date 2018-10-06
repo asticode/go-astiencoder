@@ -4,9 +4,7 @@ import (
 	"sync"
 
 	"github.com/asticode/go-astiencoder"
-
 	"github.com/asticode/go-astitools/stat"
-	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 )
@@ -17,102 +15,94 @@ type PktHandler interface {
 }
 
 type pktDispatcher struct {
-	c            *astiencoder.Closer
-	hs           []pktDispatcherHandler
+	hs           []PktHandler
 	m            *sync.Mutex
-	pkt          *avcodec.Packet
+	pktPool      *sync.Pool
 	statDispatch *astistat.DurationRatioStat
+	wg           *sync.WaitGroup
 }
 
-type pktDispatcherHandler struct {
-	h   PktHandler
-	pkt *avcodec.Packet
-}
-
-func newPktDispatcher(c *astiencoder.Closer) (d *pktDispatcher) {
-	// Create dispatcher
-	d = &pktDispatcher{
-		c:            c,
-		m:            &sync.Mutex{},
+func newPktDispatcher(c *astiencoder.Closer) *pktDispatcher {
+	return &pktDispatcher{
+		m: &sync.Mutex{},
+		pktPool: &sync.Pool{New: func() interface{} {
+			pkt := avcodec.AvPacketAlloc()
+			c.Add(func() error {
+				avcodec.AvPacketFree(pkt)
+				return nil
+			})
+			return pkt
+		}},
 		statDispatch: astistat.NewDurationRatioStat(),
+		wg:           &sync.WaitGroup{},
 	}
-
-	// Create pkt
-	d.pkt = avcodec.AvPacketAlloc()
-	c.Add(func() error {
-		avcodec.AvPacketFree(d.pkt)
-		return nil
-	})
-	return
 }
 
 func (d *pktDispatcher) addHandler(h PktHandler) {
-	// Lock
 	d.m.Lock()
 	defer d.m.Unlock()
-
-	// Create pkt
-	pkt := avcodec.AvPacketAlloc()
-	d.c.Add(func() error {
-		avcodec.AvPacketFree(pkt)
-		return nil
-	})
-
-	// Append
-	d.hs = append(d.hs, pktDispatcherHandler{
-		h:   h,
-		pkt: pkt,
-	})
+	d.hs = append(d.hs, h)
 }
 
-func (d *pktDispatcher) dispatch(r *astisync.Regulator) {
-	// Lock
-	d.m.Lock()
+func (d *pktDispatcher) getPkt() *avcodec.Packet {
+	return d.pktPool.Get().(*avcodec.Packet)
+}
 
-	// Make sure the pkt is unref
-	defer d.pkt.AvPacketUnref()
+func (d *pktDispatcher) putPkt(pkt *avcodec.Packet) {
+	pkt.AvPacketUnref()
+	d.pktPool.Put(pkt)
+}
 
+func (d *pktDispatcher) dispatch(pkt *avcodec.Packet) {
 	// Copy handlers
-	var hs []pktDispatcherHandler
+	d.m.Lock()
+	var hs []PktHandler
 	for _, h := range d.hs {
-		v, ok := h.h.(PktCond)
-		if !ok || v.UsePkt(d.pkt) {
+		v, ok := h.(PktCond)
+		if !ok || v.UsePkt(pkt) {
 			hs = append(hs, h)
 		}
 	}
-
-	// Unlock
 	d.m.Unlock()
 
-	// Create new process
-	p := r.NewProcess()
+	// No handlers
+	if len(hs) == 0 {
+		return
+	}
+
+	// Wait for all previous subprocesses to be done
+	// In case a brave soul tries to update this logic so that several packet can be sent to handlers in parallel, bare
+	// in mind that packets must be sent in order whereas sending packets in goroutines doesn't keep this order
+	d.statDispatch.Add(true)
+	d.wait()
+	d.statDispatch.Done(true)
 
 	// Add subprocesses
-	p.AddSubprocesses(len(hs))
+	d.wg.Add(len(hs))
 
 	// Loop through handlers
 	for _, h := range hs {
 		// Copy pkt
-		h.pkt.AvPacketRef(d.pkt)
+		hPkt := d.getPkt()
+		hPkt.AvPacketRef(pkt)
 
 		// Handle pkt
-		go func(h pktDispatcherHandler) {
-			defer p.SubprocessIsDone()
-			defer h.pkt.AvPacketUnref()
-			h.h.HandlePkt(h.pkt)
+		go func(h PktHandler) {
+			defer d.wg.Done()
+			defer d.putPkt(hPkt)
+			h.HandlePkt(hPkt)
 		}(h)
 	}
+}
 
-	// Wait for one of the subprocess to be done
-	d.statDispatch.Add(d.pkt)
-	p.Wait()
-	d.statDispatch.Done(d.pkt)
+func (d *pktDispatcher) wait() {
+	d.wg.Wait()
 }
 
 func (d *pktDispatcher) addStats(s *astistat.Stater) {
 	// Add wait time
 	s.AddStat(astistat.StatMetadata{
-		Description: "Percentage of time spent waiting for first child to finish processing dispatched packet",
+		Description: "Percentage of time spent waiting for all previous subprocesses to be done",
 		Label:       "Dispatch ratio",
 		Unit:        "%",
 	}, d.statDispatch)
@@ -139,3 +129,5 @@ func newPktCond(i *avformat.Stream, h PktHandler) *pktCond {
 func (c *pktCond) UsePkt(pkt *avcodec.Packet) bool {
 	return pkt.StreamIndex() == c.i.Index()
 }
+
+type pktRetriever func() *avcodec.Packet

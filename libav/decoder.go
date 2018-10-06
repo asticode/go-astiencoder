@@ -23,13 +23,12 @@ type Decoder struct {
 	d                *frameDispatcher
 	e                astiencoder.EmitEventFunc
 	q                *astisync.CtxQueue
-	r                *astisync.Regulator
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
 }
 
 // NewDecoder creates a new decoder
-func NewDecoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (d *Decoder) {
+func NewDecoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (d *Decoder) {
 	count := atomic.AddUint64(&countDecoder, uint64(1))
 	d = &Decoder{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
@@ -38,10 +37,9 @@ func NewDecoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astie
 			Name:        fmt.Sprintf("decoder_%d", count),
 		}),
 		ctxCodec:         ctxCodec,
-		d:                newFrameDispatcher(c, e),
+		d:                newFrameDispatcher(e, c),
 		e:                e,
 		q:                astisync.NewCtxQueue(),
-		r:                astisync.NewRegulator(packetsBufferLength),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
@@ -50,7 +48,7 @@ func NewDecoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astie
 }
 
 // NewDecoderFromCodecParams creates a new decoder from codec params
-func NewDecoderFromCodecParams(codecParams *avcodec.CodecParameters, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (d *Decoder, err error) {
+func NewDecoderFromCodecParams(codecParams *avcodec.CodecParameters, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (d *Decoder, err error) {
 	// Find decoder
 	var cdc *avcodec.Codec
 	if cdc = avcodec.AvcodecFindDecoder(codecParams.CodecId()); cdc == nil {
@@ -86,7 +84,7 @@ func NewDecoderFromCodecParams(codecParams *avcodec.CodecParameters, e astiencod
 	})
 
 	// Create decoder
-	d = NewDecoder(ctxCodec, e, c, packetsBufferLength)
+	d = NewDecoder(ctxCodec, e, c)
 	return
 }
 
@@ -127,9 +125,8 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Handle context
 		go d.q.HandleCtx(d.Context())
 
-		// Set up regulator
-		d.r.HandleCtx(d.Context())
-		defer d.r.Wait()
+		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
+		defer d.d.wait()
 
 		// Make sure to stop the queue properly
 		defer d.q.Stop()
@@ -157,21 +154,34 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Loop
 			for {
 				// Receive frame
-				d.statWorkRatio.Add(true)
-				if ret := avcodec.AvcodecReceiveFrame(d.ctxCodec, d.d.f); ret < 0 {
-					d.statWorkRatio.Done(true)
-					if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
-						emitAvError(d.e, ret, "avcodec.AvcodecReceiveFrame failed")
-					}
+				if stop := d.receiveFrame(); stop {
 					return
 				}
-				d.statWorkRatio.Done(true)
-
-				// Dispatch frame
-				d.d.dispatch(d.r)
 			}
 		})
 	})
+}
+
+func (d *Decoder) receiveFrame() (stop bool) {
+	// Get frame
+	f := d.d.getFrame()
+	defer d.d.putFrame(f)
+
+	// Receive frame
+	d.statWorkRatio.Add(true)
+	if ret := avcodec.AvcodecReceiveFrame(d.ctxCodec, f); ret < 0 {
+		d.statWorkRatio.Done(true)
+		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
+			emitAvError(d.e, ret, "avcodec.AvcodecReceiveFrame failed")
+		}
+		stop = true
+		return
+	}
+	d.statWorkRatio.Done(true)
+
+	// Dispatch frame
+	d.d.dispatch(f)
+	return
 }
 
 // HandlePkt implements the PktHandler interface

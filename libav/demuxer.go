@@ -7,7 +7,6 @@ import (
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astitools/stat"
-	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
@@ -21,12 +20,11 @@ type Demuxer struct {
 	ctxFormat     *avformat.Context
 	d             *pktDispatcher
 	e             astiencoder.EmitEventFunc
-	r             *astisync.Regulator
 	statWorkRatio *astistat.DurationRatioStat
 }
 
 // NewDemuxer creates a new demuxer
-func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (d *Demuxer) {
+func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (d *Demuxer) {
 	count := atomic.AddUint64(&countDemuxer, uint64(1))
 	d = &Demuxer{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
@@ -37,7 +35,6 @@ func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *ast
 		ctxFormat:     ctxFormat,
 		d:             newPktDispatcher(c),
 		e:             e,
-		r:             astisync.NewRegulator(packetsBufferLength),
 		statWorkRatio: astistat.NewDurationRatioStat(),
 	}
 	d.addStats()
@@ -68,25 +65,15 @@ func (d *Demuxer) Connect(i *avformat.Stream, h PktHandler) {
 // Start starts the demuxer
 func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	d.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
-		// Set up regulator
-		d.r.HandleCtx(d.Context())
-		defer d.r.Wait()
+		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
+		defer d.d.wait()
 
 		// Loop
 		for {
 			// Read frame
-			d.statWorkRatio.Add(true)
-			if ret := d.ctxFormat.AvReadFrame(d.d.pkt); ret < 0 {
-				d.statWorkRatio.Done(true)
-				if ret != avutil.AVERROR_EOF {
-					emitAvError(d.e, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
-				}
+			if stop := d.readFrame(); stop {
 				return
 			}
-			d.statWorkRatio.Done(true)
-
-			// Dispatch pkt
-			d.d.dispatch(d.r)
 
 			// Handle pause
 			d.HandlePause()
@@ -97,4 +84,26 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			}
 		}
 	})
+}
+
+func (d *Demuxer) readFrame() (stop bool) {
+	// Get pkt from pool
+	pkt := d.d.getPkt()
+	defer d.d.putPkt(pkt)
+
+	// Read frame
+	d.statWorkRatio.Add(true)
+	if ret := d.ctxFormat.AvReadFrame(pkt); ret < 0 {
+		d.statWorkRatio.Done(true)
+		if ret != avutil.AVERROR_EOF {
+			emitAvError(d.e, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
+		}
+		stop = true
+		return
+	}
+	d.statWorkRatio.Done(true)
+
+	// Dispatch pkt
+	d.d.dispatch(pkt)
+	return
 }

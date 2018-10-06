@@ -109,7 +109,7 @@ func (b *builder) openInputs(j astiencoder.Job, o *astilibav.Opener, e astiencod
 		is[n] = openedInput{
 			c:         cfg,
 			ctxFormat: ctxFormat,
-			d:         astilibav.NewDemuxer(ctxFormat, e, c, 10),
+			d:         astilibav.NewDemuxer(ctxFormat, e, c),
 		}
 	}
 	return
@@ -232,7 +232,7 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 
 			// Create encoder
 			var e *astilibav.Encoder
-			if e, err = astilibav.NewEncoderFromOptions(outCtx.encoderOptions(), prev, bd.w.EmitEventFunc(), bd.w.Closer(), 10); err != nil {
+			if e, err = astilibav.NewEncoderFromOptions(outCtx.encoderOptions(), prev, bd.w.EmitEventFunc(), bd.w.Closer()); err != nil {
 				err = errors.Wrapf(err, "main: creating encoder for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
 				return
 			}
@@ -449,7 +449,7 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 	// Decoder doesn't exist
 	if !okD || !okS {
 		// Create decoder
-		if d, err = astilibav.NewDecoderFromCodecParams(is.CodecParameters(), bd.w.EmitEventFunc(), bd.w.Closer(), 10); err != nil {
+		if d, err = astilibav.NewDecoderFromCodecParams(is.CodecParameters(), bd.w.EmitEventFunc(), bd.w.Closer()); err != nil {
 			err = errors.Wrapf(err, "main: creating decoder for stream 0x%x(%d) of %s failed", is.Id(), is.Id(), i.c.Name)
 			return
 		}
@@ -491,7 +491,7 @@ func (b *builder) createFilterer(bd *buildData, i *avformat.Stream, inCtx, outCt
 		}
 
 		// Create filterer
-		if f, err = astilibav.NewFiltererFromOptions(fo, i, bd.w.EmitEventFunc(), bd.w.Closer(), 10); err != nil {
+		if f, err = astilibav.NewFiltererFromOptions(fo, i, bd.w.EmitEventFunc(), bd.w.Closer()); err != nil {
 			err = errors.Wrapf(err, "main: creating filterer with filters %+v failed", filters)
 			return
 		}

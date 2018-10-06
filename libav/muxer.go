@@ -101,7 +101,7 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			defer m.HandlePause()
 
 			// Assert payload
-			pkt := p.(*avcodec.Packet)
+			pkt := p.(pktRetriever)()
 
 			// Increment incoming rate
 			m.statIncomingRate.Add(1)
@@ -136,12 +136,17 @@ func (m *Muxer) NewPktHandler(o *avformat.Stream, prev Descriptor) *MuxerPktHand
 
 // HandlePkt implements the PktHandler interface
 func (h *MuxerPktHandler) HandlePkt(pkt *avcodec.Packet) {
-	// Rescale timestamps
-	pkt.AvPacketRescaleTs(h.prev.TimeBase(), h.o.TimeBase())
-
-	// Set stream index
-	pkt.SetStreamIndex(h.o.Index())
-
 	// Send pkt
-	h.q.Send(pkt, true)
+	h.q.Send(h.pktRetriever(pkt), true)
+}
+
+func (h *MuxerPktHandler) pktRetriever(pkt *avcodec.Packet) pktRetriever {
+	return func() *avcodec.Packet {
+		// Rescale timestamps
+		pkt.AvPacketRescaleTs(h.prev.TimeBase(), h.o.TimeBase())
+
+		// Set stream index
+		pkt.SetStreamIndex(h.o.Index())
+		return pkt
+	}
 }

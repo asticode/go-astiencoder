@@ -5,7 +5,6 @@ import (
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astitools/stat"
-	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/goav/avutil"
 )
 
@@ -17,97 +16,91 @@ type FrameHandler interface {
 type frameDispatcher struct {
 	c            *astiencoder.Closer
 	e            astiencoder.EmitEventFunc
-	f            *avutil.Frame
-	hs           []frameDispatcherHandler
+	framePool    *sync.Pool
+	hs           []FrameHandler
 	m            *sync.Mutex
 	statDispatch *astistat.DurationRatioStat
+	wg           *sync.WaitGroup
 }
 
-type frameDispatcherHandler struct {
-	h FrameHandler
-	f *avutil.Frame
-}
-
-func newFrameDispatcher(c *astiencoder.Closer, e astiencoder.EmitEventFunc) (d *frameDispatcher) {
-	// Create dispatcher
-	d = &frameDispatcher{
-		c:            c,
-		e:            e,
+func newFrameDispatcher(e astiencoder.EmitEventFunc, c *astiencoder.Closer) *frameDispatcher {
+	return &frameDispatcher{
+		c: c,
+		e: e,
+		framePool: &sync.Pool{New: func() interface{} {
+			f := avutil.AvFrameAlloc()
+			c.Add(func() error {
+				avutil.AvFrameFree(f)
+				return nil
+			})
+			return f
+		}},
 		m:            &sync.Mutex{},
 		statDispatch: astistat.NewDurationRatioStat(),
+		wg:           &sync.WaitGroup{},
 	}
-
-	// Create frame
-	d.f = avutil.AvFrameAlloc()
-	c.Add(func() error {
-		avutil.AvFrameFree(d.f)
-		return nil
-	})
-	return
 }
 
 func (d *frameDispatcher) addHandler(h FrameHandler) {
-	// Lock
 	d.m.Lock()
 	defer d.m.Unlock()
-
-	// Create frame
-	f := avutil.AvFrameAlloc()
-	d.c.Add(func() error {
-		avutil.AvFrameFree(f)
-		return nil
-	})
-
-	// Append
-	d.hs = append(d.hs, frameDispatcherHandler{
-		h: h,
-		f: f,
-	})
+	d.hs = append(d.hs, h)
 }
 
-func (d *frameDispatcher) dispatch(r *astisync.Regulator) {
-	// Lock
-	d.m.Lock()
+func (d *frameDispatcher) getFrame() *avutil.Frame {
+	return d.framePool.Get().(*avutil.Frame)
+}
 
-	// Make sure the frame is unref
-	defer avutil.AvFrameUnref(d.f)
+func (d *frameDispatcher) putFrame(f *avutil.Frame) {
+	avutil.AvFrameUnref(f)
+	d.framePool.Put(f)
+}
 
+func (d *frameDispatcher) dispatch(f *avutil.Frame) {
 	// Copy handlers
-	var hs []frameDispatcherHandler
+	d.m.Lock()
+	var hs []FrameHandler
 	for _, h := range d.hs {
 		hs = append(hs, h)
 	}
-
-	// Unlock
 	d.m.Unlock()
 
-	// Create new process
-	p := r.NewProcess()
+	// No handlers
+	if len(hs) == 0 {
+		return
+	}
+
+	// Wait for all previous subprocesses to be done
+	// In case a brave soul tries to update this logic so that several packet can be sent to handlers in parallel, bare
+	// in mind that packets must be sent in order whereas sending packets in goroutines doesn't keep this order
+	d.statDispatch.Add(true)
+	d.wait()
+	d.statDispatch.Done(true)
 
 	// Add subprocesses
-	p.AddSubprocesses(len(d.hs))
+	d.wg.Add(len(hs))
 
 	// Loop through handlers
 	for _, h := range hs {
 		// Copy frame
-		if ret := avutil.AvFrameRef(h.f, d.f); ret < 0 {
-			emitAvError(d.e, ret, "avutil.AvFrameRef of %+v to %+v failed", d.f, h.f)
-			p.SubprocessIsDone()
+		hF := d.getFrame()
+		if ret := avutil.AvFrameRef(hF, f); ret < 0 {
+			emitAvError(d.e, ret, "avutil.AvFrameRef failed")
+			d.wg.Done()
 			continue
 		}
 
 		// Handle frame
-		go func(h frameDispatcherHandler) {
-			defer p.SubprocessIsDone()
-			defer avutil.AvFrameUnref(h.f)
-			h.h.HandleFrame(h.f)
+		go func(h FrameHandler) {
+			defer d.wg.Done()
+			defer d.putFrame(hF)
+			h.HandleFrame(hF)
 		}(h)
 	}
+}
 
-	// Wait for one of the subprocess to be done
-	d.statDispatch.Add(d.f)
-	p.Wait()
-	d.statDispatch.Done(d.f)
+func (d *frameDispatcher) wait() {
+	d.wg.Wait()
 }
 
 func (d *frameDispatcher) addStats(s *astistat.Stater) {

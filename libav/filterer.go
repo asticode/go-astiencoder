@@ -27,13 +27,12 @@ type Filterer struct {
 	g                *avfilter.Graph
 	prev             Descriptor
 	q                *astisync.CtxQueue
-	r                *astisync.Regulator
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
 }
 
 // NewFilterer creates a new filterer
-func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, prev Descriptor, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (f *Filterer) {
+func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, prev Descriptor, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (f *Filterer) {
 	count := atomic.AddUint64(&countFilterer, uint64(1))
 	f = &Filterer{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
@@ -43,12 +42,11 @@ func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Grap
 		}),
 		bufferSinkCtx:    bufferSinkCtx,
 		bufferSrcCtx:     bufferSrcCtx,
-		d:                newFrameDispatcher(c, e),
+		d:                newFrameDispatcher(e, c),
 		e:                e,
 		g:                g,
 		prev:             prev,
 		q:                astisync.NewCtxQueue(),
-		r:                astisync.NewRegulator(packetsBufferLength),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
@@ -73,7 +71,7 @@ type FiltererInputOptions struct {
 }
 
 // NewFiltererFromOptions creates a new filterer based on options
-func NewFiltererFromOptions(o FiltererOptions, prev Descriptor, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (_ *Filterer, err error) {
+func NewFiltererFromOptions(o FiltererOptions, prev Descriptor, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (_ *Filterer, err error) {
 	// Create graph
 	g := avfilter.AvfilterGraphAlloc()
 	c.Add(func() error {
@@ -138,7 +136,7 @@ func NewFiltererFromOptions(o FiltererOptions, prev Descriptor, e astiencoder.Em
 	}
 
 	// Create filterer
-	return NewFilterer(bufferSrcCtx, bufferSinkCtx, g, prev, e, c, packetsBufferLength), nil
+	return NewFilterer(bufferSrcCtx, bufferSinkCtx, g, prev, e, c), nil
 }
 
 func (f *Filterer) addStats() {
@@ -178,9 +176,8 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Handle context
 		go f.q.HandleCtx(f.Context())
 
-		// Set up regulator
-		f.r.HandleCtx(f.Context())
-		defer f.r.Wait()
+		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
+		defer f.d.wait()
 
 		// Make sure to stop the queue properly
 		defer f.q.Stop()
@@ -207,22 +204,34 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 			// Loop
 			for {
-				// Pull filtered frame from graph
-				f.statWorkRatio.Add(true)
-				if ret := f.g.AvBuffersinkGetFrame(f.bufferSinkCtx, f.d.f); ret < 0 {
-					f.statWorkRatio.Done(true)
-					if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
-						emitAvError(f.e, ret, "f.g.AvBuffersinkGetFrame failed")
-					}
+				// Pull filtered frame
+				if stop := f.pullFilteredFrame(); stop {
 					return
 				}
-				f.statWorkRatio.Done(true)
-
-				// Dispatch frame
-				f.d.dispatch(f.r)
 			}
 		})
 	})
+}
+
+func (f *Filterer) pullFilteredFrame() (stop bool) {
+	// Get frame
+	fm := f.d.getFrame()
+	defer f.d.putFrame(fm)
+
+	// Pull filtered frame from graph
+	f.statWorkRatio.Add(true)
+	if ret := f.g.AvBuffersinkGetFrame(f.bufferSinkCtx, fm); ret < 0 {
+		f.statWorkRatio.Done(true)
+		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
+			emitAvError(f.e, ret, "f.g.AvBuffersinkGetFrame failed")
+		}
+		return
+	}
+	f.statWorkRatio.Done(true)
+
+	// Dispatch frame
+	f.d.dispatch(fm)
+	return
 }
 
 // HandleFrame implements the FrameHandler interface

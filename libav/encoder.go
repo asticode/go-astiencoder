@@ -27,13 +27,12 @@ type Encoder struct {
 	e                astiencoder.EmitEventFunc
 	prev             Descriptor
 	q                *astisync.CtxQueue
-	r                *astisync.Regulator
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
 }
 
 // NewEncoder creates a new encoder
-func NewEncoder(ctxCodec *avcodec.Context, prev Descriptor, ee astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (e *Encoder) {
+func NewEncoder(ctxCodec *avcodec.Context, prev Descriptor, ee astiencoder.EmitEventFunc, c *astiencoder.Closer) (e *Encoder) {
 	count := atomic.AddUint64(&countEncoder, uint64(1))
 	e = &Encoder{
 		BaseNode: astiencoder.NewBaseNode(ee, astiencoder.NodeMetadata{
@@ -46,7 +45,6 @@ func NewEncoder(ctxCodec *avcodec.Context, prev Descriptor, ee astiencoder.EmitE
 		e:                ee,
 		prev:             prev,
 		q:                astisync.NewCtxQueue(),
-		r:                astisync.NewRegulator(packetsBufferLength),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
@@ -75,7 +73,7 @@ type EncoderOptions struct {
 }
 
 // NewEncoderFromOptions creates a new encoder based on options
-func NewEncoderFromOptions(o EncoderOptions, prev Descriptor, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (_ *Encoder, err error) {
+func NewEncoderFromOptions(o EncoderOptions, prev Descriptor, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (_ *Encoder, err error) {
 	// Find encoder
 	var cdc *avcodec.Codec
 	if len(o.CodecName) > 0 {
@@ -147,7 +145,7 @@ func NewEncoderFromOptions(o EncoderOptions, prev Descriptor, e astiencoder.Emit
 	})
 
 	// Create encoder
-	return NewEncoder(ctxCodec, prev, e, c, packetsBufferLength), nil
+	return NewEncoder(ctxCodec, prev, e, c), nil
 }
 
 func (e *Encoder) addStats() {
@@ -187,9 +185,11 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Handle context
 		go e.q.HandleCtx(e.Context())
 
-		// Set up regulator
-		e.r.HandleCtx(e.Context())
-		defer e.r.Wait()
+		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
+		defer e.d.wait()
+
+		// Make sure to flush the encoder
+		defer e.flush()
 
 		// Make sure to stop the queue properly
 		defer e.q.Stop()
@@ -205,36 +205,58 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Increment incoming rate
 			e.statIncomingRate.Add(1)
 
-			// Send frame to encoder
-			e.statWorkRatio.Add(true)
-			if ret := avcodec.AvcodecSendFrame(e.ctxCodec, f); ret < 0 {
-				e.statWorkRatio.Done(true)
-				emitAvError(e.e, ret, "avcodec.AvcodecSendFrame failed")
-				return
-			}
-			e.statWorkRatio.Done(true)
-
-			// Loop
-			for {
-				// Receive pkt
-				e.statWorkRatio.Add(true)
-				if ret := avcodec.AvcodecReceivePacket(e.ctxCodec, e.d.pkt); ret < 0 {
-					e.statWorkRatio.Done(true)
-					if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
-						emitAvError(e.e, ret, "avcodec.AvcodecReceivePacket failed")
-					}
-					return
-				}
-				e.statWorkRatio.Done(true)
-
-				// Rescale timestamps
-				e.d.pkt.AvPacketRescaleTs(e.prev.TimeBase(), e.ctxCodec.TimeBase())
-
-				// Dispatch pkt
-				e.d.dispatch(e.r)
-			}
+			// Encode
+			e.encode(f)
 		})
 	})
+}
+
+func (e *Encoder) flush() {
+	e.encode(nil)
+}
+
+func (e *Encoder) encode(f *avutil.Frame) {
+	// Send frame to encoder
+	e.statWorkRatio.Add(true)
+	if ret := avcodec.AvcodecSendFrame(e.ctxCodec, f); ret < 0 {
+		e.statWorkRatio.Done(true)
+		emitAvError(e.e, ret, "avcodec.AvcodecSendFrame failed")
+		return
+	}
+	e.statWorkRatio.Done(true)
+
+	// Loop
+	for {
+		// Receive pkt
+		if stop := e.receivePkt(); stop {
+			return
+		}
+	}
+}
+
+func (e *Encoder) receivePkt() (stop bool) {
+	// Get pkt from pool
+	pkt := e.d.getPkt()
+	defer e.d.putPkt(pkt)
+
+	// Receive pkt
+	e.statWorkRatio.Add(true)
+	if ret := avcodec.AvcodecReceivePacket(e.ctxCodec, pkt); ret < 0 {
+		e.statWorkRatio.Done(true)
+		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
+			emitAvError(e.e, ret, "avcodec.AvcodecReceivePacket failed")
+		}
+		stop = true
+		return
+	}
+	e.statWorkRatio.Done(true)
+
+	// Rescale timestamps
+	pkt.AvPacketRescaleTs(e.prev.TimeBase(), e.ctxCodec.TimeBase())
+
+	// Dispatch pkt
+	e.d.dispatch(pkt)
+	return
 }
 
 // HandleFrame implements the FrameHandler interface
