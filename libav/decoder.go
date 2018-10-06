@@ -186,5 +186,5 @@ func (d *Decoder) receiveFrame() (stop bool) {
 
 // HandlePkt implements the PktHandler interface
 func (d *Decoder) HandlePkt(pkt *avcodec.Packet) {
-	d.q.Send(pkt, true)
+	d.q.Send(pkt)
 }

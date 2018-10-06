@@ -136,7 +136,7 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 // HandlePkt implements the PktHandler interface
 func (d *PktDumper) HandlePkt(pkt *avcodec.Packet) {
-	d.q.Send(pkt, true)
+	d.q.Send(pkt)
 }
 
 // PktDumpFunc is a PktDumpFunc that dumps the packet to a file

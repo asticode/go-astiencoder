@@ -261,7 +261,7 @@ func (e *Encoder) receivePkt() (stop bool) {
 
 // HandleFrame implements the FrameHandler interface
 func (e *Encoder) HandleFrame(f *avutil.Frame) {
-	e.q.Send(f, true)
+	e.q.Send(f)
 }
 
 // AddStream adds a stream based on the codec ctx

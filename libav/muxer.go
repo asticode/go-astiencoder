@@ -137,7 +137,7 @@ func (m *Muxer) NewPktHandler(o *avformat.Stream, prev Descriptor) *MuxerPktHand
 // HandlePkt implements the PktHandler interface
 func (h *MuxerPktHandler) HandlePkt(pkt *avcodec.Packet) {
 	// Send pkt
-	h.q.Send(h.pktRetriever(pkt), true)
+	h.q.Send(h.pktRetriever(pkt))
 }
 
 func (h *MuxerPktHandler) pktRetriever(pkt *avcodec.Packet) pktRetriever {

@@ -237,7 +237,7 @@ func (f *Filterer) pullFilteredFrame() (stop bool) {
 
 // HandleFrame implements the FrameHandler interface
 func (f *Filterer) HandleFrame(fm *avutil.Frame) {
-	f.q.Send(fm, true)
+	f.q.Send(fm)
 }
 
 // TimeBase implements the Descriptor interface
