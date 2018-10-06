@@ -225,6 +225,7 @@ func (f *Filterer) pullFilteredFrame() (stop bool) {
 		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
 			emitAvError(f.e, ret, "f.g.AvBuffersinkGetFrame failed")
 		}
+		stop = true
 		return
 	}
 	f.statWorkRatio.Done(true)
