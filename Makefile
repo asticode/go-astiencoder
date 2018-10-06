@@ -4,9 +4,6 @@ env = CGO_CFLAGS="-I$(CURDIR)/vendor_c/include" CGO_LDFLAGS="-L$(CURDIR)/vendor_
 example:
 	$(env) go run ./astiencoder -v -j examples/$(example).json
 
-dev:
-	$(env) go run ./astiencoder -v -j examples/tmp/dev.json
-
 build:
 	$(env) go build -o $(GOPATH)/bin/astiencoder ./astiencoder
 

@@ -15,7 +15,6 @@ var (
 )
 
 // Workflow represents a workflow
-// TODO Allow visualising workflow in terminal + jpeg
 type Workflow struct {
 	bn      *BaseNode
 	c       *Closer
