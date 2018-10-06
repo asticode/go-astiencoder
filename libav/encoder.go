@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/asticode/goav/avformat"
+
 	"github.com/pkg/errors"
 
 	"github.com/asticode/go-astiencoder"
@@ -23,6 +25,7 @@ type Encoder struct {
 	ctxCodec         *avcodec.Context
 	d                *pktDispatcher
 	e                astiencoder.EmitEventFunc
+	prev             Descriptor
 	q                *astisync.CtxQueue
 	r                *astisync.Regulator
 	statIncomingRate *astistat.IncrementStat
@@ -30,7 +33,7 @@ type Encoder struct {
 }
 
 // NewEncoder creates a new encoder
-func NewEncoder(ctxCodec *avcodec.Context, ee astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (e *Encoder) {
+func NewEncoder(ctxCodec *avcodec.Context, prev Descriptor, ee astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (e *Encoder) {
 	count := atomic.AddUint64(&countEncoder, uint64(1))
 	e = &Encoder{
 		BaseNode: astiencoder.NewBaseNode(ee, astiencoder.NodeMetadata{
@@ -41,6 +44,7 @@ func NewEncoder(ctxCodec *avcodec.Context, ee astiencoder.EmitEventFunc, c *asti
 		ctxCodec:         ctxCodec,
 		d:                newPktDispatcher(c),
 		e:                ee,
+		prev:             prev,
 		q:                astisync.NewCtxQueue(),
 		r:                astisync.NewRegulator(packetsBufferLength),
 		statIncomingRate: astistat.NewIncrementStat(),
@@ -52,18 +56,26 @@ func NewEncoder(ctxCodec *avcodec.Context, ee astiencoder.EmitEventFunc, c *asti
 
 // EncoderOptions represents encoder options
 type EncoderOptions struct {
-	CodecID     avcodec.CodecId
-	CodecName   string
-	CodecType   avcodec.MediaType
-	FrameRate   avutil.Rational
-	Height      int
-	PixelFormat avutil.PixelFormat
-	TimeBase    avutil.Rational
-	Width       int
+	// Mandatory options
+	BitRate           int
+	CodecID           avcodec.CodecId
+	CodecName         string
+	CodecType         avcodec.MediaType
+	FrameRate         avutil.Rational
+	GopSize           int
+	Height            int
+	PixelFormat       avutil.PixelFormat
+	SampleAspectRatio avutil.Rational
+	TimeBase          avutil.Rational
+	Width             int
+
+	// Optional options
+	Dict        string
+	ThreadCount *int
 }
 
 // NewEncoderFromOptions creates a new encoder based on options
-func NewEncoderFromOptions(o EncoderOptions, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (_ *Encoder, err error) {
+func NewEncoderFromOptions(o EncoderOptions, prev Descriptor, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (_ *Encoder, err error) {
 	// Find encoder
 	var cdc *avcodec.Codec
 	if len(o.CodecName) > 0 {
@@ -88,18 +100,40 @@ func NewEncoderFromOptions(o EncoderOptions, e astiencoder.EmitEventFunc, c *ast
 		return
 	}
 
-	// Set context parameters
+	// Set global context parameters
+	ctxCodec.SetFlags(ctxCodec.Flags() | avcodec.AV_CODEC_FLAG_GLOBAL_HEADER)
+	if o.ThreadCount != nil {
+		ctxCodec.SetThreadCount(*o.ThreadCount)
+	}
+
+	// Set media type-specific context parameters
 	switch o.CodecType {
 	case avutil.AVMEDIA_TYPE_VIDEO:
+		ctxCodec.SetBitRate(int64(o.BitRate))
 		ctxCodec.SetFramerate(o.FrameRate)
+		ctxCodec.SetGopSize(o.GopSize)
 		ctxCodec.SetHeight(o.Height)
 		ctxCodec.SetPixFmt(o.PixelFormat)
+		ctxCodec.SetSampleAspectRatio(o.SampleAspectRatio)
 		ctxCodec.SetTimeBase(o.TimeBase)
 		ctxCodec.SetWidth(o.Width)
 	}
 
+	// Dict
+	var dict *avutil.Dictionary
+	if len(o.Dict) > 0 {
+		// Parse dict
+		if ret := avutil.AvDictParseString(&dict, o.Dict, "=", ",", 0); ret < 0 {
+			err = errors.Wrapf(newAvError(ret), "astilibav: avutil.AvDictParseString on %s failed", o.Dict)
+			return
+		}
+
+		// Make sure the dict is freed
+		defer avutil.AvDictFree(&dict)
+	}
+
 	// Open codec
-	if ret := ctxCodec.AvcodecOpen2(cdc, nil); ret < 0 {
+	if ret := ctxCodec.AvcodecOpen2(cdc, &dict); ret < 0 {
 		err = errors.Wrap(newAvError(ret), "astilibav: d.ctxCodec.AvcodecOpen2 failed")
 		return
 	}
@@ -113,7 +147,7 @@ func NewEncoderFromOptions(o EncoderOptions, e astiencoder.EmitEventFunc, c *ast
 	})
 
 	// Create encoder
-	return NewEncoder(ctxCodec, e, c, packetsBufferLength), nil
+	return NewEncoder(ctxCodec, prev, e, c, packetsBufferLength), nil
 }
 
 func (e *Encoder) addStats() {
@@ -193,6 +227,9 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 				}
 				e.statWorkRatio.Done(true)
 
+				// Rescale timestamps
+				e.d.pkt.AvPacketRescaleTs(e.prev.TimeBase(), e.ctxCodec.TimeBase())
+
 				// Dispatch pkt
 				e.d.dispatch(e.r)
 			}
@@ -205,7 +242,23 @@ func (e *Encoder) HandleFrame(f *avutil.Frame) {
 	e.q.Send(f, true)
 }
 
-// TimeBaser returns the encoder time baser
-func (e *Encoder) TimeBaser() TimeBaser {
-	return e.ctxCodec
+// AddStream adds a stream based on the codec ctx
+func (e *Encoder) AddStream(ctxFormat *avformat.Context) (o *avformat.Stream, err error) {
+	// Add stream
+	o = AddStream(ctxFormat)
+
+	// Set codec parameters
+	if ret := avcodec.AvcodecParametersFromContext(o.CodecParameters(), e.ctxCodec); ret < 0 {
+		err = errors.Wrapf(newAvError(ret), "astilibav: avcodec.AvcodecParametersFromContext from %+v to %+v failed", e.ctxCodec, o.CodecParameters())
+		return
+	}
+
+	// Set other attributes
+	o.SetTimeBase(e.ctxCodec.TimeBase())
+	return
+}
+
+// TimeBase implements the Descriptor interface
+func (e *Encoder) TimeBase() avutil.Rational {
+	return e.ctxCodec.TimeBase()
 }

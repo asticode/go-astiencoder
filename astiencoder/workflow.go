@@ -182,7 +182,7 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 			// Add demuxer as root node of the workflow
 			bd.w.AddChild(i.o.d)
 
-			// In case of copy we only want to connect the demuxer to the muxer through a transmuxer
+			// In case of copy we only want to connect the demuxer to the muxer
 			if o.Codec == astiencoder.JobOperationCodecCopy {
 				// Loop through outputs
 				for _, o := range oos {
@@ -217,21 +217,28 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 
 			// Create filterer
 			var f *astilibav.Filterer
-			if f, err = b.createFilterer(bd, inCtx, outCtx); err != nil {
+			if f, err = b.createFilterer(bd, is, inCtx, outCtx); err != nil {
 				err = errors.Wrapf(err, "main: creating filterer for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
 				return
 			}
 
+			// Connect demuxer to filterer
+			var prev astilibav.Descriptor
+			prev = is
+			if f != nil {
+				prev = f
+				d.Connect(f)
+			}
+
 			// Create encoder
 			var e *astilibav.Encoder
-			if e, err = astilibav.NewEncoderFromOptions(outCtx.encoderOptions(), bd.w.EmitEventFunc(), bd.w.Closer(), 10); err != nil {
+			if e, err = astilibav.NewEncoderFromOptions(outCtx.encoderOptions(), prev, bd.w.EmitEventFunc(), bd.w.Closer(), 10); err != nil {
 				err = errors.Wrapf(err, "main: creating encoder for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
 				return
 			}
 
-			// Connect nodes
+			// Connect demuxer or filterer to encoder
 			if f != nil {
-				d.Connect(f)
 				f.Connect(e)
 			} else {
 				d.Connect(e)
@@ -249,15 +256,15 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 						return
 					}
 				default:
-					// Clone stream
+					// Add stream
 					var os *avformat.Stream
-					if os, err = astilibav.CloneStream(is, o.o.ctxFormat); err != nil {
-						err = errors.Wrapf(err, "main: cloning stream 0x%x(%d) of %s failed", is.Id(), is.Id(), i.c.Name)
+					if os, err = e.AddStream(o.o.ctxFormat); err != nil {
+						err = errors.Wrapf(err, "main: adding stream for stream 0x%x(%d) of %s and output %s failed", is.Id(), is.Id(), i.c.Name, o.c.Name)
 						return
 					}
 
 					// Create muxer handler
-					h = o.o.m.NewPktHandler(os, e.TimeBaser())
+					h = o.o.m.NewPktHandler(os, e)
 				}
 
 				// Connect encoder to handler
@@ -316,13 +323,17 @@ func (b *builder) operationInputsOutputs(o astiencoder.JobOperation, bd *buildDa
 }
 
 type operationCtx struct {
+	bitRate           int
 	codecID           avcodec.CodecId
 	codecName         string
 	codecType         avcodec.MediaType
+	dict              string
 	frameRate         avutil.Rational
+	gopSize           int
 	height            int
 	pixelFormat       avutil.PixelFormat
 	sampleAspectRatio avutil.Rational
+	threadCount       *int
 	timeBase          avutil.Rational
 	width             int
 }
@@ -330,9 +341,11 @@ type operationCtx struct {
 func (b *builder) operationInputCtx(s *avformat.Stream) operationCtx {
 	ctxCodec := (*avcodec.Context)(unsafe.Pointer(s.Codec()))
 	return operationCtx{
+		bitRate:           ctxCodec.BitRate(),
 		codecID:           s.CodecParameters().CodecId(),
 		codecType:         s.CodecParameters().CodecType(),
 		frameRate:         s.AvgFrameRate(),
+		gopSize:           ctxCodec.GopSize(),
 		height:            ctxCodec.Height(),
 		pixelFormat:       ctxCodec.PixFmt(),
 		sampleAspectRatio: s.SampleAspectRatio(),
@@ -348,7 +361,7 @@ func (b *builder) operationOutputCtx(o astiencoder.JobOperation, inCtx operation
 	// Set codec name
 	outCtx.codecName = o.Codec
 
-	// Set framerate
+	// Set frame rate
 	if o.FrameRate != nil {
 		outCtx.frameRate = avutil.NewRational(o.FrameRate.Num, o.FrameRate.Den)
 	}
@@ -356,8 +369,8 @@ func (b *builder) operationOutputCtx(o astiencoder.JobOperation, inCtx operation
 	// Set time base
 	if o.TimeBase != nil {
 		outCtx.timeBase = avutil.NewRational(o.TimeBase.Num, o.TimeBase.Den)
-	} else if o.FrameRate != nil {
-		outCtx.timeBase = avutil.NewRational(o.FrameRate.Den, o.FrameRate.Num)
+	} else {
+		outCtx.timeBase = avutil.NewRational(outCtx.frameRate.Den(), outCtx.frameRate.Num())
 	}
 
 	// Set pixel format
@@ -376,6 +389,22 @@ func (b *builder) operationOutputCtx(o astiencoder.JobOperation, inCtx operation
 	if o.Width != nil {
 		outCtx.width = *o.Width
 	}
+
+	// Set bit rate
+	if o.BitRate != nil {
+		outCtx.bitRate = *o.BitRate
+	}
+
+	// Set gop size
+	if o.GopSize != nil {
+		outCtx.gopSize = *o.GopSize
+	}
+
+	// Set thread count
+	outCtx.threadCount = o.ThreadCount
+
+	// Set dict
+	outCtx.dict = o.Dict
 	return
 }
 
@@ -392,14 +421,19 @@ func (ctx operationCtx) filtererInputOptions() astilibav.FiltererInputOptions {
 
 func (ctx operationCtx) encoderOptions() astilibav.EncoderOptions {
 	return astilibav.EncoderOptions{
-		CodecID:     ctx.codecID,
-		CodecName:   ctx.codecName,
-		CodecType:   ctx.codecType,
-		FrameRate:   ctx.frameRate,
-		Height:      ctx.height,
-		PixelFormat: ctx.pixelFormat,
-		TimeBase:    ctx.timeBase,
-		Width:       ctx.width,
+		BitRate:           ctx.bitRate,
+		CodecID:           ctx.codecID,
+		CodecName:         ctx.codecName,
+		CodecType:         ctx.codecType,
+		Dict:              ctx.dict,
+		FrameRate:         ctx.frameRate,
+		GopSize:           ctx.gopSize,
+		Height:            ctx.height,
+		PixelFormat:       ctx.pixelFormat,
+		SampleAspectRatio: ctx.sampleAspectRatio,
+		ThreadCount:       ctx.threadCount,
+		TimeBase:          ctx.timeBase,
+		Width:             ctx.width,
 	}
 }
 
@@ -429,7 +463,7 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 	return
 }
 
-func (b *builder) createFilterer(bd *buildData, inCtx, outCtx operationCtx) (f *astilibav.Filterer, err error) {
+func (b *builder) createFilterer(bd *buildData, i *avformat.Stream, inCtx, outCtx operationCtx) (f *astilibav.Filterer, err error) {
 	// Create filters
 	var filters []string
 
@@ -457,7 +491,7 @@ func (b *builder) createFilterer(bd *buildData, inCtx, outCtx operationCtx) (f *
 		}
 
 		// Create filterer
-		if f, err = astilibav.NewFiltererFromOptions(fo, bd.w.EmitEventFunc(), bd.w.Closer(), 10); err != nil {
+		if f, err = astilibav.NewFiltererFromOptions(fo, i, bd.w.EmitEventFunc(), bd.w.Closer(), 10); err != nil {
 			err = errors.Wrapf(err, "main: creating filterer with filters %+v failed", filters)
 			return
 		}

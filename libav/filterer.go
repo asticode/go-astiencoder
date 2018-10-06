@@ -25,6 +25,7 @@ type Filterer struct {
 	d                *frameDispatcher
 	e                astiencoder.EmitEventFunc
 	g                *avfilter.Graph
+	prev             Descriptor
 	q                *astisync.CtxQueue
 	r                *astisync.Regulator
 	statIncomingRate *astistat.IncrementStat
@@ -32,7 +33,7 @@ type Filterer struct {
 }
 
 // NewFilterer creates a new filterer
-func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (f *Filterer) {
+func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, prev Descriptor, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (f *Filterer) {
 	count := atomic.AddUint64(&countFilterer, uint64(1))
 	f = &Filterer{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
@@ -45,6 +46,7 @@ func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Grap
 		d:                newFrameDispatcher(c, e),
 		e:                e,
 		g:                g,
+		prev:             prev,
 		q:                astisync.NewCtxQueue(),
 		r:                astisync.NewRegulator(packetsBufferLength),
 		statIncomingRate: astistat.NewIncrementStat(),
@@ -71,7 +73,7 @@ type FiltererInputOptions struct {
 }
 
 // NewFiltererFromOptions creates a new filterer based on options
-func NewFiltererFromOptions(o FiltererOptions, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (_ *Filterer, err error) {
+func NewFiltererFromOptions(o FiltererOptions, prev Descriptor, e astiencoder.EmitEventFunc, c *astiencoder.Closer, packetsBufferLength int) (_ *Filterer, err error) {
 	// Create graph
 	g := avfilter.AvfilterGraphAlloc()
 	c.Add(func() error {
@@ -136,7 +138,7 @@ func NewFiltererFromOptions(o FiltererOptions, e astiencoder.EmitEventFunc, c *a
 	}
 
 	// Create filterer
-	return NewFilterer(bufferSrcCtx, bufferSinkCtx, g, e, c, packetsBufferLength), nil
+	return NewFilterer(bufferSrcCtx, bufferSinkCtx, g, prev, e, c, packetsBufferLength), nil
 }
 
 func (f *Filterer) addStats() {
@@ -226,4 +228,12 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 // HandleFrame implements the FrameHandler interface
 func (f *Filterer) HandleFrame(fm *avutil.Frame) {
 	f.q.Send(fm, true)
+}
+
+// TimeBase implements the Descriptor interface
+func (f *Filterer) TimeBase() avutil.Rational {
+	if f.bufferSinkCtx.NbInputs() == 0 {
+		return f.prev.TimeBase()
+	}
+	return f.bufferSinkCtx.Inputs()[0].TimeBase()
 }

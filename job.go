@@ -34,17 +34,20 @@ const (
 
 // JobOperation represents a job operation
 // This can usually be compared to an encoding
-// We need to refrain from using a dict here as we want to parse each and every attribute in order to provide detailed
-// processing
+// Refrain from indicating all options in the dict and use other attributes instead
 type JobOperation struct {
+	BitRate *int `json:"bit_rate,omitempty"`
 	// Possible values are "copy" and all libav codec names.
 	Codec string `json:"codec,omitempty"`
+	Dict  string `json:"dict,omitempty"`
 	// Frame rate is a per-operation value since we may have different frame rate operations for a similar output
 	FrameRate   *astifloat.Rational  `json:"frame_rate,omitempty"`
+	GopSize     *int                 `json:"gop_size,omitempty"`
 	Height      *int                 `json:"height,omitempty"`
 	Inputs      []JobOperationInput  `json:"inputs"`
 	Outputs     []JobOperationOutput `json:"outputs"`
 	PixelFormat string               `json:"pixel_format,omitempty"`
+	ThreadCount *int                 `json:"thread_count,omitempty"`
 	// Since frame rate is a per-operation value, time base is as well
 	TimeBase *astifloat.Rational `json:"time_base,omitempty"`
 	Width    *int                `json:"width,omitempty"`

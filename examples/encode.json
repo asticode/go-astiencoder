@@ -12,6 +12,7 @@
   "operations": {
     "default": {
       "codec": "libx264",
+      "dict": "profile=baseline",
       "inputs": [
         {
           "media_type": "video",

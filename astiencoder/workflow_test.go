@@ -9,7 +9,7 @@ import (
 func TestCopy(t *testing.T) {
 	testJob(t, "../examples/copy.json", func(j astiencoder.Job) map[string]string {
 		return map[string]string{
-			"../examples/tmp/copy.ts": "testdata/copy.ts",
+			"../examples/tmp/copy.mp4": "testdata/copy.mp4",
 		}
 	})
 }
