@@ -41,7 +41,11 @@ const base = {
                                 menu.init(data.responseJSON)
 
                                 // Custom function
-                                if (typeof pageFunc !== "undefined" && pageFunc !== null) pageFunc(data)
+                                if (typeof pageFunc !== "undefined" && pageFunc !== null) {
+                                    pageFunc(data)
+                                } else {
+                                    asticode.loader.hide()
+                                }
                             }
                         })
                     },
