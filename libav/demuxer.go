@@ -9,7 +9,6 @@ import (
 	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/go-astitools/worker"
-	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
 )
@@ -19,11 +18,11 @@ var countDemuxer uint64
 // Demuxer represents an object capable of demuxing packets out of an input
 type Demuxer struct {
 	*astiencoder.BaseNode
-	ctxFormat        *avformat.Context
-	d                *pktDispatcher
-	e                astiencoder.EmitEventFunc
-	r                *astisync.Regulator
-	statWorkRatio    *astistat.DurationRatioStat
+	ctxFormat     *avformat.Context
+	d             *pktDispatcher
+	e             astiencoder.EmitEventFunc
+	r             *astisync.Regulator
+	statWorkRatio *astistat.DurationRatioStat
 }
 
 // NewDemuxer creates a new demuxer
@@ -35,11 +34,11 @@ func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *ast
 			Label:       fmt.Sprintf("Demuxer #%d", count),
 			Name:        fmt.Sprintf("demuxer_%d", count),
 		}),
-		ctxFormat:        ctxFormat,
-		d:                newPktDispatcher(c),
-		e:                e,
-		r:                astisync.NewRegulator(packetsBufferLength),
-		statWorkRatio:    astistat.NewDurationRatioStat(),
+		ctxFormat:     ctxFormat,
+		d:             newPktDispatcher(c),
+		e:             e,
+		r:             astisync.NewRegulator(packetsBufferLength),
+		statWorkRatio: astistat.NewDurationRatioStat(),
 	}
 	d.addStats()
 	return
@@ -60,9 +59,7 @@ func (d *Demuxer) addStats() {
 // Connect connects the demuxer to a PktHandler for a specific stream index
 func (d *Demuxer) Connect(i *avformat.Stream, h PktHandler) {
 	// Add handler
-	d.d.addHandler(h, func(pkt *avcodec.Packet) bool {
-		return pkt.StreamIndex() == i.Index()
-	})
+	d.d.addHandler(newPktCond(i, h))
 
 	// Connect nodes
 	astiencoder.ConnectNodes(d, h.(astiencoder.Node))

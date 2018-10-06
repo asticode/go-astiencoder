@@ -141,7 +141,7 @@ func (e *Encoder) addStats() {
 // Connect connects the encoder to a PktHandler
 func (e *Encoder) Connect(h PktHandler) {
 	// Append handler
-	e.d.addHandler(h, nil)
+	e.d.addHandler(h)
 
 	// Connect nodes
 	astiencoder.ConnectNodes(e, h.(astiencoder.Node))

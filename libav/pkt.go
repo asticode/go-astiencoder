@@ -8,6 +8,7 @@ import (
 	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/goav/avcodec"
+	"github.com/asticode/goav/avformat"
 )
 
 // PktHandler represents an object that can handle a pkt
@@ -16,24 +17,23 @@ type PktHandler interface {
 }
 
 type pktDispatcher struct {
-	c        *astiencoder.Closer
-	hs       []pktDispatcherHandler
-	m        *sync.Mutex
-	pkt      *avcodec.Packet
+	c            *astiencoder.Closer
+	hs           []pktDispatcherHandler
+	m            *sync.Mutex
+	pkt          *avcodec.Packet
 	statDispatch *astistat.DurationRatioStat
 }
 
 type pktDispatcherHandler struct {
 	h   PktHandler
 	pkt *avcodec.Packet
-	use func(pkt *avcodec.Packet) bool
 }
 
 func newPktDispatcher(c *astiencoder.Closer) (d *pktDispatcher) {
 	// Create dispatcher
 	d = &pktDispatcher{
-		c:        c,
-		m:        &sync.Mutex{},
+		c:            c,
+		m:            &sync.Mutex{},
 		statDispatch: astistat.NewDurationRatioStat(),
 	}
 
@@ -46,7 +46,7 @@ func newPktDispatcher(c *astiencoder.Closer) (d *pktDispatcher) {
 	return
 }
 
-func (d *pktDispatcher) addHandler(h PktHandler, use func(pkt *avcodec.Packet) bool) {
+func (d *pktDispatcher) addHandler(h PktHandler) {
 	// Lock
 	d.m.Lock()
 	defer d.m.Unlock()
@@ -62,7 +62,6 @@ func (d *pktDispatcher) addHandler(h PktHandler, use func(pkt *avcodec.Packet) b
 	d.hs = append(d.hs, pktDispatcherHandler{
 		h:   h,
 		pkt: pkt,
-		use: use,
 	})
 }
 
@@ -76,7 +75,8 @@ func (d *pktDispatcher) dispatch(r *astisync.Regulator) {
 	// Copy handlers
 	var hs []pktDispatcherHandler
 	for _, h := range d.hs {
-		if h.use == nil || h.use(d.pkt) {
+		v, ok := h.h.(PktCond)
+		if !ok || v.UsePkt(d.pkt) {
 			hs = append(hs, h)
 		}
 	}
@@ -116,4 +116,26 @@ func (d *pktDispatcher) addStats(s *astistat.Stater) {
 		Label:       "Dispatch ratio",
 		Unit:        "%",
 	}, d.statDispatch)
+}
+
+// PktCond represents an object that can decide whether to use a pkt
+type PktCond interface {
+	UsePkt(pkt *avcodec.Packet) bool
+}
+
+type pktCond struct {
+	PktHandler
+	i *avformat.Stream
+}
+
+func newPktCond(i *avformat.Stream, h PktHandler) *pktCond {
+	return &pktCond{
+		i:          i,
+		PktHandler: h,
+	}
+}
+
+// UsePkt implements the PktCond interface
+func (c *pktCond) UsePkt(pkt *avcodec.Packet) bool {
+	return pkt.StreamIndex() == c.i.Index()
 }

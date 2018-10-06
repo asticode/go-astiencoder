@@ -15,7 +15,7 @@ import (
 func testJob(t *testing.T, jobPath string, assertPaths func(j astiencoder.Job) map[string]string) {
 	// Create encoder
 	cfg := &astiencoder.Configuration{}
-	cfg.Exec.StopWhenWorkflowsAreDone = true
+	cfg.Exec.StopWhenWorkflowsAreStopped = true
 	e := astiencoder.NewEncoder(cfg)
 	defer e.Close()
 
