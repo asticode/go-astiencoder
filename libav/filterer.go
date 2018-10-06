@@ -57,17 +57,7 @@ func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Grap
 // FiltererOptions represents filterer options
 type FiltererOptions struct {
 	Content string
-	Input   FiltererInputOptions
-}
-
-// FiltererInputOptions represent filterer input options
-type FiltererInputOptions struct {
-	CodecType         avcodec.MediaType
-	Height            int
-	PixelFormat       avutil.PixelFormat
-	SampleAspectRatio avutil.Rational
-	TimeBase          avutil.Rational
-	Width             int
+	Input   Context
 }
 
 // NewFiltererFromOptions creates a new filterer based on options

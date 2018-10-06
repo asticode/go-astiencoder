@@ -52,42 +52,28 @@ func NewEncoder(ctxCodec *avcodec.Context, prev Descriptor, ee astiencoder.EmitE
 	return
 }
 
-// EncoderOptions represents encoder options
-type EncoderOptions struct {
-	// Mandatory options
-	BitRate           int
-	CodecID           avcodec.CodecId
-	CodecName         string
-	CodecType         avcodec.MediaType
-	FrameRate         avutil.Rational
-	GopSize           int
-	Height            int
-	PixelFormat       avutil.PixelFormat
-	SampleAspectRatio avutil.Rational
-	TimeBase          avutil.Rational
-	Width             int
-
-	// Optional options
-	Dict        string
-	ThreadCount *int
-}
-
-// NewEncoderFromOptions creates a new encoder based on options
-func NewEncoderFromOptions(o EncoderOptions, prev Descriptor, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (_ *Encoder, err error) {
+// NewEncoderFromContext creates a new encoder based on a context
+func NewEncoderFromContext(ctx Context, prev Descriptor, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (_ *Encoder, err error) {
 	// Find encoder
 	var cdc *avcodec.Codec
-	if len(o.CodecName) > 0 {
-		if cdc = avcodec.AvcodecFindEncoderByName(o.CodecName); cdc == nil {
-			err = fmt.Errorf("astilibav: no encoder with name %s", o.CodecName)
+	if len(ctx.CodecName) > 0 {
+		if cdc = avcodec.AvcodecFindEncoderByName(ctx.CodecName); cdc == nil {
+			err = fmt.Errorf("astilibav: no encoder with name %s", ctx.CodecName)
 			return
 		}
-	} else if o.CodecID > 0 {
-		if cdc = avcodec.AvcodecFindEncoder(o.CodecID); cdc == nil {
-			err = fmt.Errorf("astilibav: no encoder with id %+v", o.CodecID)
+	} else if ctx.CodecID > 0 {
+		if cdc = avcodec.AvcodecFindEncoder(ctx.CodecID); cdc == nil {
+			err = fmt.Errorf("astilibav: no encoder with id %+v", ctx.CodecID)
 			return
 		}
 	} else {
 		err = errors.New("astilibav: neither codec name nor codec id provided")
+		return
+	}
+
+	// Check whether the context is valid with the codec
+	if err = ctx.validWithCodec(cdc); err != nil {
+		err = errors.Wrap(err, "astilibav: checking whether the context is valid with the codec failed")
 		return
 	}
 
@@ -100,29 +86,38 @@ func NewEncoderFromOptions(o EncoderOptions, prev Descriptor, e astiencoder.Emit
 
 	// Set global context parameters
 	ctxCodec.SetFlags(ctxCodec.Flags() | avcodec.AV_CODEC_FLAG_GLOBAL_HEADER)
-	if o.ThreadCount != nil {
-		ctxCodec.SetThreadCount(*o.ThreadCount)
+	if ctx.ThreadCount != nil {
+		ctxCodec.SetThreadCount(*ctx.ThreadCount)
 	}
 
 	// Set media type-specific context parameters
-	switch o.CodecType {
+	switch ctx.CodecType {
+	case avutil.AVMEDIA_TYPE_AUDIO:
+		ctxCodec.SetBitRate(int64(ctx.BitRate))
+		ctxCodec.SetChannelLayout(ctx.ChannelLayout)
+		ctxCodec.SetChannels(ctx.Channels)
+		ctxCodec.SetSampleFmt(ctx.SampleFmt)
+		ctxCodec.SetSampleRate(ctx.SampleRate)
 	case avutil.AVMEDIA_TYPE_VIDEO:
-		ctxCodec.SetBitRate(int64(o.BitRate))
-		ctxCodec.SetFramerate(o.FrameRate)
-		ctxCodec.SetGopSize(o.GopSize)
-		ctxCodec.SetHeight(o.Height)
-		ctxCodec.SetPixFmt(o.PixelFormat)
-		ctxCodec.SetSampleAspectRatio(o.SampleAspectRatio)
-		ctxCodec.SetTimeBase(o.TimeBase)
-		ctxCodec.SetWidth(o.Width)
+		ctxCodec.SetBitRate(int64(ctx.BitRate))
+		ctxCodec.SetFramerate(ctx.FrameRate)
+		ctxCodec.SetGopSize(ctx.GopSize)
+		ctxCodec.SetHeight(ctx.Height)
+		ctxCodec.SetPixFmt(ctx.PixelFormat)
+		ctxCodec.SetSampleAspectRatio(ctx.SampleAspectRatio)
+		ctxCodec.SetTimeBase(ctx.TimeBase)
+		ctxCodec.SetWidth(ctx.Width)
+	default:
+		err = fmt.Errorf("astilibav: encoder doesn't handle %v codec type", ctx.CodecType)
+		return
 	}
 
 	// Dict
 	var dict *avutil.Dictionary
-	if len(o.Dict) > 0 {
+	if len(ctx.Dict) > 0 {
 		// Parse dict
-		if ret := avutil.AvDictParseString(&dict, o.Dict, "=", ",", 0); ret < 0 {
-			err = errors.Wrapf(newAvError(ret), "astilibav: avutil.AvDictParseString on %s failed", o.Dict)
+		if ret := avutil.AvDictParseString(&dict, ctx.Dict, "=", ",", 0); ret < 0 {
+			err = errors.Wrapf(newAvError(ret), "astilibav: avutil.AvDictParseString on %s failed", ctx.Dict)
 			return
 		}
 

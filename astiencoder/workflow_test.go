@@ -25,3 +25,11 @@ func TestMJpeg(t *testing.T) {
 		}
 	})
 }
+
+func TestEncode(t *testing.T) {
+	testJob(t, "../examples/encode.json", func(j astiencoder.Job) (o map[string]string) {
+		return map[string]string{
+			"../examples/tmp/encode.mp4": "testdata/encode.mp4",
+		}
+	})
+}

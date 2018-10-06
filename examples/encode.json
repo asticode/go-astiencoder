@@ -10,7 +10,21 @@
     }
   },
   "operations": {
-    "default": {
+    "audio": {
+      "codec": "aac",
+      "inputs": [
+        {
+          "media_type": "audio",
+          "name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    "video": {
       "codec": "libx264",
       "dict": "profile=baseline",
       "inputs": [

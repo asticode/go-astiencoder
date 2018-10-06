@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"strings"
-	"unsafe"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astiencoder/libav"
@@ -210,7 +209,7 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 			}
 
 			// Create input ctx
-			inCtx := b.operationInputCtx(is)
+			inCtx := astilibav.NewContextFromStream(is)
 
 			// Create output ctx
 			outCtx := b.operationOutputCtx(o, inCtx)
@@ -232,7 +231,7 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 
 			// Create encoder
 			var e *astilibav.Encoder
-			if e, err = astilibav.NewEncoderFromOptions(outCtx.encoderOptions(), prev, bd.w.EmitEventFunc(), bd.w.Closer()); err != nil {
+			if e, err = astilibav.NewEncoderFromContext(outCtx, prev, bd.w.EmitEventFunc(), bd.w.Closer()); err != nil {
 				err = errors.Wrapf(err, "main: creating encoder for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
 				return
 			}
@@ -322,119 +321,60 @@ func (b *builder) operationInputsOutputs(o astiencoder.JobOperation, bd *buildDa
 	return
 }
 
-type operationCtx struct {
-	bitRate           int
-	codecID           avcodec.CodecId
-	codecName         string
-	codecType         avcodec.MediaType
-	dict              string
-	frameRate         avutil.Rational
-	gopSize           int
-	height            int
-	pixelFormat       avutil.PixelFormat
-	sampleAspectRatio avutil.Rational
-	threadCount       *int
-	timeBase          avutil.Rational
-	width             int
-}
-
-func (b *builder) operationInputCtx(s *avformat.Stream) operationCtx {
-	ctxCodec := (*avcodec.Context)(unsafe.Pointer(s.Codec()))
-	return operationCtx{
-		bitRate:           ctxCodec.BitRate(),
-		codecID:           s.CodecParameters().CodecId(),
-		codecType:         s.CodecParameters().CodecType(),
-		frameRate:         s.AvgFrameRate(),
-		gopSize:           ctxCodec.GopSize(),
-		height:            ctxCodec.Height(),
-		pixelFormat:       ctxCodec.PixFmt(),
-		sampleAspectRatio: s.SampleAspectRatio(),
-		timeBase:          s.TimeBase(),
-		width:             ctxCodec.Width(),
-	}
-}
-
-func (b *builder) operationOutputCtx(o astiencoder.JobOperation, inCtx operationCtx) (outCtx operationCtx) {
+func (b *builder) operationOutputCtx(o astiencoder.JobOperation, inCtx astilibav.Context) (outCtx astilibav.Context) {
 	// Default output ctx is input ctx
 	outCtx = inCtx
 
 	// Set codec name
-	outCtx.codecName = o.Codec
+	outCtx.CodecName = o.Codec
 
 	// Set frame rate
 	if o.FrameRate != nil {
-		outCtx.frameRate = avutil.NewRational(o.FrameRate.Num, o.FrameRate.Den)
+		outCtx.FrameRate = avutil.NewRational(o.FrameRate.Num, o.FrameRate.Den)
 	}
 
 	// Set time base
 	if o.TimeBase != nil {
-		outCtx.timeBase = avutil.NewRational(o.TimeBase.Num, o.TimeBase.Den)
+		outCtx.TimeBase = avutil.NewRational(o.TimeBase.Num, o.TimeBase.Den)
 	} else {
-		outCtx.timeBase = avutil.NewRational(outCtx.frameRate.Den(), outCtx.frameRate.Num())
+		outCtx.TimeBase = avutil.NewRational(outCtx.FrameRate.Den(), outCtx.FrameRate.Num())
 	}
 
 	// Set pixel format
 	if len(o.PixelFormat) > 0 {
-		outCtx.pixelFormat = avutil.PixelFormatFromString(o.PixelFormat)
+		outCtx.PixelFormat = avutil.PixelFormatFromString(o.PixelFormat)
 	} else if o.Codec == "mjpeg" {
-		outCtx.pixelFormat = avutil.AV_PIX_FMT_YUVJ420P
+		outCtx.PixelFormat = avutil.AV_PIX_FMT_YUVJ420P
 	}
 
 	// Set height
 	if o.Height != nil {
-		outCtx.height = *o.Height
+		outCtx.Height = *o.Height
 	}
 
 	// Set width
 	if o.Width != nil {
-		outCtx.width = *o.Width
+		outCtx.Width = *o.Width
 	}
 
 	// Set bit rate
 	if o.BitRate != nil {
-		outCtx.bitRate = *o.BitRate
+		outCtx.BitRate = *o.BitRate
 	}
 
 	// Set gop size
 	if o.GopSize != nil {
-		outCtx.gopSize = *o.GopSize
+		outCtx.GopSize = *o.GopSize
 	}
 
 	// Set thread count
-	outCtx.threadCount = o.ThreadCount
+	outCtx.ThreadCount = o.ThreadCount
 
 	// Set dict
-	outCtx.dict = o.Dict
+	outCtx.Dict = o.Dict
+
+	// TODO Add audio options
 	return
-}
-
-func (ctx operationCtx) filtererInputOptions() astilibav.FiltererInputOptions {
-	return astilibav.FiltererInputOptions{
-		CodecType:         ctx.codecType,
-		Height:            ctx.height,
-		PixelFormat:       ctx.pixelFormat,
-		SampleAspectRatio: ctx.sampleAspectRatio,
-		TimeBase:          ctx.timeBase,
-		Width:             ctx.width,
-	}
-}
-
-func (ctx operationCtx) encoderOptions() astilibav.EncoderOptions {
-	return astilibav.EncoderOptions{
-		BitRate:           ctx.bitRate,
-		CodecID:           ctx.codecID,
-		CodecName:         ctx.codecName,
-		CodecType:         ctx.codecType,
-		Dict:              ctx.dict,
-		FrameRate:         ctx.frameRate,
-		GopSize:           ctx.gopSize,
-		Height:            ctx.height,
-		PixelFormat:       ctx.pixelFormat,
-		SampleAspectRatio: ctx.sampleAspectRatio,
-		ThreadCount:       ctx.threadCount,
-		TimeBase:          ctx.timeBase,
-		Width:             ctx.width,
-	}
 }
 
 func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.Stream) (d *astilibav.Decoder, err error) {
@@ -463,22 +403,22 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 	return
 }
 
-func (b *builder) createFilterer(bd *buildData, i *avformat.Stream, inCtx, outCtx operationCtx) (f *astilibav.Filterer, err error) {
+func (b *builder) createFilterer(bd *buildData, i *avformat.Stream, inCtx, outCtx astilibav.Context) (f *astilibav.Filterer, err error) {
 	// Create filters
 	var filters []string
 
 	// Switch on media type
-	switch inCtx.codecType {
+	switch inCtx.CodecType {
 	case avutil.AVMEDIA_TYPE_VIDEO:
 		// Frame rate
 		// TODO Use select if inFramerate > outFramerate
-		if inCtx.frameRate.Num()/inCtx.frameRate.Den() != outCtx.frameRate.Num()/outCtx.frameRate.Den() {
-			filters = append(filters, fmt.Sprintf("minterpolate='fps=%d/%d'", outCtx.frameRate.Num(), outCtx.frameRate.Den()))
+		if inCtx.FrameRate.Num()/inCtx.FrameRate.Den() != outCtx.FrameRate.Num()/outCtx.FrameRate.Den() {
+			filters = append(filters, fmt.Sprintf("minterpolate='fps=%d/%d'", outCtx.FrameRate.Num(), outCtx.FrameRate.Den()))
 		}
 
 		// Scale
-		if inCtx.height != outCtx.height || inCtx.width != outCtx.width {
-			filters = append(filters, fmt.Sprintf("scale='w=%d:h=%d'", outCtx.width, outCtx.height))
+		if inCtx.Height != outCtx.Height || inCtx.Width != outCtx.Width {
+			filters = append(filters, fmt.Sprintf("scale='w=%d:h=%d'", outCtx.Width, outCtx.Height))
 		}
 	}
 
@@ -487,7 +427,7 @@ func (b *builder) createFilterer(bd *buildData, i *avformat.Stream, inCtx, outCt
 		// Create filterer options
 		fo := astilibav.FiltererOptions{
 			Content: strings.Join(filters, ","),
-			Input:   inCtx.filtererInputOptions(),
+			Input:   inCtx,
 		}
 
 		// Create filterer

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"encoding/json"
+	"github.com/asticode/goav/avutil"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -11,6 +12,10 @@ import (
 	"github.com/asticode/go-astiencoder"
 	"github.com/pkg/errors"
 )
+
+func init() {
+	avutil.AvLogSetLevel(avutil.AV_LOG_ERROR)
+}
 
 func testJob(t *testing.T, jobPath string, assertPaths func(j astiencoder.Job) map[string]string) {
 	// Create encoder
