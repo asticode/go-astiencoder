@@ -228,6 +228,7 @@ Let say the absolute path to your current dir is `/path/to`, here are their resp
 - [ ] proper tests
 - [ ] audio resampling
 - [ ] packaging (dash + hls + smooth)
+- [ ] add plugin in [snickers](https://github.com/snickers/snickers/tree/master/encoders)
 - [ ] many others :D
 
 # Contribute
