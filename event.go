@@ -34,12 +34,9 @@ func EventError(err error) Event {
 	}
 }
 
-// EventHandler returns a method that can handle events coming out of the encoder
-type EventHandler func() (isBlocking bool, fn func(e Event))
-
-// LoggerHandleEventFunc returns the logger handle event func
-var LoggerHandleEventFunc = func() (isBlocking bool, fn func(e Event)) {
-	return true, func(e Event) {
+// AddLoggerEventHandler adds the logger event handler
+var AddLoggerEventHandler = func(fn func(h EventHandler, o EventHandlerOptions)) {
+	fn(func(e Event) {
 		switch e.Name {
 		case EventNameError:
 			astilog.Error(e.Payload.(error))
@@ -52,46 +49,52 @@ var LoggerHandleEventFunc = func() (isBlocking bool, fn func(e Event)) {
 		case EventNameWorkflowStopped:
 			astilog.Debugf("astiencoder: workflow %s is stopped", e.Payload.(string))
 		}
-	}
+	}, EventHandlerOptions{Blocking: true})
 }
 
-// EmitEventFunc is a method that can emit events out of the encoder
-type EmitEventFunc func(e Event)
+// EventHandler returns a method that can handle events coming out of the encoder
+type EventHandler func(e Event)
 
-type eventHandler struct {
-	fn         func(e Event)
-	isBlocking bool
+// EventHandlerOptions represents event handler options
+type EventHandlerOptions struct {
+	Blocking bool
 }
 
-type eventEmitter struct {
+// EventEmitter represents an object capable of emitting events
+type EventEmitter struct {
 	hs []eventHandler
 	m  *sync.Mutex
 }
 
-func newEventEmitter() *eventEmitter {
-	return &eventEmitter{
-		m: &sync.Mutex{},
-	}
+type eventHandler struct {
+	h EventHandler
+	o EventHandlerOptions
 }
 
-func (e *eventEmitter) addHandler(h EventHandler) {
+// NewEventEmitter creates a new event emitter
+func NewEventEmitter() *EventEmitter {
+	return &EventEmitter{m: &sync.Mutex{}}
+}
+
+// AddHandler adds a new handler
+func (e *EventEmitter) AddHandler(h EventHandler, o EventHandlerOptions) {
 	e.m.Lock()
 	defer e.m.Unlock()
-	isBlocking, fn := h()
 	e.hs = append(e.hs, eventHandler{
-		isBlocking: isBlocking,
-		fn:         fn,
+		h: h,
+		o: o,
 	})
 }
 
-func (e *eventEmitter) emit(evt Event) {
+// Emit emits a new event
+func (e *EventEmitter) Emit(evt Event) {
 	e.m.Lock()
 	defer e.m.Unlock()
 	for _, h := range e.hs {
-		if h.isBlocking {
-			h.fn(evt)
+		if h.o.Blocking {
+			h.h(evt)
 		} else {
-			go h.fn(evt)
+			go h.h(evt)
 		}
 	}
 }

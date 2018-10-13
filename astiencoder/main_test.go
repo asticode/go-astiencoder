@@ -17,15 +17,12 @@ func init() {
 	avutil.AvLogSetLevel(avutil.AV_LOG_ERROR)
 }
 
-func testJob(t *testing.T, jobPath string, assertPaths func(j astiencoder.Job) map[string]string) {
+func testJob(t *testing.T, jobPath string, assertPaths func(j Job) map[string]string) {
 	// Create encoder
 	cfg := &astiencoder.Configuration{}
 	cfg.Exec.StopWhenWorkflowsAreStopped = true
 	e := astiencoder.NewEncoder(cfg)
 	defer e.Close()
-
-	// Set workflow builder
-	e.SetWorkflowBuilder(newBuilder())
 
 	// Open job
 	j, err := openJob(jobPath)
@@ -34,15 +31,15 @@ func testJob(t *testing.T, jobPath string, assertPaths func(j astiencoder.Job) m
 		return
 	}
 
-	// Create workflow
-	w, err := e.NewWorkflow("test", j)
+	// Add workflow
+	w, err := addWorkflow("test", j, e)
 	if err != nil {
 		t.Error(err)
 		return
 	}
 
 	// Start workflow
-	w.Start()
+	w.Start(e.Context())
 
 	// Wait
 	e.Wait()
@@ -53,7 +50,7 @@ func testJob(t *testing.T, jobPath string, assertPaths func(j astiencoder.Job) m
 	}
 }
 
-func openJob(path string) (j astiencoder.Job, err error) {
+func openJob(path string) (j Job, err error) {
 	// Open
 	var f *os.File
 	if f, err = os.Open(path); err != nil {

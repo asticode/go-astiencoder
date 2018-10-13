@@ -21,14 +21,14 @@ type Decoder struct {
 	*astiencoder.BaseNode
 	ctxCodec         *avcodec.Context
 	d                *frameDispatcher
-	e                astiencoder.EmitEventFunc
+	e                *astiencoder.EventEmitter
 	q                *astisync.CtxQueue
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
 }
 
 // NewDecoder creates a new decoder
-func NewDecoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (d *Decoder) {
+func NewDecoder(ctxCodec *avcodec.Context, e *astiencoder.EventEmitter, c *astiencoder.Closer) (d *Decoder) {
 	count := atomic.AddUint64(&countDecoder, uint64(1))
 	d = &Decoder{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
@@ -48,7 +48,7 @@ func NewDecoder(ctxCodec *avcodec.Context, e astiencoder.EmitEventFunc, c *astie
 }
 
 // NewDecoderFromCodecParams creates a new decoder from codec params
-func NewDecoderFromCodecParams(codecParams *avcodec.CodecParameters, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (d *Decoder, err error) {
+func NewDecoderFromCodecParams(codecParams *avcodec.CodecParameters, e *astiencoder.EventEmitter, c *astiencoder.Closer) (d *Decoder, err error) {
 	// Find decoder
 	var cdc *avcodec.Codec
 	if cdc = avcodec.AvcodecFindDecoder(codecParams.CodecId()); cdc == nil {

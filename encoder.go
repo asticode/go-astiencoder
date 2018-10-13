@@ -1,6 +1,7 @@
 package astiencoder
 
 import (
+	"context"
 	"sync"
 
 	"fmt"
@@ -16,25 +17,19 @@ var (
 
 // Encoder represents an encoder
 type Encoder struct {
-	b         WorkflowBuilder
 	cfg       *Configuration
 	e         *exposer
-	ee        *eventEmitter
+	ee        *EventEmitter
 	m         *sync.Mutex
 	w         *astiworker.Worker
 	ws        map[string]*Workflow
 	wsStarted map[string]bool
 }
 
-// WorkflowBuilder represents an object that can build a workflow based on a job
-type WorkflowBuilder interface {
-	BuildWorkflow(j Job, w *Workflow) error
-}
-
 // NewEncoder creates a new encoder
 func NewEncoder(cfg *Configuration) (e *Encoder) {
 	aw := astiworker.NewWorker()
-	ee := newEventEmitter()
+	ee := NewEventEmitter()
 	e = &Encoder{
 		cfg:       cfg,
 		ee:        ee,
@@ -44,13 +39,18 @@ func NewEncoder(cfg *Configuration) (e *Encoder) {
 		wsStarted: make(map[string]bool),
 	}
 	e.e = newExposer(e)
-	ee.addHandler(e.handleEvent)
+	ee.AddHandler(e.handleEvent, EventHandlerOptions{})
 	return
 }
 
 // Close implements the io.Closer interface
 func (e *Encoder) Close() error {
 	return nil
+}
+
+// Context returns the encoder context
+func (e *Encoder) Context() context.Context {
+	return e.w.Context()
 }
 
 // Stop stops the encoder
@@ -69,35 +69,24 @@ func (e *Encoder) Wait() {
 }
 
 // AddEventHandler adds an event handler
-func (e *Encoder) AddEventHandler(h EventHandler) {
-	e.ee.addHandler(h)
-}
-
-// SetWorkflowBuilder sets the workflow builder
-func (e *Encoder) SetWorkflowBuilder(b WorkflowBuilder) {
-	e.b = b
+func (e *Encoder) AddEventHandler(h EventHandler, o EventHandlerOptions) {
+	e.ee.AddHandler(h, o)
 }
 
 // Serve creates and starts the server
-func (e *Encoder) Serve() (err error) {
+func (e *Encoder) Serve(h ServerCustomHandler) (err error) {
 	var s *server
 	if s, err = newServer(e.cfg.Server, e.e); err != nil {
 		err = errors.Wrap(err, "astiencoder: creating new server failed")
 		return
 	}
-	e.AddEventHandler(s.handleEvent)
-	e.w.Serve(e.cfg.Server.Addr, s.handler())
+	e.AddEventHandler(s.handleEvent, EventHandlerOptions{})
+	e.w.Serve(e.cfg.Server.Addr, s.handler(h))
 	return
 }
 
-// NewWorkflow creates a new workflow based on a job
-func (e *Encoder) NewWorkflow(name string, j Job) (w *Workflow, err error) {
-	// No workflow builder
-	if e.b == nil {
-		err = errors.New("astiencoder: no workflow builder")
-		return
-	}
-
+// NewWorkflow creates a new workflow
+func (e *Encoder) NewWorkflow(name string) (w *Workflow, err error) {
 	// Name is already used
 	e.m.Lock()
 	_, ok := e.ws[name]
@@ -111,16 +100,7 @@ func (e *Encoder) NewWorkflow(name string, j Job) (w *Workflow, err error) {
 	c := newCloser()
 
 	// Create workflow
-	w = newWorkflow(name, j, e.w.Context(), e.ee.emit, e.w.NewTask, c)
-
-	// Build workflow
-	if err = e.b.BuildWorkflow(j, w); err != nil {
-		err = errors.Wrapf(err, "astiencoder: building workflow for job %+v failed", j)
-		return
-	}
-
-	// Index nodes in workflow
-	w.indexNodes()
+	w = NewWorkflow(name, e.ee, e.w.NewTask, c)
 
 	// Store workflow
 	e.m.Lock()
@@ -141,23 +121,21 @@ func (e *Encoder) Workflow(name string) (w *Workflow, err error) {
 	return
 }
 
-func (e *Encoder) handleEvent() (bool, func(Event)) {
-	return false, func(evt Event) {
-		switch evt.Name {
-		case EventNameWorkflowStarted:
-			e.m.Lock()
-			defer e.m.Unlock()
-			if _, ok := e.ws[evt.Payload.(string)]; !ok {
-				return
-			}
-			e.wsStarted[evt.Payload.(string)] = true
-		case EventNameWorkflowStopped:
-			e.m.Lock()
-			defer e.m.Unlock()
-			delete(e.wsStarted, evt.Payload.(string))
-			if e.cfg.Exec.StopWhenWorkflowsAreStopped && len(e.wsStarted) == 0 {
-				e.Stop()
-			}
+func (e *Encoder) handleEvent(evt Event) {
+	switch evt.Name {
+	case EventNameWorkflowStarted:
+		e.m.Lock()
+		defer e.m.Unlock()
+		if _, ok := e.ws[evt.Payload.(string)]; !ok {
+			return
+		}
+		e.wsStarted[evt.Payload.(string)] = true
+	case EventNameWorkflowStopped:
+		e.m.Lock()
+		defer e.m.Unlock()
+		delete(e.wsStarted, evt.Payload.(string))
+		if e.cfg.Exec.StopWhenWorkflowsAreStopped && len(e.wsStarted) == 0 {
+			e.Stop()
 		}
 	}
 }

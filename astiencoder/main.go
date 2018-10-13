@@ -44,16 +44,13 @@ func main() {
 	defer e.Close()
 
 	// Add event handler
-	e.AddEventHandler(astiencoder.LoggerHandleEventFunc)
-
-	// Set workflow builder
-	e.SetWorkflowBuilder(newBuilder())
+	astiencoder.AddLoggerEventHandler(e.AddEventHandler)
 
 	// Handle signals
 	e.HandleSignals()
 
 	// Serve
-	if err := e.Serve(); err != nil {
+	if err := e.Serve(serverCustomHandler); err != nil {
 		astilog.Fatal(errors.Wrap(err, "main: serving failed"))
 	}
 
@@ -66,22 +63,22 @@ func main() {
 		}
 
 		// Unmarshal
-		var j astiencoder.Job
+		var j Job
 		if err = json.NewDecoder(f).Decode(&j); err != nil {
 			astilog.Fatal(errors.Wrapf(err, "main: unmarshaling %s into %+v failed", *job, j))
 		}
 
-		// Create workflow
+		// Add workflow
 		var w *astiencoder.Workflow
-		if w, err = e.NewWorkflow("default", j); err != nil {
-			astilog.Fatal(errors.Wrapf(err, "main: creating default workflow for job %+v failed", j))
+		if w, err = addWorkflow("default", j, e); err != nil {
+			astilog.Fatal(errors.Wrap(err, "main: adding default workflow failed"))
 		}
 
 		// Make sure the worker stops when the workflow is stopped
 		c.Encoder.Exec.StopWhenWorkflowsAreStopped = true
 
 		// Start workflow
-		w.Start()
+		w.Start(e.Context())
 	}
 
 	// Wait

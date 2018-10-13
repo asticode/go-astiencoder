@@ -16,33 +16,30 @@ var (
 
 // Workflow represents a workflow
 type Workflow struct {
-	bn      *BaseNode
-	c       *Closer
-	e       EmitEventFunc
-	j       Job
-	m       *sync.Mutex
-	name    string
-	ns      map[string]Node
-	rootCtx context.Context
-	t       *astiworker.Task
-	tf      CreateTaskFunc
+	bn   *BaseNode
+	c    *Closer
+	e    *EventEmitter
+	m    *sync.Mutex
+	name string
+	ns   map[string]Node
+	t    *astiworker.Task
+	tf   CreateTaskFunc
 }
 
-func newWorkflow(name string, j Job, rootCtx context.Context, e EmitEventFunc, tf CreateTaskFunc, c *Closer) *Workflow {
+// NewWorkflow creates a new workflow
+func NewWorkflow(name string, e *EventEmitter, tf CreateTaskFunc, c *Closer) *Workflow {
 	return &Workflow{
 		bn: NewBaseNode(nil, NodeMetadata{
 			Description: "root",
 			Label:       "root",
 			Name:        "root",
 		}),
-		c:       c,
-		e:       e,
-		j:       j,
-		m:       &sync.Mutex{},
-		name:    name,
-		ns:      make(map[string]Node),
-		rootCtx: rootCtx,
-		tf:      tf,
+		c:    c,
+		e:    e,
+		m:    &sync.Mutex{},
+		name: name,
+		ns:   make(map[string]Node),
+		tf:   tf,
 	}
 }
 
@@ -51,12 +48,13 @@ func (w *Workflow) Closer() *Closer {
 	return w.c
 }
 
-// EmitEventFunc returns the emit event func
-func (w *Workflow) EmitEventFunc() EmitEventFunc {
+// EventEmitter returns the event emitter
+func (w *Workflow) EventEmitter() *EventEmitter {
 	return w.e
 }
 
-func (w *Workflow) indexNodes() {
+// IndexNodes indexes nodes
+func (w *Workflow) IndexNodes() {
 	// Lock
 	w.m.Lock()
 	defer w.m.Unlock()
@@ -77,12 +75,12 @@ func (w *Workflow) indexNodesFunc(ns []Node) {
 }
 
 // Start starts the workflow
-func (w *Workflow) Start() {
-	w.start(w.nodes()...)
+func (w *Workflow) Start(ctx context.Context) {
+	w.start(ctx, w.nodes()...)
 }
 
-func (w *Workflow) start(ns ...Node) {
-	w.bn.Start(w.rootCtx, w.tf, func(t *astiworker.Task) {
+func (w *Workflow) start(ctx context.Context, ns ...Node) {
+	w.bn.Start(ctx, w.tf, func(t *astiworker.Task) {
 		// Log
 		astilog.Debugf("astiencoder: starting workflow %s", w.name)
 
@@ -95,7 +93,7 @@ func (w *Workflow) start(ns ...Node) {
 		}
 
 		// Send event
-		w.e(Event{
+		w.e.Emit(Event{
 			Name:    EventNameWorkflowStarted,
 			Payload: w.name,
 		})
@@ -105,11 +103,11 @@ func (w *Workflow) start(ns ...Node) {
 
 		// Close
 		if err := w.c.Close(); err != nil {
-			w.e(EventError(errors.Wrapf(err, "astiencoder: closing workflow %s failed", w.name)))
+			w.e.Emit(EventError(errors.Wrapf(err, "astiencoder: closing workflow %s failed", w.name)))
 		}
 
 		// Send event
-		w.e(Event{
+		w.e.Emit(Event{
 			Name:    EventNameWorkflowStopped,
 			Payload: w.name,
 		})
@@ -145,7 +143,7 @@ func (w *Workflow) Pause() {
 	w.bn.m.Unlock()
 
 	// Send event
-	w.e(Event{
+	w.e.Emit(Event{
 		Name:    EventNameWorkflowPaused,
 		Payload: w.name,
 	})
@@ -170,7 +168,7 @@ func (w *Workflow) Continue() {
 	w.bn.m.Unlock()
 
 	// Send event
-	w.e(Event{
+	w.e.Emit(Event{
 		Name:    EventNameWorkflowStarted,
 		Payload: w.name,
 	})

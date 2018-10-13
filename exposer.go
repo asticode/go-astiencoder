@@ -21,7 +21,6 @@ type ExposedEncoder struct {
 type ExposedWorkflow struct {
 	ExposedWorkflowBase
 	Edges []ExposedWorkflowEdge `json:"edges"`
-	Job   Job                   `json:"job"`
 	Nodes []ExposedWorkflowNode `json:"nodes"`
 }
 
@@ -30,7 +29,6 @@ func newExposedWorkflow(w *Workflow) (o ExposedWorkflow) {
 	o = ExposedWorkflow{
 		ExposedWorkflowBase: newExposedWorkflowBase(w),
 		Edges:               []ExposedWorkflowEdge{},
-		Job:                 w.j,
 		Nodes:               []ExposedWorkflowNode{},
 	}
 
@@ -129,11 +127,6 @@ func (e *exposer) encoder() (o ExposedEncoder) {
 	return
 }
 
-func (e *exposer) addWorkflow(name string, j Job) (err error) {
-	_, err = e.e.NewWorkflow(name, j)
-	return
-}
-
 func (e *exposer) workflow(name string) (ew ExposedWorkflow, err error) {
 	var w *Workflow
 	if w, err = e.e.Workflow(name); err != nil {
@@ -175,7 +168,7 @@ func (e *exposer) startWorkflow(name string) (err error) {
 	}
 
 	// Start workflow
-	w.Start()
+	w.Start(e.e.Context())
 	return
 }
 
@@ -234,7 +227,7 @@ func (e *exposer) startNode(workflow, node string) (err error) {
 		w.startNode(n)
 	} else {
 		// Workflow is stopped, we start it as well as the desired node
-		w.start(n)
+		w.start(e.e.Context(), n)
 	}
 	return
 }

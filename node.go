@@ -82,7 +82,7 @@ type BaseNode struct {
 	childrenStarted map[string]bool
 	ctx             context.Context
 	ctxPause        context.Context
-	e               EmitEventFunc
+	e               *EventEmitter
 	m               *sync.Mutex
 	md              NodeMetadata
 	oStart          *sync.Once
@@ -94,7 +94,7 @@ type BaseNode struct {
 }
 
 // NewBaseNode creates a new base node
-func NewBaseNode(e EmitEventFunc, m NodeMetadata) (n *BaseNode) {
+func NewBaseNode(e *EventEmitter, m NodeMetadata) (n *BaseNode) {
 	n = &BaseNode{
 		children:        make(map[string]Node),
 		childrenStarted: make(map[string]bool),
@@ -169,7 +169,7 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 
 		// Send event
 		if n.e != nil {
-			n.e(Event{
+			n.e.Emit(Event{
 				Name:    EventNameNodeStarted,
 				Payload: n.md.Name,
 			})
@@ -182,7 +182,7 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 
 			// Send event
 			if n.e != nil {
-				defer n.e(Event{
+				defer n.e.Emit(Event{
 					Name:    EventNameNodeStopped,
 					Payload: n.md.Name,
 				})
@@ -257,7 +257,7 @@ func (n *BaseNode) Pause() {
 
 	// Send event
 	if n.e != nil {
-		n.e(Event{
+		n.e.Emit(Event{
 			Name:    EventNameNodePaused,
 			Payload: n.md.Name,
 		})
@@ -283,7 +283,7 @@ func (n *BaseNode) Continue() {
 
 	// Send event
 	if n.e != nil {
-		n.e(Event{
+		n.e.Emit(Event{
 			Name:    EventNameNodeContinued,
 			Payload: n.md.Name,
 		})
@@ -444,7 +444,7 @@ func (n *BaseNode) statsHandleFunc(stats []astistat.Stat) {
 	}
 
 	// Send event
-	n.e(Event{
+	n.e.Emit(Event{
 		Name:    EventNameStats,
 		Payload: e,
 	})

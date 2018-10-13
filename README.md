@@ -20,9 +20,7 @@ However, this project could be useful to you if you're looking to:
 # How is this project structured?
 ## The encoder framework
 
-At the root of the project, package `astiencoder` provides the framework to build an [Encoder](encoder.go).
- 
-When provided with a `WorkflowBuilder`, it can build [Workflows](workflow.go) based on [Jobs](job.go).
+At the root of the project, package `astiencoder` provides the framework to build an [Encoder](encoder.go) that can manage several [Workflows](workflow.go).
 
 At this point, [Workflows](workflow.go) are made of [Nodes](node.go) that can start/pause/continue/stop any kind of work. 
  
@@ -58,7 +56,9 @@ type FrameHandler interface {
 
 In folder `astiencoder`, package `main` provides an out-of-the-box encoder using both packages `astiencoder` and `astilibav`.
 
-It's a good place to start digging if you're looking to implement your own `WorkflowBuilder`.
+It creates workflows based on [Jobs](astiencoder/job.go).
+
+It's a good place to start digging if you're looking to implement your own workflow builder.
 
 # How do I install this project?
 ## FFMpeg
@@ -179,15 +179,7 @@ File outputs will be written in the `examples/tmp` folder.
 
 # How can I build my own workflow?
 
-If you're using the [Encoder](encoder.go), you'll need to use the `WorkflowBuilder` interface:
-
-```go
-type WorkflowBuilder interface {
-	BuildWorkflow(j Job, w *Workflow) error
-}
-```
-
-Otherwise, I'd recommend to get inspiration from the out-of-the-box encoder's [workflow builder](astiencoder/workflow.go).
+I'd recommend to get inspiration from the out-of-the-box encoder's [workflow builder](astiencoder/workflow.go).
 
 # Which ffmpeg C bindings is this project using and why?
 

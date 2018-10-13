@@ -25,7 +25,7 @@ type PktDumper struct {
 	*astiencoder.BaseNode
 	count            uint32
 	data             map[string]interface{}
-	e                astiencoder.EmitEventFunc
+	e                *astiencoder.EventEmitter
 	fn               PktDumpFunc
 	pattern          string
 	q                *astisync.CtxQueue
@@ -38,7 +38,7 @@ type PktDumper struct {
 type PktDumpFunc func(pkt *avcodec.Packet, pattern string) error
 
 // NewPktDumper creates a new pk dumper
-func NewPktDumper(pattern string, fn PktDumpFunc, data map[string]interface{}, e astiencoder.EmitEventFunc) (d *PktDumper, err error) {
+func NewPktDumper(pattern string, fn PktDumpFunc, data map[string]interface{}, e *astiencoder.EventEmitter) (d *PktDumper, err error) {
 	// Create pkt dumper
 	count := atomic.AddUint64(&countPktDumper, uint64(1))
 	d = &PktDumper{
@@ -117,7 +117,7 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			d.statWorkRatio.Add(true)
 			if err := d.t.Execute(buf, d.data); err != nil {
 				d.statWorkRatio.Done(true)
-				d.e(astiencoder.EventError(errors.Wrapf(err, "astilibav: executing template %s with data %+v failed", d.pattern, d.data)))
+				d.e.Emit(astiencoder.EventError(errors.Wrapf(err, "astilibav: executing template %s with data %+v failed", d.pattern, d.data)))
 				return
 			}
 			d.statWorkRatio.Done(true)
@@ -126,7 +126,7 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			d.statWorkRatio.Add(true)
 			if err := d.fn(pkt, buf.String()); err != nil {
 				d.statWorkRatio.Done(true)
-				d.e(astiencoder.EventError(errors.Wrapf(err, "astilibav: pkt dump func with pattern %s failed", buf)))
+				d.e.Emit(astiencoder.EventError(errors.Wrapf(err, "astilibav: pkt dump func with pattern %s failed", buf)))
 				return
 			}
 			d.statWorkRatio.Done(true)

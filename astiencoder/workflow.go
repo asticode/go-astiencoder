@@ -12,6 +12,25 @@ import (
 	"github.com/pkg/errors"
 )
 
+func addWorkflow(name string, j Job, e *astiencoder.Encoder) (w *astiencoder.Workflow, err error) {
+	// Create workflow
+	if w, err = e.NewWorkflow(name); err != nil {
+		err = errors.Wrap(err, "main: creating workflow failed")
+		return
+	}
+
+	// Build workflow
+	b := newBuilder()
+	if err = b.buildWorkflow(j, w); err != nil {
+		err = errors.Wrap(err, "main: building workflow failed")
+		return
+	}
+
+	// Index nodes
+	w.IndexNodes()
+	return
+}
+
 type builder struct{}
 
 func newBuilder() *builder {
@@ -19,13 +38,13 @@ func newBuilder() *builder {
 }
 
 type openedInput struct {
-	c         astiencoder.JobInput
+	c         JobInput
 	ctxFormat *avformat.Context
 	d         *astilibav.Demuxer
 }
 
 type openedOutput struct {
-	c         astiencoder.JobOutput
+	c         JobOutput
 	ctxFormat *avformat.Context
 	m         *astilibav.Muxer
 }
@@ -44,8 +63,7 @@ func newBuildData(w *astiencoder.Workflow) *buildData {
 	}
 }
 
-// BuildWorkflow implements the astiencoder.WorkflowBuilder interface
-func (b *builder) BuildWorkflow(j astiencoder.Job, w *astiencoder.Workflow) (err error) {
+func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow) (err error) {
 	// Create build data
 	bd := newBuildData(w)
 
@@ -59,7 +77,7 @@ func (b *builder) BuildWorkflow(j astiencoder.Job, w *astiencoder.Workflow) (err
 	}
 
 	// Open inputs
-	if bd.inputs, err = b.openInputs(j, o, w.EmitEventFunc(), w.Closer()); err != nil {
+	if bd.inputs, err = b.openInputs(j, o, w.EventEmitter(), w.Closer()); err != nil {
 		err = errors.Wrap(err, "main: opening inputs failed")
 		return
 	}
@@ -71,7 +89,7 @@ func (b *builder) BuildWorkflow(j astiencoder.Job, w *astiencoder.Workflow) (err
 	}
 
 	// Open outputs
-	if bd.outputs, err = b.openOutputs(j, o, w.EmitEventFunc(), w.Closer()); err != nil {
+	if bd.outputs, err = b.openOutputs(j, o, w.EventEmitter(), w.Closer()); err != nil {
 		err = errors.Wrap(err, "main: opening outputs failed")
 		return
 	}
@@ -93,13 +111,13 @@ func (b *builder) BuildWorkflow(j astiencoder.Job, w *astiencoder.Workflow) (err
 	return
 }
 
-func (b *builder) openInputs(j astiencoder.Job, o *astilibav.Opener, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (is map[string]openedInput, err error) {
+func (b *builder) openInputs(j Job, o *astilibav.Opener, e *astiencoder.EventEmitter, c *astiencoder.Closer) (is map[string]openedInput, err error) {
 	// Loop through inputs
 	is = make(map[string]openedInput)
 	for n, cfg := range j.Inputs {
 		// Open
 		var ctxFormat *avformat.Context
-		if ctxFormat, err = o.OpenInput(n, cfg); err != nil {
+		if ctxFormat, err = o.OpenInput(astilibav.OpenerOptions{URL: cfg.URL}); err != nil {
 			err = errors.Wrapf(err, "main: opening input %s with conf %+v failed", n, cfg)
 			return
 		}
@@ -114,7 +132,7 @@ func (b *builder) openInputs(j astiencoder.Job, o *astilibav.Opener, e astiencod
 	return
 }
 
-func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (os map[string]openedOutput, err error) {
+func (b *builder) openOutputs(j Job, o *astilibav.Opener, e *astiencoder.EventEmitter, c *astiencoder.Closer) (os map[string]openedOutput, err error) {
 	// Loop through outputs
 	os = make(map[string]openedOutput)
 	for n, cfg := range j.Outputs {
@@ -125,12 +143,12 @@ func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener, e astienco
 
 		// Switch on type
 		switch cfg.Type {
-		case astiencoder.JobOutputTypePktDump:
+		case JobOutputTypePktDump:
 			// This is a per-operation and per-input value since we may want to index the path by input name
 			// The writer is created afterwards
 		default:
 			// Open
-			if oo.ctxFormat, err = o.OpenOutput(n, cfg); err != nil {
+			if oo.ctxFormat, err = o.OpenOutput(astilibav.OpenerOptions{URL: cfg.URL}); err != nil {
 				err = errors.Wrapf(err, "main: opening output %s with conf %+v failed", n, cfg)
 				return
 			}
@@ -146,16 +164,16 @@ func (b *builder) openOutputs(j astiencoder.Job, o *astilibav.Opener, e astienco
 }
 
 type operationInput struct {
-	c astiencoder.JobOperationInput
+	c JobOperationInput
 	o openedInput
 }
 
 type operationOutput struct {
-	c astiencoder.JobOperationOutput
+	c JobOperationOutput
 	o openedOutput
 }
 
-func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation, bd *buildData) (err error) {
+func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildData) (err error) {
 	// Get operation inputs and outputs
 	var ois []operationInput
 	var oos []operationOutput
@@ -182,7 +200,7 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 			bd.w.AddChild(i.o.d)
 
 			// In case of copy we only want to connect the demuxer to the muxer
-			if o.Codec == astiencoder.JobOperationCodecCopy {
+			if o.Codec == JobOperationCodecCopy {
 				// Loop through outputs
 				for _, o := range oos {
 					// Clone stream
@@ -231,7 +249,7 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 
 			// Create encoder
 			var e *astilibav.Encoder
-			if e, err = astilibav.NewEncoderFromContext(outCtx, prev, bd.w.EmitEventFunc(), bd.w.Closer()); err != nil {
+			if e, err = astilibav.NewEncoderFromContext(outCtx, prev, bd.w.EventEmitter(), bd.w.Closer()); err != nil {
 				err = errors.Wrapf(err, "main: creating encoder for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
 				return
 			}
@@ -248,9 +266,9 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 				// Switch on type
 				var h astilibav.PktHandler
 				switch o.o.c.Type {
-				case astiencoder.JobOutputTypePktDump:
+				case JobOutputTypePktDump:
 					// Create pkt dumper
-					if h, err = astilibav.NewPktDumper(o.o.c.URL, astilibav.PktDumpFile, map[string]interface{}{"input": i.c.Name}, bd.w.EmitEventFunc()); err != nil {
+					if h, err = astilibav.NewPktDumper(o.o.c.URL, astilibav.PktDumpFile, map[string]interface{}{"input": i.c.Name}, bd.w.EventEmitter()); err != nil {
 						err = errors.Wrapf(err, "main: creating pkt dumper for output %s with conf %+v failed", o.c.Name, o.c)
 						return
 					}
@@ -274,7 +292,7 @@ func (b *builder) addOperationToWorkflow(name string, o astiencoder.JobOperation
 	return
 }
 
-func (b *builder) operationInputsOutputs(o astiencoder.JobOperation, bd *buildData) (is []operationInput, os []operationOutput, err error) {
+func (b *builder) operationInputsOutputs(o JobOperation, bd *buildData) (is []operationInput, os []operationOutput, err error) {
 	// No inputs
 	if len(o.Inputs) == 0 {
 		err = errors.New("main: no operation inputs provided")
@@ -321,7 +339,7 @@ func (b *builder) operationInputsOutputs(o astiencoder.JobOperation, bd *buildDa
 	return
 }
 
-func (b *builder) operationOutputCtx(o astiencoder.JobOperation, inCtx astilibav.Context) (outCtx astilibav.Context) {
+func (b *builder) operationOutputCtx(o JobOperation, inCtx astilibav.Context) (outCtx astilibav.Context) {
 	// Default output ctx is input ctx
 	outCtx = inCtx
 
@@ -389,7 +407,7 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 	// Decoder doesn't exist
 	if !okD || !okS {
 		// Create decoder
-		if d, err = astilibav.NewDecoderFromCodecParams(is.CodecParameters(), bd.w.EmitEventFunc(), bd.w.Closer()); err != nil {
+		if d, err = astilibav.NewDecoderFromCodecParams(is.CodecParameters(), bd.w.EventEmitter(), bd.w.Closer()); err != nil {
 			err = errors.Wrapf(err, "main: creating decoder for stream 0x%x(%d) of %s failed", is.Id(), is.Id(), i.c.Name)
 			return
 		}
@@ -431,7 +449,7 @@ func (b *builder) createFilterer(bd *buildData, i *avformat.Stream, inCtx, outCt
 		}
 
 		// Create filterer
-		if f, err = astilibav.NewFiltererFromOptions(fo, i, bd.w.EmitEventFunc(), bd.w.Closer()); err != nil {
+		if f, err = astilibav.NewFiltererFromOptions(fo, i, bd.w.EventEmitter(), bd.w.Closer()); err != nil {
 			err = errors.Wrapf(err, "main: creating filterer with filters %+v failed", filters)
 			return
 		}

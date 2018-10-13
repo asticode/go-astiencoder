@@ -1,4 +1,4 @@
-package astiencoder
+package main
 
 import "github.com/asticode/go-astitools/float"
 

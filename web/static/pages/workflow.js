@@ -13,9 +13,6 @@ const page = {
                     // Init network
                     page.initNetwork(data.responseJSON)
 
-                    // Init job
-                    page.initJob(data.responseJSON)
-
                     // Hide loading
                     asticode.loader.hide()
                 }
@@ -87,9 +84,6 @@ const page = {
 
         // Initialize mermaid
         mermaid.init({}, ".network")
-    },
-    initJob: function(data) {
-        document.getElementById("job").innerText = JSON.stringify(data.job, null, 4)
     },
     websocketFunc: function(eventName, payload) {
         switch (eventName) {

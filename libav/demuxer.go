@@ -19,12 +19,12 @@ type Demuxer struct {
 	*astiencoder.BaseNode
 	ctxFormat     *avformat.Context
 	d             *pktDispatcher
-	e             astiencoder.EmitEventFunc
+	e             *astiencoder.EventEmitter
 	statWorkRatio *astistat.DurationRatioStat
 }
 
 // NewDemuxer creates a new demuxer
-func NewDemuxer(ctxFormat *avformat.Context, e astiencoder.EmitEventFunc, c *astiencoder.Closer) (d *Demuxer) {
+func NewDemuxer(ctxFormat *avformat.Context, e *astiencoder.EventEmitter, c *astiencoder.Closer) (d *Demuxer) {
 	count := atomic.AddUint64(&countDemuxer, uint64(1))
 	d = &Demuxer{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{

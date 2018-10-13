@@ -3,7 +3,6 @@ package astiencoder
 import (
 	"encoding/json"
 	"fmt"
-	"mime/multipart"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -41,7 +40,10 @@ func newServer(c ConfigurationServer, e *exposer) (s *server, err error) {
 	return
 }
 
-func (s *server) handler() http.Handler {
+// ServerCustomHandler represents a server custom handler
+type ServerCustomHandler func(r *httprouter.Router, e *Encoder)
+
+func (s *server) handler(ch ServerCustomHandler) http.Handler {
 	// Init router
 	var r = httprouter.New()
 
@@ -58,7 +60,6 @@ func (s *server) handler() http.Handler {
 	r.GET("/api/references", s.handleReferences())
 	r.GET("/api/encoder", s.handleEncoder())
 	r.GET("/api/encoder/stop", s.handleEncoderStop())
-	r.POST("/api/workflows", s.handleAddWorkflow())
 	r.GET("/api/workflows/:workflow", s.handleWorkflow())
 	r.GET("/api/workflows/:workflow/nodes/:node/continue", s.handleNodeContinue())
 	r.GET("/api/workflows/:workflow/nodes/:node/pause", s.handleNodePause())
@@ -66,6 +67,11 @@ func (s *server) handler() http.Handler {
 	r.GET("/api/workflows/:workflow/continue", s.handleWorkflowContinue())
 	r.GET("/api/workflows/:workflow/pause", s.handleWorkflowPause())
 	r.GET("/api/workflows/:workflow/start", s.handleWorkflowStart())
+
+	// Custom
+	if ch != nil {
+		ch(r, s.e.e)
+	}
 
 	// Chain middlewares
 	var h = astihttp.ChainMiddlewares(r, astihttp.MiddlewareBasicAuth(s.c.Username, s.c.Password))
@@ -152,12 +158,13 @@ type APIReferences struct {
 
 func (s *server) writeJSONData(rw http.ResponseWriter, data interface{}) {
 	if err := json.NewEncoder(rw).Encode(data); err != nil {
-		s.writeJSONError(rw, http.StatusInternalServerError, errors.Wrap(err, "astiencoder: json encoding failed"))
+		WriteJSONError(rw, http.StatusInternalServerError, errors.Wrap(err, "astiencoder: json encoding failed"))
 		return
 	}
 }
 
-func (s *server) writeJSONError(rw http.ResponseWriter, code int, err error) {
+// WriteJSONError writes a JSON error
+func WriteJSONError(rw http.ResponseWriter, code int, err error) {
 	rw.WriteHeader(code)
 	astilog.Error(err)
 	if err := json.NewEncoder(rw).Encode(APIError{Message: errors.Cause(err).Error()}); err != nil {
@@ -187,58 +194,22 @@ func (s *server) handleEncoderStop() httprouter.Handle {
 	return func(rw http.ResponseWriter, r *http.Request, p httprouter.Params) { s.e.stopEncoder() }
 }
 
-func (s *server) handleAddWorkflow() httprouter.Handle {
-	return func(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-		// Get name
-		var name string
-		if name = r.FormValue("name"); len(name) == 0 {
-			s.writeJSONError(rw, http.StatusBadRequest, errors.New("astiencoder: name is mandatory"))
-			return
-		}
-
-		// Parse job
-		var f multipart.File
-		var err error
-		if f, _, err = r.FormFile("job"); err != nil {
-			if err != http.ErrMissingFile {
-				s.writeJSONError(rw, http.StatusInternalServerError, errors.Wrap(err, "astiencoder: getting form file failed"))
-			} else {
-				s.writeJSONError(rw, http.StatusBadRequest, errors.New("astiencoder: job is mandatory"))
-			}
-			return
-		}
-
-		// Unmarshal
-		var j Job
-		if err = json.NewDecoder(f).Decode(&j); err != nil {
-			s.writeJSONError(rw, http.StatusBadRequest, errors.Wrap(err, "astiencoder: unmarshaling job failed"))
-			return
-		}
-
-		// Add workflow
-		if err := s.e.addWorkflow(name, j); err != nil {
-			s.writeJSONError(rw, http.StatusBadRequest, errors.Wrapf(err, "astiencoder: adding workflow %s failed", name))
-			return
-		}
-	}
-}
-
 func (s *server) handleWorkflow() httprouter.Handle {
 	return func(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		// Get workflow
 		w, err := s.e.workflow(p.ByName("workflow"))
 		if err != nil {
 			if err == ErrWorkflowNotFound {
-				s.writeJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
 			} else {
-				s.writeJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencoder: fetching workflow %s failed", p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencoder: fetching workflow %s failed", p.ByName("workflow")))
 			}
 			return
 		}
 
 		// Write
 		if err := json.NewEncoder(rw).Encode(w); err != nil {
-			s.writeJSONError(rw, http.StatusInternalServerError, errors.Wrap(err, "astiencoder: writing failed"))
+			WriteJSONError(rw, http.StatusInternalServerError, errors.Wrap(err, "astiencoder: writing failed"))
 			return
 		}
 	}
@@ -249,9 +220,9 @@ func (s *server) handleWorkflowContinue() httprouter.Handle {
 		// Continue workflow
 		if err := s.e.continueWorkflow(p.ByName("workflow")); err != nil {
 			if err == ErrWorkflowNotFound {
-				s.writeJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
 			} else {
-				s.writeJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: continuing workflow %s failed", p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: continuing workflow %s failed", p.ByName("workflow")))
 			}
 			return
 		}
@@ -263,9 +234,9 @@ func (s *server) handleWorkflowPause() httprouter.Handle {
 		// Pause workflow
 		if err := s.e.pauseWorkflow(p.ByName("workflow")); err != nil {
 			if err == ErrWorkflowNotFound {
-				s.writeJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
 			} else {
-				s.writeJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: pausing workflow %s failed", p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: pausing workflow %s failed", p.ByName("workflow")))
 			}
 			return
 		}
@@ -277,9 +248,9 @@ func (s *server) handleWorkflowStart() httprouter.Handle {
 		// Start workflow
 		if err := s.e.startWorkflow(p.ByName("workflow")); err != nil {
 			if err == ErrWorkflowNotFound {
-				s.writeJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
 			} else {
-				s.writeJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: starting workflow %s failed", p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: starting workflow %s failed", p.ByName("workflow")))
 			}
 			return
 		}
@@ -291,11 +262,11 @@ func (s *server) handleNodeContinue() httprouter.Handle {
 		// Continue node
 		if err := s.e.continueNode(p.ByName("workflow"), p.ByName("node")); err != nil {
 			if err == ErrWorkflowNotFound {
-				s.writeJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
 			} else if err == ErrNodeNotFound {
-				s.writeJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: node %s doesn't exist", p.ByName("node")))
+				WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: node %s doesn't exist", p.ByName("node")))
 			} else {
-				s.writeJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: continuing node %s of workflow %s failed", p.ByName("node"), p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: continuing node %s of workflow %s failed", p.ByName("node"), p.ByName("workflow")))
 			}
 			return
 		}
@@ -307,11 +278,11 @@ func (s *server) handleNodePause() httprouter.Handle {
 		// Pause node
 		if err := s.e.pauseNode(p.ByName("workflow"), p.ByName("node")); err != nil {
 			if err == ErrWorkflowNotFound {
-				s.writeJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
 			} else if err == ErrNodeNotFound {
-				s.writeJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: node %s doesn't exist", p.ByName("node")))
+				WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: node %s doesn't exist", p.ByName("node")))
 			} else {
-				s.writeJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: pausing node %s of workflow %s failed", p.ByName("node"), p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: pausing node %s of workflow %s failed", p.ByName("node"), p.ByName("workflow")))
 			}
 			return
 		}
@@ -323,11 +294,11 @@ func (s *server) handleNodeStart() httprouter.Handle {
 		// Start node
 		if err := s.e.startNode(p.ByName("workflow"), p.ByName("node")); err != nil {
 			if err == ErrWorkflowNotFound {
-				s.writeJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
 			} else if err == ErrNodeNotFound {
-				s.writeJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: node %s doesn't exist", p.ByName("node")))
+				WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: node %s doesn't exist", p.ByName("node")))
 			} else {
-				s.writeJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: starting node %s of workflow %s failed", p.ByName("node"), p.ByName("workflow")))
+				WriteJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencode: starting node %s of workflow %s failed", p.ByName("node"), p.ByName("workflow")))
 			}
 			return
 		}
@@ -370,14 +341,12 @@ func (s *server) handleWebsocketPing(c *astiws.Client, eventName string, payload
 	return nil
 }
 
-func (s *server) handleEvent() (isBlocking bool, fn func(e Event)) {
-	return false, func(e Event) {
-		switch e.Name {
-		case EventNameError:
-			s.sendEventToWebsocket(e.Name, errors.Cause(e.Payload.(error)))
-		default:
-			s.sendEventToWebsocket(e.Name, e.Payload)
-		}
+func (s *server) handleEvent(e Event) {
+	switch e.Name {
+	case EventNameError:
+		s.sendEventToWebsocket(e.Name, errors.Cause(e.Payload.(error)))
+	default:
+		s.sendEventToWebsocket(e.Name, e.Payload)
 	}
 }
 

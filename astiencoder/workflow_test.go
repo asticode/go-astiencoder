@@ -2,12 +2,10 @@ package main
 
 import (
 	"testing"
-
-	"github.com/asticode/go-astiencoder"
 )
 
 func TestCopy(t *testing.T) {
-	testJob(t, "../examples/copy.json", func(j astiencoder.Job) map[string]string {
+	testJob(t, "../examples/copy.json", func(j Job) map[string]string {
 		return map[string]string{
 			"../examples/tmp/copy.mp4": "testdata/copy.mp4",
 		}
@@ -15,7 +13,7 @@ func TestCopy(t *testing.T) {
 }
 
 func TestMJpeg(t *testing.T) {
-	testJob(t, "../examples/mjpeg.json", func(j astiencoder.Job) (o map[string]string) {
+	testJob(t, "../examples/mjpeg.json", func(j Job) (o map[string]string) {
 		return map[string]string{
 			"../examples/tmp/default-0-0-1.jpeg": "testdata/default-0-0-1.jpeg",
 			"../examples/tmp/default-0-1-2.jpeg": "testdata/default-0-1-2.jpeg",
@@ -27,7 +25,7 @@ func TestMJpeg(t *testing.T) {
 }
 
 func TestEncode(t *testing.T) {
-	testJob(t, "../examples/encode.json", func(j astiencoder.Job) (o map[string]string) {
+	testJob(t, "../examples/encode.json", func(j Job) (o map[string]string) {
 		return map[string]string{
 			"../examples/tmp/encode.mp4": "testdata/encode.mp4",
 		}

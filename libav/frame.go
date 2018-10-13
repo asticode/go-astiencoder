@@ -15,7 +15,7 @@ type FrameHandler interface {
 
 type frameDispatcher struct {
 	c            *astiencoder.Closer
-	e            astiencoder.EmitEventFunc
+	e            *astiencoder.EventEmitter
 	framePool    *sync.Pool
 	hs           []FrameHandler
 	m            *sync.Mutex
@@ -23,7 +23,7 @@ type frameDispatcher struct {
 	wg           *sync.WaitGroup
 }
 
-func newFrameDispatcher(e astiencoder.EmitEventFunc, c *astiencoder.Closer) *frameDispatcher {
+func newFrameDispatcher(e *astiencoder.EventEmitter, c *astiencoder.Closer) *frameDispatcher {
 	return &frameDispatcher{
 		c: c,
 		e: e,
