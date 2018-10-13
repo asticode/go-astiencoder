@@ -1,6 +1,7 @@
 package astilibav
 
 import (
+	"github.com/asticode/goav/avutil"
 	"github.com/pkg/errors"
 
 	"github.com/asticode/go-astiencoder"
@@ -21,13 +22,28 @@ func NewOpener(c *astiencoder.Closer) *Opener {
 
 // OpenerOptions represents opener options
 type OpenerOptions struct {
-	URL string
+	Dict        string
+	InputFormat *avformat.InputFormat
+	URL         string
 }
 
 // OpenInput opens an input
 func (o *Opener) OpenInput(opts OpenerOptions) (ctxFormat *avformat.Context, err error) {
+	// Dict
+	var dict *avutil.Dictionary
+	if len(opts.Dict) > 0 {
+		// Parse dict
+		if ret := avutil.AvDictParseString(&dict, opts.Dict, "=", ",", 0); ret < 0 {
+			err = errors.Wrapf(newAvError(ret), "astilibav: avutil.AvDictParseString on %s failed", opts.Dict)
+			return
+		}
+
+		// Make sure the dict is freed
+		defer avutil.AvDictFree(&dict)
+	}
+
 	// Open input
-	if ret := avformat.AvformatOpenInput(&ctxFormat, opts.URL, nil, nil); ret < 0 {
+	if ret := avformat.AvformatOpenInput(&ctxFormat, opts.URL, opts.InputFormat, &dict); ret < 0 {
 		err = errors.Wrapf(newAvError(ret), "astilibav: avformat.AvformatOpenInput on input with options %+v failed", opts)
 		return
 	}

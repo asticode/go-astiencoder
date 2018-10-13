@@ -221,7 +221,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 					h := o.o.m.NewPktHandler(os, is)
 
 					// Connect demuxer to handler
-					i.o.d.Connect(is, h)
+					i.o.d.Connect(h, is)
 				}
 				continue
 			}
@@ -275,7 +275,11 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 				switch o.o.c.Type {
 				case JobOutputTypePktDump:
 					// Create pkt dumper
-					if h, err = astilibav.NewPktDumper(o.o.c.URL, astilibav.PktDumpFile, map[string]interface{}{"input": i.c.Name}, bd.ee); err != nil {
+					if h, err = astilibav.NewPktDumper(astilibav.PktDumperOptions{
+						Data:    map[string]interface{}{"input": i.c.Name},
+						Handler: astilibav.PktDumpFile,
+						Pattern: o.o.c.URL,
+					}, bd.ee); err != nil {
 						err = errors.Wrapf(err, "main: creating pkt dumper for output %s with conf %+v failed", o.c.Name, o.c)
 						return
 					}
@@ -420,7 +424,7 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 		}
 
 		// Connect demuxer
-		i.o.d.Connect(is, d)
+		i.o.d.Connect(d, is)
 
 		// Index decoder
 		bd.decoders[i.o.d][is] = d
