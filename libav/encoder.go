@@ -253,6 +253,8 @@ func (e *Encoder) receivePkt(prev *Descriptor, pp *[]Descriptor) (stop bool) {
 	}
 	e.statWorkRatio.Done(true)
 
+	// TODO libx264 returns a pkt with a duration set to 0 here :(
+
 	// Get prev
 	if *prev == nil {
 		*prev = (*pp)[0]
