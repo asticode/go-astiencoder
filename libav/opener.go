@@ -22,9 +22,11 @@ func NewOpener(c *astiencoder.Closer) *Opener {
 
 // OpenerOptions represents opener options
 type OpenerOptions struct {
-	Dict        string
-	InputFormat *avformat.InputFormat
-	URL         string
+	Dict             string
+	InputFormat      *avformat.InputFormat
+	OutputFormat     *avformat.OutputFormat
+	OutputFormatName string
+	URL              string
 }
 
 // OpenInput opens an input
@@ -65,7 +67,7 @@ func (o *Opener) OpenInput(opts OpenerOptions) (ctxFormat *avformat.Context, err
 // OpenOutput opens an output
 func (o *Opener) OpenOutput(opts OpenerOptions) (ctxFormat *avformat.Context, err error) {
 	// Alloc format context
-	if ret := avformat.AvformatAllocOutputContext2(&ctxFormat, nil, "", opts.URL); ret < 0 {
+	if ret := avformat.AvformatAllocOutputContext2(&ctxFormat, opts.OutputFormat, opts.OutputFormatName, opts.URL); ret < 0 {
 		err = errors.Wrapf(newAvError(ret), "astilibav: avformat.AvformatAllocOutputContext2 on output with options %+v failed", opts)
 		return
 	}
