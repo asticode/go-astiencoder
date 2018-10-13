@@ -34,9 +34,10 @@ func EventError(err error) Event {
 	}
 }
 
-// AddLoggerEventHandler adds the logger event handler
-var AddLoggerEventHandler = func(fn func(h EventHandler, o EventHandlerOptions)) {
-	fn(func(e Event) {
+// LoggerEventHandler is the logger event handler
+var LoggerEventHandler = EventHandlerOptions{
+	Blocking: true,
+	Handler: func(e Event) {
 		switch e.Name {
 		case EventNameError:
 			astilog.Error(e.Payload.(error))
@@ -49,7 +50,7 @@ var AddLoggerEventHandler = func(fn func(h EventHandler, o EventHandlerOptions))
 		case EventNameWorkflowStopped:
 			astilog.Debugf("astiencoder: workflow %s is stopped", e.Payload.(string))
 		}
-	}, EventHandlerOptions{Blocking: true})
+	},
 }
 
 // EventHandler returns a method that can handle events coming out of the encoder
@@ -58,17 +59,13 @@ type EventHandler func(e Event)
 // EventHandlerOptions represents event handler options
 type EventHandlerOptions struct {
 	Blocking bool
+	Handler  EventHandler
 }
 
 // EventEmitter represents an object capable of emitting events
 type EventEmitter struct {
-	hs []eventHandler
+	hs []EventHandlerOptions
 	m  *sync.Mutex
-}
-
-type eventHandler struct {
-	h EventHandler
-	o EventHandlerOptions
 }
 
 // NewEventEmitter creates a new event emitter
@@ -77,13 +74,10 @@ func NewEventEmitter() *EventEmitter {
 }
 
 // AddHandler adds a new handler
-func (e *EventEmitter) AddHandler(h EventHandler, o EventHandlerOptions) {
+func (e *EventEmitter) AddHandler(o EventHandlerOptions) {
 	e.m.Lock()
 	defer e.m.Unlock()
-	e.hs = append(e.hs, eventHandler{
-		h: h,
-		o: o,
-	})
+	e.hs = append(e.hs, o)
 }
 
 // Emit emits a new event
@@ -91,10 +85,10 @@ func (e *EventEmitter) Emit(evt Event) {
 	e.m.Lock()
 	defer e.m.Unlock()
 	for _, h := range e.hs {
-		if h.o.Blocking {
-			h.h(evt)
+		if h.Blocking {
+			h.Handler(evt)
 		} else {
-			go h.h(evt)
+			go h.Handler(evt)
 		}
 	}
 }

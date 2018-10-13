@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/asticode/go-astiencoder"
@@ -39,19 +40,24 @@ func main() {
 	// Create logger
 	astilog.SetLogger(astilog.New(c.Logger))
 
-	// Create encoder
-	e := astiencoder.NewEncoder(c.Encoder)
-	defer e.Close()
+	// Create event emitter
+	ee := astiencoder.NewEventEmitter()
 
-	// Add event handler
-	astiencoder.AddLoggerEventHandler(e.AddEventHandler)
+	// Add logger event handler
+	ee.AddHandler(astiencoder.LoggerEventHandler)
+
+	// Create workflow pool
+	wp := astiencoder.NewWorkflowPool()
+
+	// Create encoder
+	e := newEncoder(c.Encoder, ee, wp)
 
 	// Handle signals
-	e.HandleSignals()
+	e.w.HandleSignals()
 
-	// Serve
-	if err := e.Serve(serverCustomHandler); err != nil {
-		astilog.Fatal(errors.Wrap(err, "main: serving failed"))
+	// Serve workflow pool
+	if err = wp.Serve(ee, c.Encoder.Server.PathWeb, func(h http.Handler) { e.w.Serve(c.Encoder.Server.Addr, h) }); err != nil {
+		astilog.Fatal(errors.Wrap(err, "main: serving workflow pool failed"))
 	}
 
 	// Job has been provided
@@ -78,9 +84,9 @@ func main() {
 		c.Encoder.Exec.StopWhenWorkflowsAreStopped = true
 
 		// Start workflow
-		w.Start(e.Context())
+		w.Start()
 	}
 
 	// Wait
-	e.Wait()
+	e.w.Wait()
 }

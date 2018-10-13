@@ -5,9 +5,6 @@ const base = {
         asticode.notifier.init()
         asticode.modaler.init()
 
-        // Init buttons
-        base.initButtons()
-
         // Get references
         asticode.loader.show()
         asticode.tools.sendHttp({
@@ -21,7 +18,7 @@ const base = {
                     },
                     url: "ws://" + window.location.host + "/websocket",
                     pingPeriod: data.responseJSON.ws_ping_period,
-                    offline: function() { asticode.notifier.error("Encoder is offline") },
+                    offline: function() { asticode.notifier.error("Server is offline") },
                     message: function (eventName, payload) {
                         // Handle menu events
                         menu.websocketFunc(eventName, payload)
@@ -32,7 +29,7 @@ const base = {
                     open: function() {
                         asticode.tools.sendHttp({
                             method: "GET",
-                            url: "/api/encoder",
+                            url: "/api/workflows",
                             error: function () {
                                 asticode.loader.hide()
                             },
@@ -56,59 +53,8 @@ const base = {
             },
         })
     },
-    initButtons: function() {
-        this.initButtonAddWorkflow()
-        this.initButtonStopEncoder()
-    },
-    initButtonAddWorkflow: function () {
-        document.getElementById("btn-workflow-add").onclick = function() {
-            const m = new Modal()
-            m.addTitle("Add a workflow")
-            m.addError()
-            m.addLabel("Name:")
-            const name = m.addInputText()
-            m.addLabel("Job:")
-            const job = m.addInputFile()
-            m.addSubmit("Add", function() {
-                m.resetError()
-                const form = new FormData()
-                form.append("name", name.value)
-                if (job.files.length > 0) {
-                    form.append("job", job.files[0])
-                }
-                asticode.loader.show()
-                asticode.tools.sendHttp({
-                    method: "POST",
-                    url: "/api/workflows",
-                    payload: form,
-                    error: function(data) {
-                        if (typeof data.responseJSON.message !== "undefined") m.setError(data.responseJSON.message)
-                        asticode.loader.hide()
-                    },
-                    success: function() {
-                        window.location = "/web/workflow?name=" + encodeURIComponent(name.value)
-                    }
-                })
-            })
-            asticode.modaler.setContent(m.wrapper)
-            asticode.modaler.setWidth("500px")
-            asticode.modaler.show()
-        }
-    },
-    initButtonStopEncoder: function() {
-        document.getElementById("btn-encoder-stop").onclick = function() {
-            asticode.loader.show()
-            asticode.tools.sendHttp({
-                method: "GET",
-                url: "/api/encoder/stop",
-                error: base.defaultHttpError,
-                success: base.defaultHttpSuccess,
-            })
-        }
-    },
     defaultHttpError: function(data) {
         asticode.notifier.error(data.responseJSON.message)
         asticode.loader.hide()
     },
-    defaultHttpSuccess: function() { asticode.loader.hide() }
 }

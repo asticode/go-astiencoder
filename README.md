@@ -2,7 +2,7 @@
 
 Right now this project has only been tested on FFMpeg 4.0.2.
 
-![screenshot-4](doc/screenshot-4.png)
+![screenshot-1](doc/screenshot-1.png)
 
 # Why use this project when I can use `ffmpeg` binary?
 
@@ -20,11 +20,11 @@ However, this project could be useful to you if you're looking to:
 # How is this project structured?
 ## The encoder framework
 
-At the root of the project, package `astiencoder` provides the framework to build an [Encoder](encoder.go) that can manage several [Workflows](workflow.go).
+At the root of the project, package `astiencoder` provides the framework to build a [Workflow Pool](workflow_pool.go) that can manage several [Workflows](workflow.go).
 
 At this point, [Workflows](workflow.go) are made of [Nodes](node.go) that can start/pause/continue/stop any kind of work. 
  
-The [Encoder](encoder.go) has a built-in [Server](server.go) that serves both an HTTP API and WebSocket events to interact with [Workflows](workflow.go) and [Nodes](node.go).
+The [Workflow Pool](workflow_pool.go) can serve both an HTTP API and WebSocket events to interact with [Workflows](workflow.go) and [Nodes](node.go).
 
 All internal [Events](event.go) can be handled with the proper `EventHandler`.
 
@@ -124,31 +124,15 @@ By default it's accessible at http://127.0.0.1:4000 but you can change it using 
 
 ![screenshot-1](doc/screenshot-1.png)
 
-### Add a new workflow
+### Pause/continue a workflow
 
-Click on the `+` icon on the top right of the screen:
+On the left-hand side, you'll see the names of all your workflows. Click once the slider on the right of its name to pause the workflow:
 
-![screenshot-2](doc/screenshot-2.png)
-
-Provide a name and the `.json` file containing your job:
-
-![screenshot-3](doc/screenshot-3.png)
-
-Nice, you have added a new workflow!
-
-### Start/pause/continue a workflow
-
-On the left-hand side, you'll see the names of all the workflows you've added. Click once the slider on the right of its name to start the workflow:
-
-![screenshot-4](doc/screenshot-4.png)
-
-Click a second time to pause it:
-
-![screenshot-5](doc/screenshot-5.png)
+![screenshot-4](doc/screenshot-2.png)
 
 You can also start/pause/continue nodes individually by clicking on them:
 
-![screenshot-6](doc/screenshot-6.png)
+![screenshot-6](doc/screenshot-3.png)
 
 ### What do those stats mean?
 

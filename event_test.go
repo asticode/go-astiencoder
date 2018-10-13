@@ -22,8 +22,10 @@ func (h *mockedEventHandler) handleEvent(e Event) {
 func TestEvent(t *testing.T) {
 	ee := NewEventEmitter()
 	h := newMockedEventHandler()
-	AddLoggerEventHandler(ee.AddHandler)
-	ee.AddHandler(h.handleEvent, EventHandlerOptions{Blocking: true})
+	ee.AddHandler(EventHandlerOptions{
+		Blocking: true,
+		Handler: h.handleEvent,
+	})
 	e1 := Event{
 		Name:    "1",
 		Payload: "1",

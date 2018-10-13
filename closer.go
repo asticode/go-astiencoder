@@ -15,7 +15,8 @@ type Closer struct {
 	m  *sync.Mutex
 }
 
-func newCloser() *Closer {
+// NewCloser creates a new closer
+func NewCloser() *Closer {
 	return &Closer{
 		m: &sync.Mutex{},
 	}

@@ -11,13 +11,14 @@ import (
 
 // Errors
 var (
-	ErrNodeNotFound = errors.New("node.not.found")
+	ErrNodeNotFound = errors.New("astiencoder: node.not.found")
 )
 
 // Workflow represents a workflow
 type Workflow struct {
 	bn   *BaseNode
 	c    *Closer
+	ctx  context.Context
 	e    *EventEmitter
 	m    *sync.Mutex
 	name string
@@ -27,7 +28,7 @@ type Workflow struct {
 }
 
 // NewWorkflow creates a new workflow
-func NewWorkflow(name string, e *EventEmitter, tf CreateTaskFunc, c *Closer) *Workflow {
+func NewWorkflow(ctx context.Context, name string, e *EventEmitter, tf CreateTaskFunc, c *Closer) *Workflow {
 	return &Workflow{
 		bn: NewBaseNode(nil, NodeMetadata{
 			Description: "root",
@@ -35,6 +36,7 @@ func NewWorkflow(name string, e *EventEmitter, tf CreateTaskFunc, c *Closer) *Wo
 			Name:        "root",
 		}),
 		c:    c,
+		ctx:  ctx,
 		e:    e,
 		m:    &sync.Mutex{},
 		name: name,
@@ -43,14 +45,9 @@ func NewWorkflow(name string, e *EventEmitter, tf CreateTaskFunc, c *Closer) *Wo
 	}
 }
 
-// Closer returns the closer
+// Closer returns the workflow closer
 func (w *Workflow) Closer() *Closer {
 	return w.c
-}
-
-// EventEmitter returns the event emitter
-func (w *Workflow) EventEmitter() *EventEmitter {
-	return w.e
 }
 
 // IndexNodes indexes nodes
@@ -75,12 +72,12 @@ func (w *Workflow) indexNodesFunc(ns []Node) {
 }
 
 // Start starts the workflow
-func (w *Workflow) Start(ctx context.Context) {
-	w.start(ctx, w.nodes()...)
+func (w *Workflow) Start() {
+	w.start(w.nodes()...)
 }
 
-func (w *Workflow) start(ctx context.Context, ns ...Node) {
-	w.bn.Start(ctx, w.tf, func(t *astiworker.Task) {
+func (w *Workflow) start(ns ...Node) {
+	w.bn.Start(w.ctx, w.tf, func(t *astiworker.Task) {
 		// Log
 		astilog.Debugf("astiencoder: starting workflow %s", w.name)
 
@@ -89,7 +86,7 @@ func (w *Workflow) start(ctx context.Context, ns ...Node) {
 
 		// Loop through nodes
 		for _, n := range ns {
-			w.startNode(n)
+			w.StartNode(n)
 		}
 
 		// Send event
@@ -114,7 +111,8 @@ func (w *Workflow) start(ctx context.Context, ns ...Node) {
 	})
 }
 
-func (w *Workflow) startNode(n Node) {
+// StartNode starts a node
+func (w *Workflow) StartNode(n Node) {
 	n.Start(w.bn.Context(), w.t.NewSubTask)
 }
 

@@ -81,6 +81,7 @@ const page = {
 
         // Add graph description
         document.getElementById("network").innerHTML = desc
+        document.getElementById("network").removeAttribute("data-processed")
 
         // Initialize mermaid
         mermaid.init({}, ".network")
@@ -134,6 +135,9 @@ const page = {
 
                 // Get lines
                 const trs = el.querySelectorAll("tr")
+
+                // Element doesn't exist
+                if (typeof trs === "undefined") return
 
                 // Loop through stats
                 for (let idx = 0; idx < payload.stats.length; idx ++) {

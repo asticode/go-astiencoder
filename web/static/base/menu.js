@@ -18,9 +18,9 @@ let menu = {
         document.getElementById("menu").appendChild(this.workflows.html.table)
 
         // Add workflows
-        if (typeof data.workflows !== "undefined") {
-            for (let k = 0; k < data.workflows.length; k++) {
-                menu.addWorkflow(data.workflows[k])
+        if (typeof data !== "undefined") {
+            for (let k = 0; k < data.length; k++) {
+                menu.addWorkflow(data[k])
             }
         }
     },

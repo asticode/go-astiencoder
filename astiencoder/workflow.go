@@ -12,22 +12,25 @@ import (
 	"github.com/pkg/errors"
 )
 
-func addWorkflow(name string, j Job, e *astiencoder.Encoder) (w *astiencoder.Workflow, err error) {
+func addWorkflow(name string, j Job, e *encoder) (w *astiencoder.Workflow, err error) {
+	// Create closer
+	c := astiencoder.NewCloser()
+
 	// Create workflow
-	if w, err = e.NewWorkflow(name); err != nil {
-		err = errors.Wrap(err, "main: creating workflow failed")
-		return
-	}
+	w = astiencoder.NewWorkflow(e.w.Context(), name, e.ee, e.w.NewTask, c)
 
 	// Build workflow
 	b := newBuilder()
-	if err = b.buildWorkflow(j, w); err != nil {
+	if err = b.buildWorkflow(j, w, e.ee, c); err != nil {
 		err = errors.Wrap(err, "main: building workflow failed")
 		return
 	}
 
 	// Index nodes
 	w.IndexNodes()
+
+	// Add workflow to pool
+	e.wp.AddWorkflow(w)
 	return
 }
 
@@ -50,25 +53,29 @@ type openedOutput struct {
 }
 
 type buildData struct {
+	c        *astiencoder.Closer
 	decoders map[*astilibav.Demuxer]map[*avformat.Stream]*astilibav.Decoder
+	ee       *astiencoder.EventEmitter
 	inputs   map[string]openedInput
 	outputs  map[string]openedOutput
 	w        *astiencoder.Workflow
 }
 
-func newBuildData(w *astiencoder.Workflow) *buildData {
+func newBuildData(w *astiencoder.Workflow, ee *astiencoder.EventEmitter, c *astiencoder.Closer) *buildData {
 	return &buildData{
+		c:        c,
+		ee:       ee,
 		decoders: make(map[*astilibav.Demuxer]map[*avformat.Stream]*astilibav.Decoder),
 		w:        w,
 	}
 }
 
-func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow) (err error) {
+func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow, ee *astiencoder.EventEmitter, c *astiencoder.Closer) (err error) {
 	// Create build data
-	bd := newBuildData(w)
+	bd := newBuildData(w, ee, c)
 
 	// Create opener
-	o := astilibav.NewOpener(w.Closer())
+	o := astilibav.NewOpener(c)
 
 	// No inputs
 	if len(j.Inputs) == 0 {
@@ -77,7 +84,7 @@ func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow) (err error) {
 	}
 
 	// Open inputs
-	if bd.inputs, err = b.openInputs(j, o, w.EventEmitter(), w.Closer()); err != nil {
+	if bd.inputs, err = b.openInputs(j, o, bd); err != nil {
 		err = errors.Wrap(err, "main: opening inputs failed")
 		return
 	}
@@ -89,7 +96,7 @@ func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow) (err error) {
 	}
 
 	// Open outputs
-	if bd.outputs, err = b.openOutputs(j, o, w.EventEmitter(), w.Closer()); err != nil {
+	if bd.outputs, err = b.openOutputs(j, o, bd); err != nil {
 		err = errors.Wrap(err, "main: opening outputs failed")
 		return
 	}
@@ -111,7 +118,7 @@ func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow) (err error) {
 	return
 }
 
-func (b *builder) openInputs(j Job, o *astilibav.Opener, e *astiencoder.EventEmitter, c *astiencoder.Closer) (is map[string]openedInput, err error) {
+func (b *builder) openInputs(j Job, o *astilibav.Opener, bd *buildData) (is map[string]openedInput, err error) {
 	// Loop through inputs
 	is = make(map[string]openedInput)
 	for n, cfg := range j.Inputs {
@@ -126,13 +133,13 @@ func (b *builder) openInputs(j Job, o *astilibav.Opener, e *astiencoder.EventEmi
 		is[n] = openedInput{
 			c:         cfg,
 			ctxFormat: ctxFormat,
-			d:         astilibav.NewDemuxer(ctxFormat, e, c),
+			d:         astilibav.NewDemuxer(ctxFormat, bd.ee, bd.c),
 		}
 	}
 	return
 }
 
-func (b *builder) openOutputs(j Job, o *astilibav.Opener, e *astiencoder.EventEmitter, c *astiencoder.Closer) (os map[string]openedOutput, err error) {
+func (b *builder) openOutputs(j Job, o *astilibav.Opener, bd *buildData) (os map[string]openedOutput, err error) {
 	// Loop through outputs
 	os = make(map[string]openedOutput)
 	for n, cfg := range j.Outputs {
@@ -154,7 +161,7 @@ func (b *builder) openOutputs(j Job, o *astilibav.Opener, e *astiencoder.EventEm
 			}
 
 			// Create muxer
-			oo.m = astilibav.NewMuxer(oo.ctxFormat, e, c)
+			oo.m = astilibav.NewMuxer(oo.ctxFormat, bd.ee, bd.c)
 		}
 
 		// Index
@@ -249,7 +256,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 
 			// Create encoder
 			var e *astilibav.Encoder
-			if e, err = astilibav.NewEncoderFromContext(outCtx, prev, bd.w.EventEmitter(), bd.w.Closer()); err != nil {
+			if e, err = astilibav.NewEncoderFromContext(outCtx, prev, bd.ee, bd.c); err != nil {
 				err = errors.Wrapf(err, "main: creating encoder for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
 				return
 			}
@@ -268,7 +275,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 				switch o.o.c.Type {
 				case JobOutputTypePktDump:
 					// Create pkt dumper
-					if h, err = astilibav.NewPktDumper(o.o.c.URL, astilibav.PktDumpFile, map[string]interface{}{"input": i.c.Name}, bd.w.EventEmitter()); err != nil {
+					if h, err = astilibav.NewPktDumper(o.o.c.URL, astilibav.PktDumpFile, map[string]interface{}{"input": i.c.Name}, bd.ee); err != nil {
 						err = errors.Wrapf(err, "main: creating pkt dumper for output %s with conf %+v failed", o.c.Name, o.c)
 						return
 					}
@@ -407,7 +414,7 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 	// Decoder doesn't exist
 	if !okD || !okS {
 		// Create decoder
-		if d, err = astilibav.NewDecoderFromCodecParams(is.CodecParameters(), bd.w.EventEmitter(), bd.w.Closer()); err != nil {
+		if d, err = astilibav.NewDecoderFromCodecParams(is.CodecParameters(), bd.ee, bd.c); err != nil {
 			err = errors.Wrapf(err, "main: creating decoder for stream 0x%x(%d) of %s failed", is.Id(), is.Id(), i.c.Name)
 			return
 		}
@@ -449,7 +456,7 @@ func (b *builder) createFilterer(bd *buildData, i *avformat.Stream, inCtx, outCt
 		}
 
 		// Create filterer
-		if f, err = astilibav.NewFiltererFromOptions(fo, i, bd.w.EventEmitter(), bd.w.Closer()); err != nil {
+		if f, err = astilibav.NewFiltererFromOptions(fo, i, bd.ee, bd.c); err != nil {
 			err = errors.Wrapf(err, "main: creating filterer with filters %+v failed", filters)
 			return
 		}

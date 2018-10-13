@@ -8,7 +8,7 @@ import (
 )
 
 func TestCloser(t *testing.T) {
-	c := newCloser()
+	c := NewCloser()
 	var o []string
 	c.Add(func() error {
 		o = append(o, "1")

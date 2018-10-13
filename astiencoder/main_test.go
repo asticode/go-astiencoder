@@ -18,11 +18,16 @@ func init() {
 }
 
 func testJob(t *testing.T, jobPath string, assertPaths func(j Job) map[string]string) {
+	// Create event emitter
+	ee := astiencoder.NewEventEmitter()
+
+	// Create workflow pool
+	wp := astiencoder.NewWorkflowPool()
+
 	// Create encoder
-	cfg := &astiencoder.Configuration{}
+	cfg := &ConfigurationEncoder{}
 	cfg.Exec.StopWhenWorkflowsAreStopped = true
-	e := astiencoder.NewEncoder(cfg)
-	defer e.Close()
+	e := newEncoder(cfg, ee, wp)
 
 	// Open job
 	j, err := openJob(jobPath)
@@ -39,10 +44,10 @@ func testJob(t *testing.T, jobPath string, assertPaths func(j Job) map[string]st
 	}
 
 	// Start workflow
-	w.Start(e.Context())
+	w.Start()
 
 	// Wait
-	e.Wait()
+	e.w.Wait()
 
 	// Check expected paths
 	for expectedPath, actualPath := range assertPaths(j) {
