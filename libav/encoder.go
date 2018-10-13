@@ -181,10 +181,11 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
 		defer e.d.wait()
 
+		// We need to create a prev pool since the encoder keeps a buffer of frame
+		var pp []Descriptor
+
 		// Make sure to flush the encoder
-		// TODO This is not right :D
-		var lastPrev Descriptor
-		defer e.flush(&lastPrev)
+		defer e.flush(&pp)
 
 		// Make sure to stop the queue properly
 		defer e.q.Stop()
@@ -196,25 +197,26 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 			// Assert payload
 			p := dp.(*FrameHandlerPayload)
-			lastPrev = p.Prev
 
 			// Increment incoming rate
 			e.statIncomingRate.Add(1)
 
 			// Encode
-			e.encode(p)
+			e.encode(p, &pp)
 		})
 	})
 }
 
-func (e *Encoder) flush(prev *Descriptor) {
-	e.encode(&FrameHandlerPayload{
-		Frame: nil,
-		Prev:  *prev,
-	})
+func (e *Encoder) flush(pp *[]Descriptor) {
+	e.encode(&FrameHandlerPayload{}, pp)
 }
 
-func (e *Encoder) encode(p *FrameHandlerPayload) {
+func (e *Encoder) encode(p *FrameHandlerPayload, pp *[]Descriptor) {
+	// Add prev to pool
+	if p.Prev != nil {
+		*pp = append(*pp, p.Prev)
+	}
+
 	// Send frame to encoder
 	e.statWorkRatio.Add(true)
 	if ret := avcodec.AvcodecSendFrame(e.ctxCodec, p.Frame); ret < 0 {
@@ -225,15 +227,16 @@ func (e *Encoder) encode(p *FrameHandlerPayload) {
 	e.statWorkRatio.Done(true)
 
 	// Loop
+	prev := Descriptor(nil)
 	for {
 		// Receive pkt
-		if stop := e.receivePkt(p.Prev); stop {
+		if stop := e.receivePkt(&prev, pp); stop {
 			return
 		}
 	}
 }
 
-func (e *Encoder) receivePkt(prev Descriptor) (stop bool) {
+func (e *Encoder) receivePkt(prev *Descriptor, pp *[]Descriptor) (stop bool) {
 	// Get pkt from pool
 	pkt := e.d.getPkt()
 	defer e.d.putPkt(pkt)
@@ -250,8 +253,14 @@ func (e *Encoder) receivePkt(prev Descriptor) (stop bool) {
 	}
 	e.statWorkRatio.Done(true)
 
+	// Get prev
+	if *prev == nil {
+		*prev = (*pp)[0]
+		*pp = (*pp)[1:]
+	}
+
 	// Rescale timestamps
-	pkt.AvPacketRescaleTs(prev.TimeBase(), e.ctxCodec.TimeBase())
+	pkt.AvPacketRescaleTs((*prev).TimeBase(), e.ctxCodec.TimeBase())
 
 	// Dispatch pkt
 	e.d.dispatch(pkt, newEncoderPrev(e.ctxCodec))
