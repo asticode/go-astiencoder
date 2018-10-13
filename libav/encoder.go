@@ -25,14 +25,13 @@ type Encoder struct {
 	ctxCodec         *avcodec.Context
 	d                *pktDispatcher
 	e                *astiencoder.EventEmitter
-	prev             Descriptor
 	q                *astisync.CtxQueue
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
 }
 
 // NewEncoder creates a new encoder
-func NewEncoder(ctxCodec *avcodec.Context, prev Descriptor, ee *astiencoder.EventEmitter, c *astiencoder.Closer) (e *Encoder) {
+func NewEncoder(ctxCodec *avcodec.Context, ee *astiencoder.EventEmitter, c *astiencoder.Closer) (e *Encoder) {
 	count := atomic.AddUint64(&countEncoder, uint64(1))
 	e = &Encoder{
 		BaseNode: astiencoder.NewBaseNode(ee, astiencoder.NodeMetadata{
@@ -43,7 +42,6 @@ func NewEncoder(ctxCodec *avcodec.Context, prev Descriptor, ee *astiencoder.Even
 		ctxCodec:         ctxCodec,
 		d:                newPktDispatcher(c),
 		e:                ee,
-		prev:             prev,
 		q:                astisync.NewCtxQueue(),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
@@ -53,7 +51,7 @@ func NewEncoder(ctxCodec *avcodec.Context, prev Descriptor, ee *astiencoder.Even
 }
 
 // NewEncoderFromContext creates a new encoder based on a context
-func NewEncoderFromContext(ctx Context, prev Descriptor, e *astiencoder.EventEmitter, c *astiencoder.Closer) (_ *Encoder, err error) {
+func NewEncoderFromContext(ctx Context, e *astiencoder.EventEmitter, c *astiencoder.Closer) (_ *Encoder, err error) {
 	// Find encoder
 	var cdc *avcodec.Codec
 	if len(ctx.CodecName) > 0 {
@@ -140,7 +138,7 @@ func NewEncoderFromContext(ctx Context, prev Descriptor, e *astiencoder.EventEmi
 	})
 
 	// Create encoder
-	return NewEncoder(ctxCodec, prev, e, c), nil
+	return NewEncoder(ctxCodec, e, c), nil
 }
 
 func (e *Encoder) addStats() {
@@ -184,36 +182,42 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		defer e.d.wait()
 
 		// Make sure to flush the encoder
-		defer e.flush()
+		// TODO This is not right :D
+		var lastPrev Descriptor
+		defer e.flush(&lastPrev)
 
 		// Make sure to stop the queue properly
 		defer e.q.Stop()
 
 		// Start queue
-		e.q.Start(func(p interface{}) {
+		e.q.Start(func(dp interface{}) {
 			// Handle pause
 			defer e.HandlePause()
 
 			// Assert payload
-			f := p.(*avutil.Frame)
+			p := dp.(*FrameHandlerPayload)
+			lastPrev = p.Prev
 
 			// Increment incoming rate
 			e.statIncomingRate.Add(1)
 
 			// Encode
-			e.encode(f)
+			e.encode(p)
 		})
 	})
 }
 
-func (e *Encoder) flush() {
-	e.encode(nil)
+func (e *Encoder) flush(prev *Descriptor) {
+	e.encode(&FrameHandlerPayload{
+		Frame: nil,
+		Prev:  *prev,
+	})
 }
 
-func (e *Encoder) encode(f *avutil.Frame) {
+func (e *Encoder) encode(p *FrameHandlerPayload) {
 	// Send frame to encoder
 	e.statWorkRatio.Add(true)
-	if ret := avcodec.AvcodecSendFrame(e.ctxCodec, f); ret < 0 {
+	if ret := avcodec.AvcodecSendFrame(e.ctxCodec, p.Frame); ret < 0 {
 		e.statWorkRatio.Done(true)
 		emitAvError(e.e, ret, "avcodec.AvcodecSendFrame failed")
 		return
@@ -223,13 +227,13 @@ func (e *Encoder) encode(f *avutil.Frame) {
 	// Loop
 	for {
 		// Receive pkt
-		if stop := e.receivePkt(); stop {
+		if stop := e.receivePkt(p.Prev); stop {
 			return
 		}
 	}
 }
 
-func (e *Encoder) receivePkt() (stop bool) {
+func (e *Encoder) receivePkt(prev Descriptor) (stop bool) {
 	// Get pkt from pool
 	pkt := e.d.getPkt()
 	defer e.d.putPkt(pkt)
@@ -247,16 +251,16 @@ func (e *Encoder) receivePkt() (stop bool) {
 	e.statWorkRatio.Done(true)
 
 	// Rescale timestamps
-	pkt.AvPacketRescaleTs(e.prev.TimeBase(), e.ctxCodec.TimeBase())
+	pkt.AvPacketRescaleTs(prev.TimeBase(), e.ctxCodec.TimeBase())
 
 	// Dispatch pkt
-	e.d.dispatch(pkt)
+	e.d.dispatch(pkt, newEncoderPrev(e.ctxCodec))
 	return
 }
 
 // HandleFrame implements the FrameHandler interface
-func (e *Encoder) HandleFrame(f *avutil.Frame) {
-	e.q.Send(f)
+func (e *Encoder) HandleFrame(p *FrameHandlerPayload) {
+	e.q.Send(p)
 }
 
 // AddStream adds a stream based on the codec ctx
@@ -275,7 +279,15 @@ func (e *Encoder) AddStream(ctxFormat *avformat.Context) (o *avformat.Stream, er
 	return
 }
 
+type encoderPrev struct {
+	ctxCodec *avcodec.Context
+}
+
+func newEncoderPrev(ctxCodec *avcodec.Context) *encoderPrev {
+	return &encoderPrev{ctxCodec: ctxCodec}
+}
+
 // TimeBase implements the Descriptor interface
-func (e *Encoder) TimeBase() avutil.Rational {
-	return e.ctxCodec.TimeBase()
+func (p *encoderPrev) TimeBase() avutil.Rational {
+	return p.ctxCodec.TimeBase()
 }

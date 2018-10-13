@@ -218,7 +218,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 					}
 
 					// Create muxer handler
-					h := o.o.m.NewPktHandler(os, is)
+					h := o.o.m.NewPktHandler(os)
 
 					// Connect demuxer to handler
 					i.o.d.ConnectForStream(h, is)
@@ -241,28 +241,21 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 
 			// Create filterer
 			var f *astilibav.Filterer
-			if f, err = b.createFilterer(bd, is, inCtx, outCtx); err != nil {
+			if f, err = b.createFilterer(bd, inCtx, outCtx); err != nil {
 				err = errors.Wrapf(err, "main: creating filterer for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
 				return
 			}
 
-			// Connect demuxer to filterer
-			var prev astilibav.Descriptor
-			prev = is
-			if f != nil {
-				prev = f
-				d.Connect(f)
-			}
-
 			// Create encoder
 			var e *astilibav.Encoder
-			if e, err = astilibav.NewEncoderFromContext(outCtx, prev, bd.ee, bd.c); err != nil {
+			if e, err = astilibav.NewEncoderFromContext(outCtx, bd.ee, bd.c); err != nil {
 				err = errors.Wrapf(err, "main: creating encoder for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
 				return
 			}
 
 			// Connect demuxer or filterer to encoder
 			if f != nil {
+				d.Connect(f)
 				f.Connect(e)
 			} else {
 				d.Connect(e)
@@ -292,7 +285,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 					}
 
 					// Create muxer handler
-					h = o.o.m.NewPktHandler(os, e)
+					h = o.o.m.NewPktHandler(os)
 				}
 
 				// Connect encoder to handler
@@ -432,7 +425,7 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 	return
 }
 
-func (b *builder) createFilterer(bd *buildData, i *avformat.Stream, inCtx, outCtx astilibav.Context) (f *astilibav.Filterer, err error) {
+func (b *builder) createFilterer(bd *buildData, inCtx, outCtx astilibav.Context) (f *astilibav.Filterer, err error) {
 	// Create filters
 	var filters []string
 
@@ -460,7 +453,7 @@ func (b *builder) createFilterer(bd *buildData, i *avformat.Stream, inCtx, outCt
 		}
 
 		// Create filterer
-		if f, err = astilibav.NewFiltererFromOptions(fo, i, bd.ee, bd.c); err != nil {
+		if f, err = astilibav.NewFiltererFromOptions(fo, bd.ee, bd.c); err != nil {
 			err = errors.Wrapf(err, "main: creating filterer with filters %+v failed", filters)
 			return
 		}

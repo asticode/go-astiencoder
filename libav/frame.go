@@ -10,7 +10,13 @@ import (
 
 // FrameHandler represents an object that can handle a frame
 type FrameHandler interface {
-	HandleFrame(f *avutil.Frame)
+	HandleFrame(p *FrameHandlerPayload)
+}
+
+// FrameHandlerPayload represents a FrameHandler payload
+type FrameHandlerPayload struct {
+	Frame *avutil.Frame
+	Prev  Descriptor
 }
 
 type frameDispatcher struct {
@@ -56,7 +62,7 @@ func (d *frameDispatcher) putFrame(f *avutil.Frame) {
 	d.framePool.Put(f)
 }
 
-func (d *frameDispatcher) dispatch(f *avutil.Frame) {
+func (d *frameDispatcher) dispatch(f *avutil.Frame, prev Descriptor) {
 	// Copy handlers
 	d.m.Lock()
 	var hs []FrameHandler
@@ -94,7 +100,10 @@ func (d *frameDispatcher) dispatch(f *avutil.Frame) {
 		go func(h FrameHandler) {
 			defer d.wg.Done()
 			defer d.putFrame(hF)
-			h.HandleFrame(hF)
+			h.HandleFrame(&FrameHandlerPayload{
+				Frame: hF,
+				Prev:  prev,
+			})
 		}(h)
 	}
 }

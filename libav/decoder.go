@@ -132,19 +132,19 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		defer d.q.Stop()
 
 		// Start queue
-		d.q.Start(func(p interface{}) {
+		d.q.Start(func(dp interface{}) {
 			// Handle pause
 			defer d.HandlePause()
 
 			// Assert payload
-			pkt := p.(*avcodec.Packet)
+			p := dp.(*PktHandlerPayload)
 
 			// Increment incoming rate
 			d.statIncomingRate.Add(1)
 
 			// Send pkt to decoder
 			d.statWorkRatio.Add(true)
-			if ret := avcodec.AvcodecSendPacket(d.ctxCodec, pkt); ret < 0 {
+			if ret := avcodec.AvcodecSendPacket(d.ctxCodec, p.Pkt); ret < 0 {
 				d.statWorkRatio.Done(true)
 				emitAvError(d.e, ret, "avcodec.AvcodecSendPacket failed")
 				return
@@ -154,7 +154,7 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Loop
 			for {
 				// Receive frame
-				if stop := d.receiveFrame(); stop {
+				if stop := d.receiveFrame(p.Prev); stop {
 					return
 				}
 			}
@@ -162,7 +162,7 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	})
 }
 
-func (d *Decoder) receiveFrame() (stop bool) {
+func (d *Decoder) receiveFrame(prev Descriptor) (stop bool) {
 	// Get frame
 	f := d.d.getFrame()
 	defer d.d.putFrame(f)
@@ -180,11 +180,11 @@ func (d *Decoder) receiveFrame() (stop bool) {
 	d.statWorkRatio.Done(true)
 
 	// Dispatch frame
-	d.d.dispatch(f)
+	d.d.dispatch(f, prev)
 	return
 }
 
 // HandlePkt implements the PktHandler interface
-func (d *Decoder) HandlePkt(pkt *avcodec.Packet) {
-	d.q.Send(pkt)
+func (d *Decoder) HandlePkt(p *PktHandlerPayload) {
+	d.q.Send(p)
 }

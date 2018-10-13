@@ -11,7 +11,13 @@ import (
 
 // PktHandler represents an object that can handle a pkt
 type PktHandler interface {
-	HandlePkt(pkt *avcodec.Packet)
+	HandlePkt(p *PktHandlerPayload)
+}
+
+// PktHandlerPayload represents a PktHandler payload
+type PktHandlerPayload struct {
+	Pkt  *avcodec.Packet
+	Prev Descriptor
 }
 
 type pktDispatcher struct {
@@ -53,7 +59,7 @@ func (d *pktDispatcher) putPkt(pkt *avcodec.Packet) {
 	d.pktPool.Put(pkt)
 }
 
-func (d *pktDispatcher) dispatch(pkt *avcodec.Packet) {
+func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, prev Descriptor) {
 	// Copy handlers
 	d.m.Lock()
 	var hs []PktHandler
@@ -90,7 +96,10 @@ func (d *pktDispatcher) dispatch(pkt *avcodec.Packet) {
 		go func(h PktHandler) {
 			defer d.wg.Done()
 			defer d.putPkt(hPkt)
-			h.HandlePkt(hPkt)
+			h.HandlePkt(&PktHandlerPayload{
+				Pkt:  hPkt,
+				Prev: prev,
+			})
 		}(h)
 	}
 }
@@ -130,4 +139,4 @@ func (c *pktCond) UsePkt(pkt *avcodec.Packet) bool {
 	return pkt.StreamIndex() == c.i.Index()
 }
 
-type pktRetriever func() *avcodec.Packet
+type pktHandlerPayloadRetriever func() *PktHandlerPayload

@@ -44,11 +44,11 @@ At this point the way you connect those nodes is up to you since they implement 
 
 ```go
 type PktHandler interface {
-	HandlePkt(pkt *avcodec.Packet)
+	HandlePkt(p *PktHandlerPayload)
 }
 
 type FrameHandler interface {
-	HandleFrame(f *avutil.Frame)
+	HandleFrame(p *FrameHandlerPayload)
 }
 ```
 

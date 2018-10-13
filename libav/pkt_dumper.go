@@ -101,12 +101,12 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		defer d.q.Stop()
 
 		// Start queue
-		d.q.Start(func(p interface{}) {
+		d.q.Start(func(dp interface{}) {
 			// Handle pause
 			defer d.HandlePause()
 
 			// Assert payload
-			pkt := p.(*avcodec.Packet)
+			p := dp.(*PktHandlerPayload)
 
 			// Increment incoming rate
 			d.statIncomingRate.Add(1)
@@ -119,8 +119,8 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 				// Create data
 				d.o.Data["count"] = c
-				d.o.Data["pts"] = pkt.Pts()
-				d.o.Data["stream_idx"] = pkt.StreamIndex()
+				d.o.Data["pts"] = p.Pkt.Pts()
+				d.o.Data["stream_idx"] = p.Pkt.StreamIndex()
 
 				// Execute template
 				d.statWorkRatio.Add(true)
@@ -138,7 +138,7 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 			// Dump
 			d.statWorkRatio.Add(true)
-			if err := d.o.Handler(pkt, args); err != nil {
+			if err := d.o.Handler(p.Pkt, args); err != nil {
 				d.statWorkRatio.Done(true)
 				d.e.Emit(astiencoder.EventError(errors.Wrapf(err, "astilibav: pkt dump func with args %+v failed", args)))
 				return
@@ -149,8 +149,8 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 }
 
 // HandlePkt implements the PktHandler interface
-func (d *PktDumper) HandlePkt(pkt *avcodec.Packet) {
-	d.q.Send(pkt)
+func (d *PktDumper) HandlePkt(p *PktHandlerPayload) {
+	d.q.Send(p)
 }
 
 // PktDumpFunc is a PktDumpFunc that dumps the packet to a file

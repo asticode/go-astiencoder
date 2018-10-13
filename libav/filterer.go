@@ -25,14 +25,13 @@ type Filterer struct {
 	d                *frameDispatcher
 	e                *astiencoder.EventEmitter
 	g                *avfilter.Graph
-	prev             Descriptor
 	q                *astisync.CtxQueue
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
 }
 
 // NewFilterer creates a new filterer
-func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, prev Descriptor, e *astiencoder.EventEmitter, c *astiencoder.Closer) (f *Filterer) {
+func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, e *astiencoder.EventEmitter, c *astiencoder.Closer) (f *Filterer) {
 	count := atomic.AddUint64(&countFilterer, uint64(1))
 	f = &Filterer{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
@@ -45,7 +44,6 @@ func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Grap
 		d:                newFrameDispatcher(e, c),
 		e:                e,
 		g:                g,
-		prev:             prev,
 		q:                astisync.NewCtxQueue(),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
@@ -61,7 +59,7 @@ type FiltererOptions struct {
 }
 
 // NewFiltererFromOptions creates a new filterer based on options
-func NewFiltererFromOptions(o FiltererOptions, prev Descriptor, e *astiencoder.EventEmitter, c *astiencoder.Closer) (_ *Filterer, err error) {
+func NewFiltererFromOptions(o FiltererOptions, e *astiencoder.EventEmitter, c *astiencoder.Closer) (_ *Filterer, err error) {
 	// Create graph
 	g := avfilter.AvfilterGraphAlloc()
 	c.Add(func() error {
@@ -126,7 +124,7 @@ func NewFiltererFromOptions(o FiltererOptions, prev Descriptor, e *astiencoder.E
 	}
 
 	// Create filterer
-	return NewFilterer(bufferSrcCtx, bufferSinkCtx, g, prev, e, c), nil
+	return NewFilterer(bufferSrcCtx, bufferSinkCtx, g, e, c), nil
 }
 
 func (f *Filterer) addStats() {
@@ -173,19 +171,19 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		defer f.q.Stop()
 
 		// Start queue
-		f.q.Start(func(p interface{}) {
+		f.q.Start(func(dp interface{}) {
 			// Handle pause
 			defer f.HandlePause()
 
 			// Assert payload
-			fm := p.(*avutil.Frame)
+			p := dp.(*FrameHandlerPayload)
 
 			// Increment incoming rate
 			f.statIncomingRate.Add(1)
 
 			// Push frame in graph
 			f.statWorkRatio.Add(true)
-			if ret := f.g.AvBuffersrcAddFrameFlags(f.bufferSrcCtx, fm, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
+			if ret := f.g.AvBuffersrcAddFrameFlags(f.bufferSrcCtx, p.Frame, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
 				f.statWorkRatio.Done(true)
 				emitAvError(f.e, ret, "f.g.AvBuffersrcAddFrameFlags failed")
 				return
@@ -195,7 +193,7 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Loop
 			for {
 				// Pull filtered frame
-				if stop := f.pullFilteredFrame(); stop {
+				if stop := f.pullFilteredFrame(p.Prev); stop {
 					return
 				}
 			}
@@ -203,7 +201,7 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	})
 }
 
-func (f *Filterer) pullFilteredFrame() (stop bool) {
+func (f *Filterer) pullFilteredFrame(prev Descriptor) (stop bool) {
 	// Get frame
 	fm := f.d.getFrame()
 	defer f.d.putFrame(fm)
@@ -221,19 +219,31 @@ func (f *Filterer) pullFilteredFrame() (stop bool) {
 	f.statWorkRatio.Done(true)
 
 	// Dispatch frame
-	f.d.dispatch(fm)
+	f.d.dispatch(fm, newFiltererPrev(f.bufferSinkCtx, prev))
 	return
 }
 
 // HandleFrame implements the FrameHandler interface
-func (f *Filterer) HandleFrame(fm *avutil.Frame) {
-	f.q.Send(fm)
+func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
+	f.q.Send(p)
+}
+
+type filtererPrev struct {
+	bufferSinkCtx *avfilter.Context
+	prev          Descriptor
+}
+
+func newFiltererPrev(bufferSinkCtx *avfilter.Context, prev Descriptor) *filtererPrev {
+	return &filtererPrev{
+		bufferSinkCtx: bufferSinkCtx,
+		prev:          prev,
+	}
 }
 
 // TimeBase implements the Descriptor interface
-func (f *Filterer) TimeBase() avutil.Rational {
-	if f.bufferSinkCtx.NbInputs() == 0 {
-		return f.prev.TimeBase()
+func (p *filtererPrev) TimeBase() avutil.Rational {
+	if p.bufferSinkCtx.NbInputs() == 0 {
+		return p.prev.TimeBase()
 	}
-	return f.bufferSinkCtx.Inputs()[0].TimeBase()
+	return p.bufferSinkCtx.Inputs()[0].TimeBase()
 }

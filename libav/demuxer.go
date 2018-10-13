@@ -20,11 +20,13 @@ type Demuxer struct {
 	ctxFormat     *avformat.Context
 	d             *pktDispatcher
 	e             *astiencoder.EventEmitter
+	ss            map[int]*avformat.Stream
 	statWorkRatio *astistat.DurationRatioStat
 }
 
 // NewDemuxer creates a new demuxer
 func NewDemuxer(ctxFormat *avformat.Context, e *astiencoder.EventEmitter, c *astiencoder.Closer) (d *Demuxer) {
+	// Create demuxer
 	count := atomic.AddUint64(&countDemuxer, uint64(1))
 	d = &Demuxer{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
@@ -35,8 +37,16 @@ func NewDemuxer(ctxFormat *avformat.Context, e *astiencoder.EventEmitter, c *ast
 		ctxFormat:     ctxFormat,
 		d:             newPktDispatcher(c),
 		e:             e,
+		ss:            make(map[int]*avformat.Stream),
 		statWorkRatio: astistat.NewDurationRatioStat(),
 	}
+
+	// Index streams
+	for _, s := range ctxFormat.Streams() {
+		d.ss[s.Index()] = s
+	}
+
+	// Add stats
 	d.addStats()
 	return
 }
@@ -112,7 +122,13 @@ func (d *Demuxer) readFrame() (stop bool) {
 	}
 	d.statWorkRatio.Done(true)
 
+	// Get stream
+	s, ok := d.ss[pkt.StreamIndex()]
+	if !ok {
+		return
+	}
+
 	// Dispatch pkt
-	d.d.dispatch(pkt)
+	d.d.dispatch(pkt, s)
 	return
 }

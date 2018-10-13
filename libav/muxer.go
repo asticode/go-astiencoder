@@ -11,7 +11,6 @@ import (
 	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/go-astitools/worker"
-	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 	"github.com/pkg/errors"
 )
@@ -96,21 +95,21 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		defer m.q.Stop()
 
 		// Start queue
-		m.q.Start(func(p interface{}) {
+		m.q.Start(func(dp interface{}) {
 			// Handle pause
 			defer m.HandlePause()
 
 			// Assert payload
-			pkt := p.(pktRetriever)()
+			p := dp.(pktHandlerPayloadRetriever)()
 
 			// Increment incoming rate
 			m.statIncomingRate.Add(1)
 
 			// Write frame
 			m.statWorkRatio.Add(true)
-			if ret := m.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(pkt))); ret < 0 {
+			if ret := m.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(p.Pkt))); ret < 0 {
 				m.statWorkRatio.Done(true)
-				emitAvError(m.e, ret, "m.ctxFormat.AvInterleavedWriteFrame on %+v failed", pkt)
+				emitAvError(m.e, ret, "m.ctxFormat.AvInterleavedWriteFrame failed")
 				return
 			}
 			m.statWorkRatio.Done(true)
@@ -121,32 +120,30 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 // MuxerPktHandler is an object that can handle a pkt for the muxer
 type MuxerPktHandler struct {
 	*Muxer
-	o    *avformat.Stream
-	prev Descriptor
+	o *avformat.Stream
 }
 
 // NewHandler creates
-func (m *Muxer) NewPktHandler(o *avformat.Stream, prev Descriptor) *MuxerPktHandler {
+func (m *Muxer) NewPktHandler(o *avformat.Stream) *MuxerPktHandler {
 	return &MuxerPktHandler{
 		Muxer: m,
 		o:     o,
-		prev:  prev,
 	}
 }
 
 // HandlePkt implements the PktHandler interface
-func (h *MuxerPktHandler) HandlePkt(pkt *avcodec.Packet) {
+func (h *MuxerPktHandler) HandlePkt(p *PktHandlerPayload) {
 	// Send pkt
-	h.q.Send(h.pktRetriever(pkt))
+	h.q.Send(h.pktHandlerPayloadRetriever(p))
 }
 
-func (h *MuxerPktHandler) pktRetriever(pkt *avcodec.Packet) pktRetriever {
-	return func() *avcodec.Packet {
+func (h *MuxerPktHandler) pktHandlerPayloadRetriever(p *PktHandlerPayload) pktHandlerPayloadRetriever {
+	return func() *PktHandlerPayload {
 		// Rescale timestamps
-		pkt.AvPacketRescaleTs(h.prev.TimeBase(), h.o.TimeBase())
+		p.Pkt.AvPacketRescaleTs(p.Prev.TimeBase(), h.o.TimeBase())
 
 		// Set stream index
-		pkt.SetStreamIndex(h.o.Index())
-		return pkt
+		p.Pkt.SetStreamIndex(h.o.Index())
+		return p
 	}
 }
