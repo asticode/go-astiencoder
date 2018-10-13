@@ -221,7 +221,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 					h := o.o.m.NewPktHandler(os, is)
 
 					// Connect demuxer to handler
-					i.o.d.Connect(h, is)
+					i.o.d.ConnectForStream(h, is)
 				}
 				continue
 			}
@@ -424,7 +424,7 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 		}
 
 		// Connect demuxer
-		i.o.d.Connect(d, is)
+		i.o.d.ConnectForStream(d, is)
 
 		// Index decoder
 		bd.decoders[i.o.d][is] = d

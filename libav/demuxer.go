@@ -53,14 +53,19 @@ func (d *Demuxer) addStats() {
 	d.d.addStats(d.Stater())
 }
 
-// Connect connects the demuxer to a PktHandler for a specific stream index
-func (d *Demuxer) Connect(h PktHandler, i *avformat.Stream) {
+// Connect connects the demuxer to a PktHandler
+func (d *Demuxer) Connect(h PktHandler) {
 	// Add handler
-	if i != nil {
-		d.d.addHandler(newPktCond(i, h))
-	} else {
-		d.d.addHandler(h)
-	}
+	d.d.addHandler(h)
+
+	// Connect nodes
+	astiencoder.ConnectNodes(d, h.(astiencoder.Node))
+}
+
+// ConnectForStream connects the demuxer to a PktHandler for a specific stream
+func (d *Demuxer) ConnectForStream(h PktHandler, i *avformat.Stream) {
+	// Add handler
+	d.d.addHandler(newPktCond(i, h))
 
 	// Connect nodes
 	astiencoder.ConnectNodes(d, h.(astiencoder.Node))
