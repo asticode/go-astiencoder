@@ -86,7 +86,7 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Write trailer once everything is done
 		m.c.Add(func() error {
 			if ret := m.ctxFormat.AvWriteTrailer(); ret < 0 {
-				return errors.Wrapf(newAvError(ret), "m.ctxFormat.AvWriteTrailer on %s failed", m.ctxFormat.Filename())
+				return errors.Wrapf(NewAvError(ret), "m.ctxFormat.AvWriteTrailer on %s failed", m.ctxFormat.Filename())
 			}
 			return nil
 		})

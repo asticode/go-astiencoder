@@ -84,14 +84,14 @@ func NewFiltererFromOptions(o FiltererOptions, e *astiencoder.EventEmitter, c *a
 	// Create filter in
 	var bufferSrcCtx *avfilter.Context
 	if ret := avfilter.AvfilterGraphCreateFilter(&bufferSrcCtx, bufferSrc, "in", args, nil, g); ret < 0 {
-		err = errors.Wrapf(newAvError(ret), "astilibav: avfilter.AvfilterGraphCreateFilter on args %s failed", args)
+		err = errors.Wrapf(NewAvError(ret), "astilibav: avfilter.AvfilterGraphCreateFilter on args %s failed", args)
 		return
 	}
 
 	// Create filter sink
 	var bufferSinkCtx *avfilter.Context
 	if ret := avfilter.AvfilterGraphCreateFilter(&bufferSinkCtx, bufferSink, "out", "", nil, g); ret < 0 {
-		err = errors.Wrap(newAvError(ret), "astilibav: avfilter.AvfilterGraphCreateFilter on empty args failed")
+		err = errors.Wrap(NewAvError(ret), "astilibav: avfilter.AvfilterGraphCreateFilter on empty args failed")
 		return
 	}
 
@@ -113,13 +113,13 @@ func NewFiltererFromOptions(o FiltererOptions, e *astiencoder.EventEmitter, c *a
 
 	// Parse content
 	if ret := g.AvfilterGraphParsePtr(o.Content, &inputs, &outputs, nil); ret < 0 {
-		err = errors.Wrapf(newAvError(ret), "astilibav: g.AvfilterGraphParsePtr on content %s failed", o.Content)
+		err = errors.Wrapf(NewAvError(ret), "astilibav: g.AvfilterGraphParsePtr on content %s failed", o.Content)
 		return
 	}
 
 	// Configure
 	if ret := g.AvfilterGraphConfig(nil); ret < 0 {
-		err = errors.Wrap(newAvError(ret), "astilibav: g.AvfilterGraphConfig failed")
+		err = errors.Wrap(NewAvError(ret), "astilibav: g.AvfilterGraphConfig failed")
 		return
 	}
 

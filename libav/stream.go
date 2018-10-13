@@ -18,7 +18,7 @@ func CloneStream(i *avformat.Stream, ctxFormat *avformat.Context) (o *avformat.S
 
 	// Copy codec parameters
 	if ret := avcodec.AvcodecParametersCopy(o.CodecParameters(), i.CodecParameters()); ret < 0 {
-		err = errors.Wrapf(newAvError(ret), "astilibav: avcodec.AvcodecParametersCopy from %+v to %+v failed", i.CodecParameters(), o.CodecParameters())
+		err = errors.Wrapf(NewAvError(ret), "astilibav: avcodec.AvcodecParametersCopy from %+v to %+v failed", i.CodecParameters(), o.CodecParameters())
 		return
 	}
 

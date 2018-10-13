@@ -14,10 +14,11 @@ func (e AvError) Error() string {
 	return avutil.AvStrerr(int(e))
 }
 
-func newAvError(ret int) AvError {
+// NewAvError creates a new av error
+func NewAvError(ret int) AvError {
 	return AvError(ret)
 }
 
 func emitAvError(e *astiencoder.EventEmitter, ret int, format string, args ...interface{}) {
-	e.Emit(astiencoder.EventError(errors.Wrapf(newAvError(ret), "astilibav: "+format, args...)))
+	e.Emit(astiencoder.EventError(errors.Wrapf(NewAvError(ret), "astilibav: "+format, args...)))
 }

@@ -36,7 +36,7 @@ func (o *Opener) OpenInput(opts OpenerOptions) (ctxFormat *avformat.Context, err
 	if len(opts.Dict) > 0 {
 		// Parse dict
 		if ret := avutil.AvDictParseString(&dict, opts.Dict, "=", ",", 0); ret < 0 {
-			err = errors.Wrapf(newAvError(ret), "astilibav: avutil.AvDictParseString on %s failed", opts.Dict)
+			err = errors.Wrapf(NewAvError(ret), "astilibav: avutil.AvDictParseString on %s failed", opts.Dict)
 			return
 		}
 
@@ -46,7 +46,7 @@ func (o *Opener) OpenInput(opts OpenerOptions) (ctxFormat *avformat.Context, err
 
 	// Open input
 	if ret := avformat.AvformatOpenInput(&ctxFormat, opts.URL, opts.InputFormat, &dict); ret < 0 {
-		err = errors.Wrapf(newAvError(ret), "astilibav: avformat.AvformatOpenInput on input with options %+v failed", opts)
+		err = errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvformatOpenInput on input with options %+v failed", opts)
 		return
 	}
 
@@ -58,7 +58,7 @@ func (o *Opener) OpenInput(opts OpenerOptions) (ctxFormat *avformat.Context, err
 
 	// Retrieve stream information
 	if ret := ctxFormat.AvformatFindStreamInfo(nil); ret < 0 {
-		err = errors.Wrapf(newAvError(ret), "astilibav: ctxFormat.AvformatFindStreamInfo on input with options %+v failed", opts)
+		err = errors.Wrapf(NewAvError(ret), "astilibav: ctxFormat.AvformatFindStreamInfo on input with options %+v failed", opts)
 		return
 	}
 	return
@@ -68,7 +68,7 @@ func (o *Opener) OpenInput(opts OpenerOptions) (ctxFormat *avformat.Context, err
 func (o *Opener) OpenOutput(opts OpenerOptions) (ctxFormat *avformat.Context, err error) {
 	// Alloc format context
 	if ret := avformat.AvformatAllocOutputContext2(&ctxFormat, opts.OutputFormat, opts.OutputFormatName, opts.URL); ret < 0 {
-		err = errors.Wrapf(newAvError(ret), "astilibav: avformat.AvformatAllocOutputContext2 on output with options %+v failed", opts)
+		err = errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvformatAllocOutputContext2 on output with options %+v failed", opts)
 		return
 	}
 
@@ -83,7 +83,7 @@ func (o *Opener) OpenOutput(opts OpenerOptions) (ctxFormat *avformat.Context, er
 		// Open
 		var ctxAvIO *avformat.AvIOContext
 		if ret := avformat.AvIOOpen(&ctxAvIO, opts.URL, avformat.AVIO_FLAG_WRITE); ret < 0 {
-			err = errors.Wrapf(newAvError(ret), "astilibav: avformat.AvIOOpen on output with options %+v failed", opts)
+			err = errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvIOOpen on output with options %+v failed", opts)
 			return
 		}
 
@@ -93,7 +93,7 @@ func (o *Opener) OpenOutput(opts OpenerOptions) (ctxFormat *avformat.Context, er
 		// Make sure the avio ctx is properly closed
 		o.c.Add(func() error {
 			if ret := avformat.AvIOClosep(&ctxAvIO); ret < 0 {
-				return errors.Wrapf(newAvError(ret), "astilibav: avformat.AvIOClosep on output with options %+v failed", opts)
+				return errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvIOClosep on output with options %+v failed", opts)
 			}
 			return nil
 		})

@@ -115,7 +115,7 @@ func NewEncoderFromContext(ctx Context, e *astiencoder.EventEmitter, c *astienco
 	if len(ctx.Dict) > 0 {
 		// Parse dict
 		if ret := avutil.AvDictParseString(&dict, ctx.Dict, "=", ",", 0); ret < 0 {
-			err = errors.Wrapf(newAvError(ret), "astilibav: avutil.AvDictParseString on %s failed", ctx.Dict)
+			err = errors.Wrapf(NewAvError(ret), "astilibav: avutil.AvDictParseString on %s failed", ctx.Dict)
 			return
 		}
 
@@ -125,7 +125,7 @@ func NewEncoderFromContext(ctx Context, e *astiencoder.EventEmitter, c *astienco
 
 	// Open codec
 	if ret := ctxCodec.AvcodecOpen2(cdc, &dict); ret < 0 {
-		err = errors.Wrap(newAvError(ret), "astilibav: d.ctxCodec.AvcodecOpen2 failed")
+		err = errors.Wrap(NewAvError(ret), "astilibav: d.ctxCodec.AvcodecOpen2 failed")
 		return
 	}
 
@@ -281,7 +281,7 @@ func (e *Encoder) AddStream(ctxFormat *avformat.Context) (o *avformat.Stream, er
 
 	// Set codec parameters
 	if ret := avcodec.AvcodecParametersFromContext(o.CodecParameters(), e.ctxCodec); ret < 0 {
-		err = errors.Wrapf(newAvError(ret), "astilibav: avcodec.AvcodecParametersFromContext from %+v to %+v failed", e.ctxCodec, o.CodecParameters())
+		err = errors.Wrapf(NewAvError(ret), "astilibav: avcodec.AvcodecParametersFromContext from %+v to %+v failed", e.ctxCodec, o.CodecParameters())
 		return
 	}
 
