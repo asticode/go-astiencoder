@@ -31,11 +31,12 @@ type frameDispatcher struct {
 	framePool    *sync.Pool
 	hs           []FrameHandler
 	m            *sync.Mutex
+	n            astiencoder.Node
 	statDispatch *astistat.DurationRatioStat
 	wg           *sync.WaitGroup
 }
 
-func newFrameDispatcher(e *astiencoder.EventEmitter, c *astiencoder.Closer) *frameDispatcher {
+func newFrameDispatcher(n astiencoder.Node, e *astiencoder.EventEmitter, c *astiencoder.Closer) *frameDispatcher {
 	return &frameDispatcher{
 		c: c,
 		e: e,
@@ -48,6 +49,7 @@ func newFrameDispatcher(e *astiencoder.EventEmitter, c *astiencoder.Closer) *fra
 			return f
 		}},
 		m:            &sync.Mutex{},
+		n:            n,
 		statDispatch: astistat.NewDurationRatioStat(),
 		wg:           &sync.WaitGroup{},
 	}
@@ -109,7 +111,7 @@ func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
 			h.HandleFrame(&FrameHandlerPayload{
 				Descriptor: descriptor,
 				Frame:      hF,
-				Node:       h.(astiencoder.Node),
+				Node:       d.n,
 			})
 		}(h)
 	}

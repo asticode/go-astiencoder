@@ -37,12 +37,12 @@ func NewDecoder(ctxCodec *avcodec.Context, e *astiencoder.EventEmitter, c *astie
 			Name:        fmt.Sprintf("decoder_%d", count),
 		}),
 		ctxCodec:         ctxCodec,
-		d:                newFrameDispatcher(e, c),
 		e:                e,
 		q:                astisync.NewCtxQueue(),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
+	d.d = newFrameDispatcher(d, e, c)
 	d.addStats()
 	return
 }

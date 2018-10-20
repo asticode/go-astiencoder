@@ -41,13 +41,13 @@ func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Grap
 		}),
 		bufferSinkCtx:    bufferSinkCtx,
 		bufferSrcCtx:     bufferSrcCtx,
-		d:                newFrameDispatcher(e, c),
 		e:                e,
 		g:                g,
 		q:                astisync.NewCtxQueue(),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
+	f.d = newFrameDispatcher(f, e, c)
 	f.addStats()
 	return
 }

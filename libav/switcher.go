@@ -36,13 +36,13 @@ func NewSwitcher(e *astiencoder.EventEmitter, c *astiencoder.Closer) (s *Switche
 			Label:       fmt.Sprintf("Switcher #%d", count),
 			Name:        fmt.Sprintf("switcher_%d", count),
 		}),
-		d:                newFrameDispatcher(e, c),
 		m:                &sync.Mutex{},
 		q:                astisync.NewCtxQueue(),
 		rs:               make(map[astiencoder.Node]bool),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
+	s.d = newFrameDispatcher(s, e, c)
 	s.addStats()
 	return
 }
