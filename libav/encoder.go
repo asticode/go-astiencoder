@@ -217,6 +217,12 @@ func (e *Encoder) encode(p *FrameHandlerPayload, pp *[]Descriptor) {
 		*pp = append(*pp, p.Prev)
 	}
 
+	// Reset frame attributes
+	if p.Frame != nil {
+		p.Frame.Key_frame = 0
+		p.Frame.Pict_type = avutil.AV_PICTURE_TYPE_NONE
+	}
+
 	// Send frame to encoder
 	e.statWorkRatio.Add(true)
 	if ret := avcodec.AvcodecSendFrame(e.ctxCodec, p.Frame); ret < 0 {
