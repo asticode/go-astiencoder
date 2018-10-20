@@ -149,7 +149,7 @@ func (f *Filterer) addStats() {
 	f.q.AddStats(f.Stater())
 }
 
-// Connect connects the filterer to a FrameHandler
+// Connect implements the FrameHandlerConnector interface
 func (f *Filterer) Connect(h FrameHandler) {
 	// Append handler
 	f.d.addHandler(h)

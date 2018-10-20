@@ -165,7 +165,7 @@ func (e *Encoder) addStats() {
 	e.q.AddStats(e.Stater())
 }
 
-// Connect connects the encoder to a PktHandler
+// Connect implements the PktHandlerConnector interface
 func (e *Encoder) Connect(h PktHandler) {
 	// Append handler
 	e.d.addHandler(h)

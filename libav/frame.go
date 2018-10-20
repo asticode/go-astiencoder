@@ -13,6 +13,11 @@ type FrameHandler interface {
 	HandleFrame(p *FrameHandlerPayload)
 }
 
+// FrameHandlerConnector represents an object that can connect with a frame handler
+type FrameHandlerConnector interface {
+	Connect(next FrameHandler)
+}
+
 // FrameHandlerPayload represents a FrameHandler payload
 type FrameHandlerPayload struct {
 	Frame *avutil.Frame

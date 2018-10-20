@@ -110,7 +110,7 @@ func (d *Decoder) addStats() {
 	d.q.AddStats(d.Stater())
 }
 
-// Connect connects the decoder to a FrameHandler
+// Connect implements the FrameHandlerConnector interface
 func (d *Decoder) Connect(h FrameHandler) {
 	// Add handler
 	d.d.addHandler(h)

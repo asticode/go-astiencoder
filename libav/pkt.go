@@ -14,6 +14,11 @@ type PktHandler interface {
 	HandlePkt(p *PktHandlerPayload)
 }
 
+// PktHandlerConnector represents an object that can connect with a pkt handler
+type PktHandlerConnector interface {
+	Connect(next PktHandler)
+}
+
 // PktHandlerPayload represents a PktHandler payload
 type PktHandlerPayload struct {
 	Pkt  *avcodec.Packet

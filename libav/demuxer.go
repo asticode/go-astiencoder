@@ -63,7 +63,7 @@ func (d *Demuxer) addStats() {
 	d.d.addStats(d.Stater())
 }
 
-// Connect connects the demuxer to a PktHandler
+// Connect implements the PktHandlerConnector interface
 func (d *Demuxer) Connect(h PktHandler) {
 	// Add handler
 	d.d.addHandler(h)
