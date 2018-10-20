@@ -82,8 +82,10 @@ func NewEncoderFromContext(ctx Context, e *astiencoder.EventEmitter, c *astienco
 		return
 	}
 
-	// Set global context parameters
-	ctxCodec.SetFlags(ctxCodec.Flags() | avcodec.AV_CODEC_FLAG_GLOBAL_HEADER)
+	// Set shared context parameters
+	if ctx.GlobalHeader {
+		ctxCodec.SetFlags(ctxCodec.Flags() | avcodec.AV_CODEC_FLAG_GLOBAL_HEADER)
+	}
 	if ctx.ThreadCount != nil {
 		ctxCodec.SetThreadCount(*ctx.ThreadCount)
 	}

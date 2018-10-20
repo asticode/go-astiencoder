@@ -12,13 +12,14 @@ import (
 // Context represents parameters of an audio or a video context
 type Context struct {
 	// Shared
-	BitRate     int
-	CodecID     avcodec.CodecId
-	CodecName   string
-	CodecType   avcodec.MediaType
-	Dict        string
-	ThreadCount *int
-	TimeBase    avutil.Rational
+	BitRate      int
+	CodecID      avcodec.CodecId
+	CodecName    string
+	CodecType    avcodec.MediaType
+	Dict         string
+	GlobalHeader bool
+	ThreadCount  *int
+	TimeBase     avutil.Rational
 
 	// Audio
 	ChannelLayout uint64

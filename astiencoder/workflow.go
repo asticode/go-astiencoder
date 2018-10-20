@@ -237,7 +237,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 			inCtx := astilibav.NewContextFromStream(is)
 
 			// Create output ctx
-			outCtx := b.operationOutputCtx(o, inCtx)
+			outCtx := b.operationOutputCtx(o, inCtx, oos)
 
 			// Create filterer
 			var f *astilibav.Filterer
@@ -343,7 +343,7 @@ func (b *builder) operationInputsOutputs(o JobOperation, bd *buildData) (is []op
 	return
 }
 
-func (b *builder) operationOutputCtx(o JobOperation, inCtx astilibav.Context) (outCtx astilibav.Context) {
+func (b *builder) operationOutputCtx(o JobOperation, inCtx astilibav.Context, oos []operationOutput) (outCtx astilibav.Context) {
 	// Default output ctx is input ctx
 	outCtx = inCtx
 
@@ -396,6 +396,11 @@ func (b *builder) operationOutputCtx(o JobOperation, inCtx astilibav.Context) (o
 	outCtx.Dict = o.Dict
 
 	// TODO Add audio options
+
+	// Set global header
+	if oos[0].o.ctxFormat != nil {
+		outCtx.GlobalHeader = oos[0].o.ctxFormat.Oformat().Flags()&avformat.AVFMT_GLOBALHEADER > 0
+	}
 	return
 }
 
