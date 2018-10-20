@@ -6,6 +6,7 @@ import (
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astiencoder/libav"
+	"github.com/asticode/go-astilog"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
@@ -124,7 +125,10 @@ func (b *builder) openInputs(j Job, o *astilibav.Opener, bd *buildData) (is map[
 	for n, cfg := range j.Inputs {
 		// Open
 		var ctxFormat *avformat.Context
-		if ctxFormat, err = o.OpenInput(astilibav.OpenerOptions{URL: cfg.URL}); err != nil {
+		if ctxFormat, err = o.OpenInput(astilibav.OpenerOptions{
+			Dict: cfg.Dict,
+			URL:  cfg.URL,
+		}); err != nil {
 			err = errors.Wrapf(err, "main: opening input %s with conf %+v failed", n, cfg)
 			return
 		}
@@ -133,7 +137,9 @@ func (b *builder) openInputs(j Job, o *astilibav.Opener, bd *buildData) (is map[
 		is[n] = openedInput{
 			c:         cfg,
 			ctxFormat: ctxFormat,
-			d:         astilibav.NewDemuxer(ctxFormat, bd.ee, bd.c),
+			d: astilibav.NewDemuxerWithOptions(ctxFormat, astilibav.DemuxerOptions{
+				Live: cfg.Live,
+			}, bd.ee, bd.c),
 		}
 	}
 	return
@@ -238,6 +244,8 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 
 			// Create output ctx
 			outCtx := b.operationOutputCtx(o, inCtx, oos)
+
+			astilog.Warnf("in: %+v - out: %+v", inCtx, outCtx)
 
 			// Create filterer
 			var f *astilibav.Filterer
@@ -439,7 +447,7 @@ func (b *builder) createFilterer(bd *buildData, inCtx, outCtx astilibav.Context)
 	case avutil.AVMEDIA_TYPE_VIDEO:
 		// Frame rate
 		// TODO Use select if inFramerate > outFramerate
-		if inCtx.FrameRate.Num()/inCtx.FrameRate.Den() != outCtx.FrameRate.Num()/outCtx.FrameRate.Den() {
+		if inCtx.FrameRate.Den() > 0 && outCtx.FrameRate.Den() > 0 && inCtx.FrameRate.Num()/inCtx.FrameRate.Den() != outCtx.FrameRate.Num()/outCtx.FrameRate.Den() {
 			filters = append(filters, fmt.Sprintf("minterpolate='fps=%d/%d'", outCtx.FrameRate.Num(), outCtx.FrameRate.Den()))
 		}
 

@@ -11,7 +11,9 @@ type Job struct {
 
 // JobInput represents a job input
 type JobInput struct {
-	URL string `json:"url"`
+	Dict string `json:"dict"`
+	Live bool   `json:"live"`
+	URL  string `json:"url"`
 }
 
 // Job output types

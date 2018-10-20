@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astitools/stat"
+	"github.com/asticode/go-astitools/time"
 	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
@@ -20,8 +22,14 @@ type Demuxer struct {
 	ctxFormat     *avformat.Context
 	d             *pktDispatcher
 	e             *astiencoder.EventEmitter
-	ss            map[int]*avformat.Stream
+	o             DemuxerOptions
+	ss            map[int]*demuxerStream
 	statWorkRatio *astistat.DurationRatioStat
+}
+
+type demuxerStream struct {
+	liveNextDts time.Time
+	s           *avformat.Stream
 }
 
 // NewDemuxer creates a new demuxer
@@ -37,17 +45,29 @@ func NewDemuxer(ctxFormat *avformat.Context, e *astiencoder.EventEmitter, c *ast
 		ctxFormat:     ctxFormat,
 		d:             newPktDispatcher(c),
 		e:             e,
-		ss:            make(map[int]*avformat.Stream),
+		ss:            make(map[int]*demuxerStream),
 		statWorkRatio: astistat.NewDurationRatioStat(),
 	}
 
 	// Index streams
 	for _, s := range ctxFormat.Streams() {
-		d.ss[s.Index()] = s
+		d.ss[s.Index()] = &demuxerStream{s: s}
 	}
 
 	// Add stats
 	d.addStats()
+	return
+}
+
+// DemuxerOptions represents demuxer options
+type DemuxerOptions struct {
+	Live bool
+}
+
+// NewDemuxerWithOptions creates a new demuxer with specific options
+func NewDemuxerWithOptions(ctxFormat *avformat.Context, o DemuxerOptions, e *astiencoder.EventEmitter, c *astiencoder.Closer) (d *Demuxer) {
+	d = NewDemuxer(ctxFormat, e, c)
+	d.o = o
 	return
 }
 
@@ -90,7 +110,7 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Loop
 		for {
 			// Read frame
-			if stop := d.readFrame(); stop {
+			if stop := d.readFrame(ctx); stop {
 				return
 			}
 
@@ -105,7 +125,7 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	})
 }
 
-func (d *Demuxer) readFrame() (stop bool) {
+func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	// Get pkt from pool
 	pkt := d.d.getPkt()
 	defer d.d.putPkt(pkt)
@@ -128,7 +148,22 @@ func (d *Demuxer) readFrame() (stop bool) {
 		return
 	}
 
+	// Simulate live
+	if d.o.Live {
+		// Sleep until next DTS
+		if !s.liveNextDts.IsZero() {
+			if delta := s.liveNextDts.Sub(time.Now()); delta > 0 {
+				astitime.Sleep(ctx, delta)
+			}
+		} else {
+			s.liveNextDts = time.Now()
+		}
+
+		// Compute next DTS
+		s.liveNextDts = s.liveNextDts.Add(time.Duration(avutil.AvRescaleQ(pkt.Duration()*1e9, s.s.TimeBase(), avutil.NewRational(1, 1))))
+	}
+
 	// Dispatch pkt
-	d.d.dispatch(pkt, s)
+	d.d.dispatch(pkt, s.s)
 	return
 }
