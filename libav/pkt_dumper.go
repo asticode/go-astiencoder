@@ -75,7 +75,7 @@ func NewPktDumper(o PktDumperOptions, e *astiencoder.EventEmitter) (d *PktDumper
 func (d *PktDumper) addStats() {
 	// Add incoming rate
 	d.Stater().AddStat(astistat.StatMetadata{
-		Description: "Number of packets coming in the pkt dumper per second",
+		Description: "Number of packets coming in per second",
 		Label:       "Incoming rate",
 		Unit:        "pps",
 	}, d.statIncomingRate)

@@ -20,8 +20,9 @@ type FrameHandlerConnector interface {
 
 // FrameHandlerPayload represents a FrameHandler payload
 type FrameHandlerPayload struct {
-	Frame *avutil.Frame
-	Prev  Descriptor
+	Descriptor Descriptor
+	Frame      *avutil.Frame
+	Node       astiencoder.Node
 }
 
 type frameDispatcher struct {
@@ -67,7 +68,7 @@ func (d *frameDispatcher) putFrame(f *avutil.Frame) {
 	d.framePool.Put(f)
 }
 
-func (d *frameDispatcher) dispatch(f *avutil.Frame, prev Descriptor) {
+func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
 	// Copy handlers
 	d.m.Lock()
 	var hs []FrameHandler
@@ -106,8 +107,9 @@ func (d *frameDispatcher) dispatch(f *avutil.Frame, prev Descriptor) {
 			defer d.wg.Done()
 			defer d.putFrame(hF)
 			h.HandleFrame(&FrameHandlerPayload{
-				Frame: hF,
-				Prev:  prev,
+				Descriptor: descriptor,
+				Frame:      hF,
+				Node:       h.(astiencoder.Node),
 			})
 		}(h)
 	}

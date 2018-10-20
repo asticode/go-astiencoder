@@ -53,7 +53,7 @@ func NewMuxer(ctxFormat *avformat.Context, e *astiencoder.EventEmitter, c *astie
 func (m *Muxer) addStats() {
 	// Add incoming rate
 	m.Stater().AddStat(astistat.StatMetadata{
-		Description: "Number of packets coming in the muxer per second",
+		Description: "Number of packets coming in per second",
 		Label:       "Incoming rate",
 		Unit:        "pps",
 	}, m.statIncomingRate)
@@ -140,7 +140,7 @@ func (h *MuxerPktHandler) HandlePkt(p *PktHandlerPayload) {
 func (h *MuxerPktHandler) pktHandlerPayloadRetriever(p *PktHandlerPayload) pktHandlerPayloadRetriever {
 	return func() *PktHandlerPayload {
 		// Rescale timestamps
-		p.Pkt.AvPacketRescaleTs(p.Prev.TimeBase(), h.o.TimeBase())
+		p.Pkt.AvPacketRescaleTs(p.Descriptor.TimeBase(), h.o.TimeBase())
 
 		// Set stream index
 		p.Pkt.SetStreamIndex(h.o.Index())

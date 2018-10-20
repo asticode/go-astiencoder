@@ -130,7 +130,7 @@ func NewFiltererFromOptions(o FiltererOptions, e *astiencoder.EventEmitter, c *a
 func (f *Filterer) addStats() {
 	// Add incoming rate
 	f.Stater().AddStat(astistat.StatMetadata{
-		Description: "Number of frames coming in the filter per second",
+		Description: "Number of frames coming in per second",
 		Label:       "Incoming rate",
 		Unit:        "fps",
 	}, f.statIncomingRate)
@@ -193,7 +193,7 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Loop
 			for {
 				// Pull filtered frame
-				if stop := f.pullFilteredFrame(p.Prev); stop {
+				if stop := f.pullFilteredFrame(p.Descriptor); stop {
 					return
 				}
 			}
@@ -201,7 +201,7 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	})
 }
 
-func (f *Filterer) pullFilteredFrame(prev Descriptor) (stop bool) {
+func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 	// Get frame
 	fm := f.d.getFrame()
 	defer f.d.putFrame(fm)
@@ -219,7 +219,7 @@ func (f *Filterer) pullFilteredFrame(prev Descriptor) (stop bool) {
 	f.statWorkRatio.Done(true)
 
 	// Dispatch frame
-	f.d.dispatch(fm, newFiltererPrev(f.bufferSinkCtx, prev))
+	f.d.dispatch(fm, newFiltererDescriptor(f.bufferSinkCtx, descriptor))
 	return
 }
 
@@ -228,22 +228,22 @@ func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
 	f.q.Send(p)
 }
 
-type filtererPrev struct {
+type filtererDescriptor struct {
 	bufferSinkCtx *avfilter.Context
 	prev          Descriptor
 }
 
-func newFiltererPrev(bufferSinkCtx *avfilter.Context, prev Descriptor) *filtererPrev {
-	return &filtererPrev{
+func newFiltererDescriptor(bufferSinkCtx *avfilter.Context, prev Descriptor) *filtererDescriptor {
+	return &filtererDescriptor{
 		bufferSinkCtx: bufferSinkCtx,
 		prev:          prev,
 	}
 }
 
 // TimeBase implements the Descriptor interface
-func (p *filtererPrev) TimeBase() avutil.Rational {
-	if p.bufferSinkCtx.NbInputs() == 0 {
-		return p.prev.TimeBase()
+func (d *filtererDescriptor) TimeBase() avutil.Rational {
+	if d.bufferSinkCtx.NbInputs() == 0 {
+		return d.prev.TimeBase()
 	}
-	return p.bufferSinkCtx.Inputs()[0].TimeBase()
+	return d.bufferSinkCtx.Inputs()[0].TimeBase()
 }

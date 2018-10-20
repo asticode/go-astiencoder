@@ -91,7 +91,7 @@ func NewDecoderFromCodecParams(codecParams *avcodec.CodecParameters, e *astienco
 func (d *Decoder) addStats() {
 	// Add incoming rate
 	d.Stater().AddStat(astistat.StatMetadata{
-		Description: "Number of packets coming in the decoder per second",
+		Description: "Number of packets coming in per second",
 		Label:       "Incoming rate",
 		Unit:        "pps",
 	}, d.statIncomingRate)
@@ -154,7 +154,7 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Loop
 			for {
 				// Receive frame
-				if stop := d.receiveFrame(p.Prev); stop {
+				if stop := d.receiveFrame(p.Descriptor); stop {
 					return
 				}
 			}
@@ -162,7 +162,7 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	})
 }
 
-func (d *Decoder) receiveFrame(prev Descriptor) (stop bool) {
+func (d *Decoder) receiveFrame(descriptor Descriptor) (stop bool) {
 	// Get frame
 	f := d.d.getFrame()
 	defer d.d.putFrame(f)
@@ -180,7 +180,7 @@ func (d *Decoder) receiveFrame(prev Descriptor) (stop bool) {
 	d.statWorkRatio.Done(true)
 
 	// Dispatch frame
-	d.d.dispatch(f, prev)
+	d.d.dispatch(f, descriptor)
 	return
 }
 

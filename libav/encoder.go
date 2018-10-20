@@ -146,7 +146,7 @@ func NewEncoderFromContext(ctx Context, e *astiencoder.EventEmitter, c *astienco
 func (e *Encoder) addStats() {
 	// Add incoming rate
 	e.Stater().AddStat(astistat.StatMetadata{
-		Description: "Number of frames coming in the encoder per second",
+		Description: "Number of frames coming in per second",
 		Label:       "Incoming rate",
 		Unit:        "fps",
 	}, e.statIncomingRate)
@@ -183,11 +183,11 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
 		defer e.d.wait()
 
-		// We need to create a prev pool since the encoder keeps a buffer of frame
-		var pp []Descriptor
+		// We need to create a descriptor pool since the encoder keeps a buffer of frame
+		var dpl []Descriptor
 
 		// Make sure to flush the encoder
-		defer e.flush(&pp)
+		defer e.flush(&dpl)
 
 		// Make sure to stop the queue properly
 		defer e.q.Stop()
@@ -204,19 +204,19 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			e.statIncomingRate.Add(1)
 
 			// Encode
-			e.encode(p, &pp)
+			e.encode(p, &dpl)
 		})
 	})
 }
 
-func (e *Encoder) flush(pp *[]Descriptor) {
-	e.encode(&FrameHandlerPayload{}, pp)
+func (e *Encoder) flush(dp *[]Descriptor) {
+	e.encode(&FrameHandlerPayload{}, dp)
 }
 
-func (e *Encoder) encode(p *FrameHandlerPayload, pp *[]Descriptor) {
+func (e *Encoder) encode(p *FrameHandlerPayload, dp *[]Descriptor) {
 	// Add prev to pool
-	if p.Prev != nil {
-		*pp = append(*pp, p.Prev)
+	if p.Descriptor != nil {
+		*dp = append(*dp, p.Descriptor)
 	}
 
 	// Reset frame attributes
@@ -235,16 +235,16 @@ func (e *Encoder) encode(p *FrameHandlerPayload, pp *[]Descriptor) {
 	e.statWorkRatio.Done(true)
 
 	// Loop
-	prev := Descriptor(nil)
+	descriptor := Descriptor(nil)
 	for {
 		// Receive pkt
-		if stop := e.receivePkt(&prev, pp); stop {
+		if stop := e.receivePkt(&descriptor, dp); stop {
 			return
 		}
 	}
 }
 
-func (e *Encoder) receivePkt(prev *Descriptor, pp *[]Descriptor) (stop bool) {
+func (e *Encoder) receivePkt(descriptor *Descriptor, dp *[]Descriptor) (stop bool) {
 	// Get pkt from pool
 	pkt := e.d.getPkt()
 	defer e.d.putPkt(pkt)
@@ -264,16 +264,16 @@ func (e *Encoder) receivePkt(prev *Descriptor, pp *[]Descriptor) (stop bool) {
 	// TODO libx264 returns a pkt with a duration set to 0 here :(
 
 	// Get prev
-	if *prev == nil {
-		*prev = (*pp)[0]
-		*pp = (*pp)[1:]
+	if *descriptor == nil {
+		*descriptor = (*dp)[0]
+		*dp = (*dp)[1:]
 	}
 
 	// Rescale timestamps
-	pkt.AvPacketRescaleTs((*prev).TimeBase(), e.ctxCodec.TimeBase())
+	pkt.AvPacketRescaleTs((*descriptor).TimeBase(), e.ctxCodec.TimeBase())
 
 	// Dispatch pkt
-	e.d.dispatch(pkt, newEncoderPrev(e.ctxCodec))
+	e.d.dispatch(pkt, newEncoderDescriptor(e.ctxCodec))
 	return
 }
 
@@ -298,15 +298,15 @@ func (e *Encoder) AddStream(ctxFormat *avformat.Context) (o *avformat.Stream, er
 	return
 }
 
-type encoderPrev struct {
+type encoderDescriptor struct {
 	ctxCodec *avcodec.Context
 }
 
-func newEncoderPrev(ctxCodec *avcodec.Context) *encoderPrev {
-	return &encoderPrev{ctxCodec: ctxCodec}
+func newEncoderDescriptor(ctxCodec *avcodec.Context) *encoderDescriptor {
+	return &encoderDescriptor{ctxCodec: ctxCodec}
 }
 
 // TimeBase implements the Descriptor interface
-func (p *encoderPrev) TimeBase() avutil.Rational {
-	return p.ctxCodec.TimeBase()
+func (d *encoderDescriptor) TimeBase() avutil.Rational {
+	return d.ctxCodec.TimeBase()
 }

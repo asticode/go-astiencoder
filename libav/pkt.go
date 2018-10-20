@@ -21,8 +21,8 @@ type PktHandlerConnector interface {
 
 // PktHandlerPayload represents a PktHandler payload
 type PktHandlerPayload struct {
-	Pkt  *avcodec.Packet
-	Prev Descriptor
+	Descriptor Descriptor
+	Pkt        *avcodec.Packet
 }
 
 type pktDispatcher struct {
@@ -64,7 +64,7 @@ func (d *pktDispatcher) putPkt(pkt *avcodec.Packet) {
 	d.pktPool.Put(pkt)
 }
 
-func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, prev Descriptor) {
+func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, descriptor Descriptor) {
 	// Copy handlers
 	d.m.Lock()
 	var hs []PktHandler
@@ -102,8 +102,8 @@ func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, prev Descriptor) {
 			defer d.wg.Done()
 			defer d.putPkt(hPkt)
 			h.HandlePkt(&PktHandlerPayload{
-				Pkt:  hPkt,
-				Prev: prev,
+				Descriptor: descriptor,
+				Pkt:        hPkt,
 			})
 		}(h)
 	}
