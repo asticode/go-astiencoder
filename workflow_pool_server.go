@@ -43,23 +43,28 @@ func newExposedWorkflow(w *Workflow) (o ExposedWorkflow) {
 	}
 
 	// Loop through children
+	var processedEdges = make(map[string]bool)
 	for _, n := range w.bn.Children() {
-		o.parseNode(n)
+		o.parseNode(n, processedEdges)
 	}
 	return
 }
 
-func (w *ExposedWorkflow) parseNode(p Node) {
+func (w *ExposedWorkflow) parseNode(p Node, processedEdges map[string]bool) {
 	// Append node
 	w.Nodes = append(w.Nodes, newExposedWorkflowNode(p))
 
 	// Loop through children
 	for _, c := range p.Children() {
 		// Append edge
-		w.Edges = append(w.Edges, newExposedWorkflowEdge(p, c))
+		k := fmt.Sprintf("%s --> %s", p.Metadata().Name, c.Metadata().Name)
+		if _, ok := processedEdges[k]; !ok {
+			w.Edges = append(w.Edges, newExposedWorkflowEdge(p, c))
+			processedEdges[k] = true
+		}
 
 		// Parse node
-		w.parseNode(c)
+		w.parseNode(c, processedEdges)
 	}
 }
 
