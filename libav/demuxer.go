@@ -199,8 +199,8 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	// Get pkt from pool
-	pkt := d.d.getPkt()
-	defer d.d.putPkt(pkt)
+	pkt := d.d.p.get()
+	defer d.d.p.put(pkt)
 
 	// Read frame
 	d.statWorkRatio.Add(true)

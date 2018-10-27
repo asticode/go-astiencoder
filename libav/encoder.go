@@ -246,8 +246,8 @@ func (e *Encoder) encode(p *FrameHandlerPayload, dp *[]Descriptor) {
 
 func (e *Encoder) receivePkt(descriptor *Descriptor, dp *[]Descriptor) (stop bool) {
 	// Get pkt from pool
-	pkt := e.d.getPkt()
-	defer e.d.putPkt(pkt)
+	pkt := e.d.p.get()
+	defer e.d.p.put(pkt)
 
 	// Receive pkt
 	e.statWorkRatio.Add(true)

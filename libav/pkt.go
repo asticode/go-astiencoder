@@ -28,22 +28,15 @@ type PktHandlerPayload struct {
 type pktDispatcher struct {
 	hs           []PktHandler
 	m            *sync.Mutex
-	pktPool      *sync.Pool
+	p            *pktPool
 	statDispatch *astistat.DurationRatioStat
 	wg           *sync.WaitGroup
 }
 
 func newPktDispatcher(c *astiencoder.Closer) *pktDispatcher {
 	return &pktDispatcher{
-		m: &sync.Mutex{},
-		pktPool: &sync.Pool{New: func() interface{} {
-			pkt := avcodec.AvPacketAlloc()
-			c.Add(func() error {
-				avcodec.AvPacketFree(pkt)
-				return nil
-			})
-			return pkt
-		}},
+		m:            &sync.Mutex{},
+		p:            newPktPool(c),
 		statDispatch: astistat.NewDurationRatioStat(),
 		wg:           &sync.WaitGroup{},
 	}
@@ -53,15 +46,6 @@ func (d *pktDispatcher) addHandler(h PktHandler) {
 	d.m.Lock()
 	defer d.m.Unlock()
 	d.hs = append(d.hs, h)
-}
-
-func (d *pktDispatcher) getPkt() *avcodec.Packet {
-	return d.pktPool.Get().(*avcodec.Packet)
-}
-
-func (d *pktDispatcher) putPkt(pkt *avcodec.Packet) {
-	pkt.AvPacketUnref()
-	d.pktPool.Put(pkt)
 }
 
 func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, descriptor Descriptor) {
@@ -94,13 +78,13 @@ func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, descriptor Descriptor) {
 	// Loop through handlers
 	for _, h := range hs {
 		// Copy pkt
-		hPkt := d.getPkt()
+		hPkt := d.p.get()
 		hPkt.AvPacketRef(pkt)
 
 		// Handle pkt
 		go func(h PktHandler) {
 			defer d.wg.Done()
-			defer d.putPkt(hPkt)
+			defer d.p.put(hPkt)
 			h.HandlePkt(&PktHandlerPayload{
 				Descriptor: descriptor,
 				Pkt:        hPkt,
@@ -145,3 +129,39 @@ func (c *pktCond) UsePkt(pkt *avcodec.Packet) bool {
 }
 
 type pktHandlerPayloadRetriever func() *PktHandlerPayload
+
+type pktPool struct {
+	c *astiencoder.Closer
+	m *sync.Mutex
+	p []*avcodec.Packet
+}
+
+func newPktPool(c *astiencoder.Closer) *pktPool {
+	return &pktPool{
+		c: c,
+		m: &sync.Mutex{},
+	}
+}
+
+func (p *pktPool) get() (pkt *avcodec.Packet) {
+	p.m.Lock()
+	defer p.m.Unlock()
+	if len(p.p) == 0 {
+		pkt = avcodec.AvPacketAlloc()
+		p.c.Add(func() error {
+			avcodec.AvPacketFree(pkt)
+			return nil
+		})
+		return
+	}
+	pkt = p.p[0]
+	p.p = p.p[1:]
+	return
+}
+
+func (p *pktPool) put(pkt *avcodec.Packet) {
+	p.m.Lock()
+	defer p.m.Unlock()
+	pkt.AvPacketUnref()
+	p.p = append(p.p, pkt)
+}
