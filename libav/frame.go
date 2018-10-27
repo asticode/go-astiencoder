@@ -8,14 +8,16 @@ import (
 	"github.com/asticode/goav/avutil"
 )
 
-// FrameHandler represents an object that can handle a frame
+// FrameHandler represents a node that can handle a frame
 type FrameHandler interface {
+	astiencoder.Node
 	HandleFrame(p *FrameHandlerPayload)
 }
 
-// FrameHandlerConnector represents an object that can connect with a frame handler
+// FrameHandlerConnector represents an object that can connect/disconnect with a frame handler
 type FrameHandlerConnector interface {
 	Connect(next FrameHandler)
+	Disconnect(next FrameHandler)
 }
 
 // FrameHandlerPayload represents a FrameHandler payload
@@ -28,7 +30,7 @@ type FrameHandlerPayload struct {
 type frameDispatcher struct {
 	c            *astiencoder.Closer
 	e            *astiencoder.EventEmitter
-	hs           []FrameHandler
+	hs           map[string]FrameHandler
 	m            *sync.Mutex
 	n            astiencoder.Node
 	p            *framePool
@@ -40,6 +42,7 @@ func newFrameDispatcher(n astiencoder.Node, e *astiencoder.EventEmitter, c *asti
 	return &frameDispatcher{
 		c:            c,
 		e:            e,
+		hs:           make(map[string]FrameHandler),
 		m:            &sync.Mutex{},
 		n:            n,
 		p:            newFramePool(c),
@@ -51,7 +54,13 @@ func newFrameDispatcher(n astiencoder.Node, e *astiencoder.EventEmitter, c *asti
 func (d *frameDispatcher) addHandler(h FrameHandler) {
 	d.m.Lock()
 	defer d.m.Unlock()
-	d.hs = append(d.hs, h)
+	d.hs[h.Metadata().Name] = h
+}
+
+func (d *frameDispatcher) delHandler(h FrameHandler) {
+	d.m.Lock()
+	defer d.m.Unlock()
+	delete(d.hs, h.Metadata().Name)
 }
 
 func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {

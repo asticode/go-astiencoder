@@ -1,6 +1,7 @@
 package astilibav
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/asticode/go-astiencoder"
@@ -9,14 +10,16 @@ import (
 	"github.com/asticode/goav/avformat"
 )
 
-// PktHandler represents an object that can handle a pkt
+// PktHandler represents a node that can handle a pkt
 type PktHandler interface {
+	astiencoder.Node
 	HandlePkt(p *PktHandlerPayload)
 }
 
-// PktHandlerConnector represents an object that can connect with a pkt handler
+// PktHandlerConnector represents an object that can connect/disconnect with a pkt handler
 type PktHandlerConnector interface {
 	Connect(next PktHandler)
+	Disconnect(next PktHandler)
 }
 
 // PktHandlerPayload represents a PktHandler payload
@@ -26,7 +29,7 @@ type PktHandlerPayload struct {
 }
 
 type pktDispatcher struct {
-	hs           []PktHandler
+	hs           map[string]PktHandler
 	m            *sync.Mutex
 	p            *pktPool
 	statDispatch *astistat.DurationRatioStat
@@ -35,6 +38,7 @@ type pktDispatcher struct {
 
 func newPktDispatcher(c *astiencoder.Closer) *pktDispatcher {
 	return &pktDispatcher{
+		hs:           make(map[string]PktHandler),
 		m:            &sync.Mutex{},
 		p:            newPktPool(c),
 		statDispatch: astistat.NewDurationRatioStat(),
@@ -45,7 +49,13 @@ func newPktDispatcher(c *astiencoder.Closer) *pktDispatcher {
 func (d *pktDispatcher) addHandler(h PktHandler) {
 	d.m.Lock()
 	defer d.m.Unlock()
-	d.hs = append(d.hs, h)
+	d.hs[h.Metadata().Name] = h
+}
+
+func (d *pktDispatcher) delHandler(h PktHandler) {
+	d.m.Lock()
+	defer d.m.Unlock()
+	delete(d.hs, h.Metadata().Name)
 }
 
 func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, descriptor Descriptor) {
@@ -121,6 +131,13 @@ func newPktCond(i *avformat.Stream, h PktHandler) *pktCond {
 		i:          i,
 		PktHandler: h,
 	}
+}
+
+// Metadata implements the NodeDescriptor interface
+func (c *pktCond) Metadata() astiencoder.NodeMetadata {
+	m := c.PktHandler.Metadata()
+	m.Name = fmt.Sprintf("%s_%d", c.PktHandler.Metadata().Name, c.i.Index())
+	return m
 }
 
 // UsePkt implements the PktCond interface

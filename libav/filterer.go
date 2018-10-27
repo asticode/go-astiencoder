@@ -151,11 +151,20 @@ func (f *Filterer) addStats() {
 
 // Connect implements the FrameHandlerConnector interface
 func (f *Filterer) Connect(h FrameHandler) {
-	// Append handler
+	// Add handler
 	f.d.addHandler(h)
 
 	// Connect nodes
-	astiencoder.ConnectNodes(f, h.(astiencoder.Node))
+	astiencoder.ConnectNodes(f, h)
+}
+
+// Disconnect implements the FrameHandlerConnector interface
+func (f *Filterer) Disconnect(h FrameHandler) {
+	// Delete handler
+	f.d.delHandler(h)
+
+	// Disconnect nodes
+	astiencoder.DisconnectNodes(f, h)
 }
 
 // Start starts the filterer

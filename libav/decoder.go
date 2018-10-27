@@ -116,7 +116,16 @@ func (d *Decoder) Connect(h FrameHandler) {
 	d.d.addHandler(h)
 
 	// Connect nodes
-	astiencoder.ConnectNodes(d, h.(astiencoder.Node))
+	astiencoder.ConnectNodes(d, h)
+}
+
+// Disconnect implements the FrameHandlerConnector interface
+func (d *Decoder) Disconnect(h FrameHandler) {
+	// Delete handler
+	d.d.delHandler(h)
+
+	// Disconnect nodes
+	astiencoder.DisconnectNodes(d, h)
 }
 
 // Start starts the decoder

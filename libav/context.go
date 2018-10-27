@@ -53,13 +53,20 @@ func NewContextFromStream(s *avformat.Stream) Context {
 		SampleRate:    ctxCodec.SampleRate(),
 
 		// Video
-		FrameRate:         s.AvgFrameRate(),
+		FrameRate:         streamFrameRate(s),
 		GopSize:           ctxCodec.GopSize(),
 		Height:            ctxCodec.Height(),
 		PixelFormat:       ctxCodec.PixFmt(),
 		SampleAspectRatio: s.SampleAspectRatio(),
 		Width:             ctxCodec.Width(),
 	}
+}
+
+func streamFrameRate(s *avformat.Stream) avutil.Rational {
+	if v := s.AvgFrameRate(); v.Num() > 0 {
+		return s.AvgFrameRate()
+	}
+	return s.RFrameRate()
 }
 
 func (ctx Context) validWithCodec(c *avcodec.Codec) (err error) {

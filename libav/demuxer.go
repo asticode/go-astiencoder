@@ -154,7 +154,16 @@ func (d *Demuxer) Connect(h PktHandler) {
 	d.d.addHandler(h)
 
 	// Connect nodes
-	astiencoder.ConnectNodes(d, h.(astiencoder.Node))
+	astiencoder.ConnectNodes(d, h)
+}
+
+// Disconnect implements the PktHandlerConnector interface
+func (d *Demuxer) Disconnect(h PktHandler) {
+	// Delete handler
+	d.d.delHandler(h)
+
+	// Disconnect nodes
+	astiencoder.DisconnectNodes(d, h)
 }
 
 // ConnectForStream connects the demuxer to a PktHandler for a specific stream
@@ -163,7 +172,16 @@ func (d *Demuxer) ConnectForStream(h PktHandler, i *avformat.Stream) {
 	d.d.addHandler(newPktCond(i, h))
 
 	// Connect nodes
-	astiencoder.ConnectNodes(d, h.(astiencoder.Node))
+	astiencoder.ConnectNodes(d, h)
+}
+
+// DisconnectForStream disconnects the demuxer from a PktHandler for a specific stream
+func (d *Demuxer) DisconnectForStream(h PktHandler, i *avformat.Stream) {
+	// Delete handler
+	d.d.delHandler(newPktCond(i, h))
+
+	// Disconnect nodes
+	astiencoder.DisconnectNodes(d, h)
 }
 
 // Start starts the demuxer

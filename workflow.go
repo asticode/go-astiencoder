@@ -177,6 +177,11 @@ func (w *Workflow) AddChild(n Node) {
 	w.bn.AddChild(n)
 }
 
+// DelChild deletes a child from the workflow
+func (w *Workflow) DelChild(n Node) {
+	w.bn.DelChild(n)
+}
+
 // Children returns the workflow children
 func (w *Workflow) Children() []Node {
 	return w.bn.Children()

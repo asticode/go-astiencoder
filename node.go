@@ -33,18 +33,30 @@ type NodeMetadata struct {
 
 // NodeChild represents an object with parent nodes
 type NodeChild interface {
-	AddParent(n Node)
+	NodeChildMapper
 	ParentIsStarted(m NodeMetadata)
 	ParentIsStopped(m NodeMetadata)
+}
+
+// NodeChildMapper represents an object that can play with its parents map
+type NodeChildMapper interface {
+	AddParent(n Node)
+	DelParent(n Node)
 	Parents() []Node
 }
 
 // NodeParent represents an object with child nodes
 type NodeParent interface {
-	AddChild(n Node)
+	NodeParentMapper
 	ChildIsStarted(m NodeMetadata)
 	ChildIsStopped(m NodeMetadata)
+}
+
+// NodeParentMapper represents an object that can play with its children map
+type NodeParentMapper interface {
+	AddChild(n Node)
 	Children() []Node
+	DelChild(n Node)
 }
 
 // Statuses
@@ -72,6 +84,12 @@ type Stater interface {
 func ConnectNodes(parent, child Node) {
 	parent.AddChild(child)
 	child.AddParent(parent)
+}
+
+// DisconnectNodes disconnects 2 nodes
+func DisconnectNodes(parent, child Node) {
+	parent.DelChild(child)
+	child.DelParent(parent)
 }
 
 // BaseNode represents a base node
@@ -311,6 +329,13 @@ func (n *BaseNode) AddChild(i Node) {
 	n.children[i.Metadata().Name] = i
 }
 
+// DelChild implements the NodeParent interface
+func (n *BaseNode) DelChild(i Node) {
+	n.m.Lock()
+	defer n.m.Unlock()
+	delete(n.children, i.Metadata().Name)
+}
+
 // ChildIsStarted implements the NodeParent interface
 func (n *BaseNode) ChildIsStarted(m NodeMetadata) {
 	n.m.Lock()
@@ -357,6 +382,13 @@ func (n *BaseNode) AddParent(i Node) {
 		return
 	}
 	n.parents[i.Metadata().Name] = i
+}
+
+// DelParent implements the NodeChild interface
+func (n *BaseNode) DelParent(i Node) {
+	n.m.Lock()
+	defer n.m.Unlock()
+	delete(n.parents, i.Metadata().Name)
 }
 
 // ParentIsStarted implements the NodeChild interface

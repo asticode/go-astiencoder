@@ -167,11 +167,20 @@ func (e *Encoder) addStats() {
 
 // Connect implements the PktHandlerConnector interface
 func (e *Encoder) Connect(h PktHandler) {
-	// Append handler
+	// Add handler
 	e.d.addHandler(h)
 
 	// Connect nodes
-	astiencoder.ConnectNodes(e, h.(astiencoder.Node))
+	astiencoder.ConnectNodes(e, h)
+}
+
+// Disconnect implements the PktHandlerConnector interface
+func (e *Encoder) Disconnect(h PktHandler) {
+	// Delete handler
+	e.d.delHandler(h)
+
+	// Disconnect nodes
+	astiencoder.DisconnectNodes(e, h)
 }
 
 // Start starts the encoder

@@ -87,11 +87,20 @@ func (s *Switcher) SetRules(rs map[astiencoder.Node]bool) {
 
 // Connect implements the FrameHandlerConnector interface
 func (s *Switcher) Connect(h FrameHandler) {
-	// Append handler
+	// Add handler
 	s.d.addHandler(h)
 
 	// Connect nodes
-	astiencoder.ConnectNodes(s, h.(astiencoder.Node))
+	astiencoder.ConnectNodes(s, h)
+}
+
+// Disconnect implements the FrameHandlerConnector interface
+func (s *Switcher) Disconnect(h FrameHandler) {
+	// Delete handler
+	s.d.delHandler(h)
+
+	// Disconnect nodes
+	astiencoder.DisconnectNodes(s, h)
 }
 
 // Start starts the filterer
