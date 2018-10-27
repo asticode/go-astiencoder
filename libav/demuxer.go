@@ -30,16 +30,23 @@ type Demuxer struct {
 }
 
 type demuxerStream struct {
-	nextDts time.Time
-	s       *avformat.Stream
+	nextDts  time.Time
+	s        *avformat.Stream
+	timeBase avutil.Rational
+}
+
+// Timebase implements the Descriptor interface
+func (s *demuxerStream) TimeBase() avutil.Rational {
+	return s.timeBase
 }
 
 // DemuxerOptions represents demuxer options
 type DemuxerOptions struct {
-	Dict           string
-	EmulateRate    bool
-	Format         *avformat.InputFormat
-	URL            string
+	Dict        string
+	EmulateRate bool
+	Format      *avformat.InputFormat
+	Timebase    func(s *avformat.Stream) avutil.Rational
+	URL         string
 }
 
 // NewDemuxer creates a new demuxer
@@ -99,7 +106,14 @@ func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c *astiencoder.Cl
 
 	// Index streams
 	for _, s := range d.ctxFormat.Streams() {
-		d.ss[s.Index()] = &demuxerStream{s: s}
+		ds := &demuxerStream{
+			s: s,
+			timeBase: s.TimeBase(),
+		}
+		if o.Timebase != nil {
+			ds.timeBase = o.Timebase(s)
+		}
+		d.ss[s.Index()] = ds
 	}
 
 	// Add stats
@@ -208,10 +222,13 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 		}
 
 		// Compute next DTS
-		s.nextDts = s.nextDts.Add(time.Duration(avutil.AvRescaleQ(pkt.Duration()*1e9, s.s.TimeBase(), avutil.NewRational(1,1))))
+		s.nextDts = s.nextDts.Add(time.Duration(avutil.AvRescaleQ(pkt.Duration()*1e9, s.s.TimeBase(), avutil.NewRational(1, 1))))
 	}
 
+	// Rescale ts
+	pkt.AvPacketRescaleTs(s.s.TimeBase(), s.timeBase)
+
 	// Dispatch pkt
-	d.d.dispatch(pkt, s.s)
+	d.d.dispatch(pkt, s)
 	return
 }
