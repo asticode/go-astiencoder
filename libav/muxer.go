@@ -20,7 +20,7 @@ var countMuxer uint64
 // Muxer represents an object capable of muxing packets into an output
 type Muxer struct {
 	*astiencoder.BaseNode
-	c                *astiencoder.Closer
+	c                astiencoder.CloseFuncAdder
 	ctxFormat        *avformat.Context
 	e                *astiencoder.EventEmitter
 	o                *sync.Once
@@ -37,7 +37,7 @@ type MuxerOptions struct {
 }
 
 // NewMuxer creates a new muxer
-func NewMuxer(o MuxerOptions, e *astiencoder.EventEmitter, c *astiencoder.Closer) (m *Muxer, err error) {
+func NewMuxer(o MuxerOptions, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (m *Muxer, err error) {
 	// Create muxer
 	count := atomic.AddUint64(&countMuxer, uint64(1))
 	m = &Muxer{

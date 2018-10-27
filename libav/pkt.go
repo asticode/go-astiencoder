@@ -36,7 +36,7 @@ type pktDispatcher struct {
 	wg           *sync.WaitGroup
 }
 
-func newPktDispatcher(c *astiencoder.Closer) *pktDispatcher {
+func newPktDispatcher(c astiencoder.CloseFuncAdder) *pktDispatcher {
 	return &pktDispatcher{
 		hs:           make(map[string]PktHandler),
 		m:            &sync.Mutex{},
@@ -148,12 +148,12 @@ func (c *pktCond) UsePkt(pkt *avcodec.Packet) bool {
 type pktHandlerPayloadRetriever func() *PktHandlerPayload
 
 type pktPool struct {
-	c *astiencoder.Closer
+	c astiencoder.CloseFuncAdder
 	m *sync.Mutex
 	p []*avcodec.Packet
 }
 
-func newPktPool(c *astiencoder.Closer) *pktPool {
+func newPktPool(c astiencoder.CloseFuncAdder) *pktPool {
 	return &pktPool{
 		c: c,
 		m: &sync.Mutex{},

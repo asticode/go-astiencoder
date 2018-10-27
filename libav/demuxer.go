@@ -56,7 +56,7 @@ type DemuxerOptions struct {
 }
 
 // NewDemuxer creates a new demuxer
-func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c *astiencoder.Closer) (d *Demuxer, err error) {
+func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (d *Demuxer, err error) {
 	// Create demuxer
 	count := atomic.AddUint64(&countDemuxer, uint64(1))
 	d = &Demuxer{

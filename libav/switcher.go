@@ -28,7 +28,7 @@ type Switcher struct {
 }
 
 // NewSwitcher creates a new switcher
-func NewSwitcher(e *astiencoder.EventEmitter, c *astiencoder.Closer) (s *Switcher) {
+func NewSwitcher(e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (s *Switcher) {
 	count := atomic.AddUint64(&countSwitcher, uint64(1))
 	s = &Switcher{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{

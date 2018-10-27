@@ -31,7 +31,7 @@ type Filterer struct {
 }
 
 // NewFilterer creates a new filterer
-func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, e *astiencoder.EventEmitter, c *astiencoder.Closer) (f *Filterer) {
+func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (f *Filterer) {
 	count := atomic.AddUint64(&countFilterer, uint64(1))
 	f = &Filterer{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
@@ -59,7 +59,7 @@ type FiltererOptions struct {
 }
 
 // NewFiltererFromOptions creates a new filterer based on options
-func NewFiltererFromOptions(o FiltererOptions, e *astiencoder.EventEmitter, c *astiencoder.Closer) (_ *Filterer, err error) {
+func NewFiltererFromOptions(o FiltererOptions, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (_ *Filterer, err error) {
 	// Create graph
 	g := avfilter.AvfilterGraphAlloc()
 	c.Add(func() error {
