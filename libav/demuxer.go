@@ -12,6 +12,7 @@ import (
 	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
+	"github.com/pkg/errors"
 )
 
 var countDemuxer uint64
@@ -22,7 +23,8 @@ type Demuxer struct {
 	ctxFormat     *avformat.Context
 	d             *pktDispatcher
 	e             *astiencoder.EventEmitter
-	o             DemuxerOptions
+	interruptRet  *int
+	live          bool
 	ss            map[int]*demuxerStream
 	statWorkRatio *astistat.DurationRatioStat
 }
@@ -32,42 +34,76 @@ type demuxerStream struct {
 	s           *avformat.Stream
 }
 
+// DemuxerOptions represents demuxer options
+type DemuxerOptions struct {
+	Dict   string
+	Format *avformat.InputFormat
+	Live   bool
+	URL    string
+}
+
 // NewDemuxer creates a new demuxer
-func NewDemuxer(ctxFormat *avformat.Context, e *astiencoder.EventEmitter, c *astiencoder.Closer) (d *Demuxer) {
+func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c *astiencoder.Closer) (d *Demuxer, err error) {
 	// Create demuxer
 	count := atomic.AddUint64(&countDemuxer, uint64(1))
 	d = &Demuxer{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
-			Description: fmt.Sprintf("Demuxes %s", ctxFormat.Filename()),
+			Description: fmt.Sprintf("Demuxes %s", o.URL),
 			Label:       fmt.Sprintf("Demuxer #%d", count),
 			Name:        fmt.Sprintf("demuxer_%d", count),
 		}),
-		ctxFormat:     ctxFormat,
 		d:             newPktDispatcher(c),
 		e:             e,
+		live:          o.Live,
 		ss:            make(map[int]*demuxerStream),
 		statWorkRatio: astistat.NewDurationRatioStat(),
 	}
 
+	// Dict
+	var dict *avutil.Dictionary
+	if len(o.Dict) > 0 {
+		// Parse dict
+		if ret := avutil.AvDictParseString(&dict, o.Dict, "=", ",", 0); ret < 0 {
+			err = errors.Wrapf(NewAvError(ret), "astilibav: avutil.AvDictParseString on %s failed", o.Dict)
+			return
+		}
+
+		// Make sure the dict is freed
+		defer avutil.AvDictFree(&dict)
+	}
+
+	// Alloc ctx
+	ctxFormat := avformat.AvformatAllocContext()
+
+	// Set interrupt callback
+	d.interruptRet = ctxFormat.SetInterruptCallback()
+
+	// Open input
+	if ret := avformat.AvformatOpenInput(&ctxFormat, o.URL, o.Format, &dict); ret < 0 {
+		err = errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvformatOpenInput on %+v failed", o)
+		return
+	}
+	d.ctxFormat = ctxFormat
+
+	// Make sure the input is properly closed
+	c.Add(func() error {
+		avformat.AvformatCloseInput(d.ctxFormat)
+		return nil
+	})
+
+	// Retrieve stream information
+	if ret := d.ctxFormat.AvformatFindStreamInfo(nil); ret < 0 {
+		err = errors.Wrapf(NewAvError(ret), "astilibav: ctxFormat.AvformatFindStreamInfo on %+v failed", o)
+		return
+	}
+
 	// Index streams
-	for _, s := range ctxFormat.Streams() {
+	for _, s := range d.ctxFormat.Streams() {
 		d.ss[s.Index()] = &demuxerStream{s: s}
 	}
 
 	// Add stats
 	d.addStats()
-	return
-}
-
-// DemuxerOptions represents demuxer options
-type DemuxerOptions struct {
-	Live bool
-}
-
-// NewDemuxerWithOptions creates a new demuxer with specific options
-func NewDemuxerWithOptions(ctxFormat *avformat.Context, o DemuxerOptions, e *astiencoder.EventEmitter, c *astiencoder.Closer) (d *Demuxer) {
-	d = NewDemuxer(ctxFormat, e, c)
-	d.o = o
 	return
 }
 
@@ -81,6 +117,11 @@ func (d *Demuxer) addStats() {
 
 	// Add dispatcher stats
 	d.d.addStats(d.Stater())
+}
+
+// CtxFormat returns the format ctx
+func (d *Demuxer) CtxFormat() *avformat.Context {
+	return d.ctxFormat
 }
 
 // Connect implements the PktHandlerConnector interface
@@ -106,6 +147,13 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	d.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
 		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
 		defer d.d.wait()
+
+		// Handle interrupt callback
+		*d.interruptRet = 0
+		go func() {
+			<-d.BaseNode.Context().Done()
+			*d.interruptRet = 1
+		}()
 
 		// Loop
 		for {
@@ -149,7 +197,7 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	}
 
 	// Simulate live
-	if d.o.Live {
+	if d.live {
 		// Sleep until next DTS
 		if !s.liveNextDts.IsZero() {
 			if delta := s.liveNextDts.Sub(time.Now()); delta > 0 {

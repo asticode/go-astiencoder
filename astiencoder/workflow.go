@@ -42,15 +42,13 @@ func newBuilder() *builder {
 }
 
 type openedInput struct {
-	c         JobInput
-	ctxFormat *avformat.Context
-	d         *astilibav.Demuxer
+	c JobInput
+	d *astilibav.Demuxer
 }
 
 type openedOutput struct {
-	c         JobOutput
-	ctxFormat *avformat.Context
-	m         *astilibav.Muxer
+	c JobOutput
+	m *astilibav.Muxer
 }
 
 type buildData struct {
@@ -75,9 +73,6 @@ func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow, ee *astiencoder.
 	// Create build data
 	bd := newBuildData(w, ee, c)
 
-	// Create opener
-	o := astilibav.NewOpener(c)
-
 	// No inputs
 	if len(j.Inputs) == 0 {
 		err = errors.New("main: no inputs provided")
@@ -85,7 +80,7 @@ func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow, ee *astiencoder.
 	}
 
 	// Open inputs
-	if bd.inputs, err = b.openInputs(j, o, bd); err != nil {
+	if bd.inputs, err = b.openInputs(j, bd); err != nil {
 		err = errors.Wrap(err, "main: opening inputs failed")
 		return
 	}
@@ -97,7 +92,7 @@ func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow, ee *astiencoder.
 	}
 
 	// Open outputs
-	if bd.outputs, err = b.openOutputs(j, o, bd); err != nil {
+	if bd.outputs, err = b.openOutputs(j, bd); err != nil {
 		err = errors.Wrap(err, "main: opening outputs failed")
 		return
 	}
@@ -119,33 +114,31 @@ func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow, ee *astiencoder.
 	return
 }
 
-func (b *builder) openInputs(j Job, o *astilibav.Opener, bd *buildData) (is map[string]openedInput, err error) {
+func (b *builder) openInputs(j Job, bd *buildData) (is map[string]openedInput, err error) {
 	// Loop through inputs
 	is = make(map[string]openedInput)
 	for n, cfg := range j.Inputs {
-		// Open
-		var ctxFormat *avformat.Context
-		if ctxFormat, err = o.OpenInput(astilibav.OpenerOptions{
+		// Create demuxer
+		var d *astilibav.Demuxer
+		if d, err = astilibav.NewDemuxer(astilibav.DemuxerOptions{
 			Dict: cfg.Dict,
+			Live: cfg.Live,
 			URL:  cfg.URL,
-		}); err != nil {
-			err = errors.Wrapf(err, "main: opening input %s with conf %+v failed", n, cfg)
+		}, bd.ee, bd.c); err != nil {
+			err = errors.Wrap(err, "main: creating demuxer failed")
 			return
 		}
 
 		// Index
 		is[n] = openedInput{
-			c:         cfg,
-			ctxFormat: ctxFormat,
-			d: astilibav.NewDemuxerWithOptions(ctxFormat, astilibav.DemuxerOptions{
-				Live: cfg.Live,
-			}, bd.ee, bd.c),
+			c: cfg,
+			d: d,
 		}
 	}
 	return
 }
 
-func (b *builder) openOutputs(j Job, o *astilibav.Opener, bd *buildData) (os map[string]openedOutput, err error) {
+func (b *builder) openOutputs(j Job, bd *buildData) (os map[string]openedOutput, err error) {
 	// Loop through outputs
 	os = make(map[string]openedOutput)
 	for n, cfg := range j.Outputs {
@@ -160,14 +153,11 @@ func (b *builder) openOutputs(j Job, o *astilibav.Opener, bd *buildData) (os map
 			// This is a per-operation and per-input value since we may want to index the path by input name
 			// The writer is created afterwards
 		default:
-			// Open
-			if oo.ctxFormat, err = o.OpenOutput(astilibav.OpenerOptions{URL: cfg.URL}); err != nil {
-				err = errors.Wrapf(err, "main: opening output %s with conf %+v failed", n, cfg)
+			// Create muxer
+			if oo.m, err = astilibav.NewMuxer(astilibav.MuxerOptions{URL: cfg.URL}, bd.ee, bd.c); err != nil {
+				err = errors.Wrap(err, "main: creating muxer failed")
 				return
 			}
-
-			// Create muxer
-			oo.m = astilibav.NewMuxer(oo.ctxFormat, bd.ee, bd.c)
 		}
 
 		// Index
@@ -198,7 +188,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 	// Loop through inputs
 	for _, i := range ois {
 		// Loop through streams
-		for _, is := range i.o.ctxFormat.Streams() {
+		for _, is := range i.o.d.CtxFormat().Streams() {
 			// Only process a specific PID
 			if i.c.PID != nil && is.Id() != *i.c.PID {
 				continue
@@ -218,7 +208,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 				for _, o := range oos {
 					// Clone stream
 					var os *avformat.Stream
-					if os, err = astilibav.CloneStream(is, o.o.ctxFormat); err != nil {
+					if os, err = astilibav.CloneStream(is, o.o.m.CtxFormat()); err != nil {
 						err = errors.Wrapf(err, "main: cloning stream 0x%x(%d) of %s failed", is.Id(), is.Id(), i.c.Name)
 						return
 					}
@@ -287,7 +277,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 				default:
 					// Add stream
 					var os *avformat.Stream
-					if os, err = e.AddStream(o.o.ctxFormat); err != nil {
+					if os, err = e.AddStream(o.o.m.CtxFormat()); err != nil {
 						err = errors.Wrapf(err, "main: adding stream for stream 0x%x(%d) of %s and output %s failed", is.Id(), is.Id(), i.c.Name, o.c.Name)
 						return
 					}
@@ -406,8 +396,8 @@ func (b *builder) operationOutputCtx(o JobOperation, inCtx astilibav.Context, oo
 	// TODO Add audio options
 
 	// Set global header
-	if oos[0].o.ctxFormat != nil {
-		outCtx.GlobalHeader = oos[0].o.ctxFormat.Oformat().Flags()&avformat.AVFMT_GLOBALHEADER > 0
+	if oos[0].o.m != nil {
+		outCtx.GlobalHeader = oos[0].o.m.CtxFormat().Oformat().Flags()&avformat.AVFMT_GLOBALHEADER > 0
 	}
 	return
 }

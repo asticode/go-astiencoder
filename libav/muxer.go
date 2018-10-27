@@ -29,23 +29,67 @@ type Muxer struct {
 	statWorkRatio    *astistat.DurationRatioStat
 }
 
+// MuxerOptions represents muxer options
+type MuxerOptions struct {
+	Format     *avformat.OutputFormat
+	FormatName string
+	URL        string
+}
+
 // NewMuxer creates a new muxer
-func NewMuxer(ctxFormat *avformat.Context, e *astiencoder.EventEmitter, c *astiencoder.Closer) (m *Muxer) {
+func NewMuxer(o MuxerOptions, e *astiencoder.EventEmitter, c *astiencoder.Closer) (m *Muxer, err error) {
+	// Create muxer
 	count := atomic.AddUint64(&countMuxer, uint64(1))
 	m = &Muxer{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
-			Description: fmt.Sprintf("Muxes to %s", ctxFormat.Filename()),
+			Description: fmt.Sprintf("Muxes to %s", o.URL),
 			Label:       fmt.Sprintf("Muxer #%d", count),
 			Name:        fmt.Sprintf("muxer_%d", count),
 		}),
 		c:                c,
-		ctxFormat:        ctxFormat,
 		e:                e,
 		o:                &sync.Once{},
 		q:                astisync.NewCtxQueue(),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
+
+	// Alloc format context
+	var ctxFormat *avformat.Context
+	if ret := avformat.AvformatAllocOutputContext2(&ctxFormat, o.Format, o.FormatName, o.URL); ret < 0 {
+		err = errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvformatAllocOutputContext2 on %+v failed", o)
+		return
+	}
+	m.ctxFormat = ctxFormat
+
+	// Make sure the format ctx is properly closed
+	c.Add(func() error {
+		m.ctxFormat.AvformatFreeContext()
+		return nil
+	})
+
+	// This is a file
+	if m.ctxFormat.Flags()&avformat.AVFMT_NOFILE == 0 {
+		// Open
+		var ctxAvIO *avformat.AvIOContext
+		if ret := avformat.AvIOOpen(&ctxAvIO, o.URL, avformat.AVIO_FLAG_WRITE); ret < 0 {
+			err = errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvIOOpen on %+v failed", o)
+			return
+		}
+
+		// Set pb
+		m.ctxFormat.SetPb(ctxAvIO)
+
+		// Make sure the avio ctx is properly closed
+		c.Add(func() error {
+			if ret := avformat.AvIOClosep(&ctxAvIO); ret < 0 {
+				return errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvIOClosep on %+v failed", o)
+			}
+			return nil
+		})
+	}
+
+	// Add stats
 	m.addStats()
 	return
 }
@@ -67,6 +111,11 @@ func (m *Muxer) addStats() {
 
 	// Add queue stats
 	m.q.AddStats(m.Stater())
+}
+
+// CtxFormat returns the format ctx
+func (m *Muxer) CtxFormat() *avformat.Context {
+	return m.ctxFormat
 }
 
 // Start starts the muxer
