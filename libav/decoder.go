@@ -164,8 +164,8 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 func (d *Decoder) receiveFrame(descriptor Descriptor) (stop bool) {
 	// Get frame
-	f := d.d.getFrame()
-	defer d.d.putFrame(f)
+	f := d.d.p.get()
+	defer d.d.p.put(f)
 
 	// Receive frame
 	d.statWorkRatio.Add(true)

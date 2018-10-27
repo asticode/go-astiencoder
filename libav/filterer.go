@@ -203,8 +203,8 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 	// Get frame
-	fm := f.d.getFrame()
-	defer f.d.putFrame(fm)
+	fm := f.d.p.get()
+	defer f.d.p.put(fm)
 
 	// Pull filtered frame from graph
 	f.statWorkRatio.Add(true)

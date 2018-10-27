@@ -28,28 +28,21 @@ type FrameHandlerPayload struct {
 type frameDispatcher struct {
 	c            *astiencoder.Closer
 	e            *astiencoder.EventEmitter
-	framePool    *sync.Pool
 	hs           []FrameHandler
 	m            *sync.Mutex
 	n            astiencoder.Node
+	p            *framePool
 	statDispatch *astistat.DurationRatioStat
 	wg           *sync.WaitGroup
 }
 
 func newFrameDispatcher(n astiencoder.Node, e *astiencoder.EventEmitter, c *astiencoder.Closer) *frameDispatcher {
 	return &frameDispatcher{
-		c: c,
-		e: e,
-		framePool: &sync.Pool{New: func() interface{} {
-			f := avutil.AvFrameAlloc()
-			c.Add(func() error {
-				avutil.AvFrameFree(f)
-				return nil
-			})
-			return f
-		}},
+		c:            c,
+		e:            e,
 		m:            &sync.Mutex{},
 		n:            n,
+		p:            newFramePool(c),
 		statDispatch: astistat.NewDurationRatioStat(),
 		wg:           &sync.WaitGroup{},
 	}
@@ -59,15 +52,6 @@ func (d *frameDispatcher) addHandler(h FrameHandler) {
 	d.m.Lock()
 	defer d.m.Unlock()
 	d.hs = append(d.hs, h)
-}
-
-func (d *frameDispatcher) getFrame() *avutil.Frame {
-	return d.framePool.Get().(*avutil.Frame)
-}
-
-func (d *frameDispatcher) putFrame(f *avutil.Frame) {
-	avutil.AvFrameUnref(f)
-	d.framePool.Put(f)
 }
 
 func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
@@ -97,7 +81,7 @@ func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
 	// Loop through handlers
 	for _, h := range hs {
 		// Copy frame
-		hF := d.getFrame()
+		hF := d.p.get()
 		if ret := avutil.AvFrameRef(hF, f); ret < 0 {
 			emitAvError(d.e, ret, "avutil.AvFrameRef failed")
 			d.wg.Done()
@@ -107,7 +91,7 @@ func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
 		// Handle frame
 		go func(h FrameHandler) {
 			defer d.wg.Done()
-			defer d.putFrame(hF)
+			defer d.p.put(hF)
 			h.HandleFrame(&FrameHandlerPayload{
 				Descriptor: descriptor,
 				Frame:      hF,
@@ -128,4 +112,40 @@ func (d *frameDispatcher) addStats(s *astistat.Stater) {
 		Label:       "Dispatch ratio",
 		Unit:        "%",
 	}, d.statDispatch)
+}
+
+type framePool struct {
+	c *astiencoder.Closer
+	m *sync.Mutex
+	p []*avutil.Frame
+}
+
+func newFramePool(c *astiencoder.Closer) *framePool {
+	return &framePool{
+		c: c,
+		m: &sync.Mutex{},
+	}
+}
+
+func (p *framePool) get() (f *avutil.Frame) {
+	p.m.Lock()
+	defer p.m.Unlock()
+	if len(p.p) == 0 {
+		f = avutil.AvFrameAlloc()
+		p.c.Add(func() error {
+			avutil.AvFrameFree(f)
+			return nil
+		})
+		return
+	}
+	f = p.p[0]
+	p.p = p.p[1:]
+	return
+}
+
+func (p *framePool) put(f *avutil.Frame) {
+	p.m.Lock()
+	defer p.m.Unlock()
+	avutil.AvFrameUnref(f)
+	p.p = append(p.p, f)
 }
