@@ -3,8 +3,6 @@ package astiencoder
 import (
 	"sync"
 
-	"sync/atomic"
-
 	"github.com/asticode/go-astitools/error"
 )
 
@@ -18,44 +16,42 @@ type CloseFunc func() error
 
 // Closer is an object that can close things
 type Closer struct {
-	closed uint32
-	fs     []CloseFunc
-	m      *sync.Mutex
+	fs []CloseFunc
+	m  *sync.Mutex
+	o  *sync.Once
 }
 
 // NewCloser creates a new closer
 func NewCloser() *Closer {
 	return &Closer{
 		m: &sync.Mutex{},
+		o: &sync.Once{},
 	}
 }
 
 // Close implements the io.Closer interface
 func (c *Closer) Close() (err error) {
-	// Check if not already closed
-	if closed := atomic.SwapUint32(&c.closed, 1); closed == 1 {
-		return nil
-	}
+	c.o.Do(func() {
+		// Get close funcs
+		c.m.Lock()
+		fs := append([]CloseFunc{}, c.fs...)
+		c.m.Unlock()
 
-	// Get close funcs
-	c.m.Lock()
-	fs := append([]CloseFunc{}, c.fs...)
-	c.m.Unlock()
-
-	// Loop through closers
-	var errs []error
-	for _, f := range fs {
-		if errC := f(); errC != nil {
-			errs = append(errs, errC)
+		// Loop through closers
+		var errs []error
+		for _, f := range fs {
+			if errC := f(); errC != nil {
+				errs = append(errs, errC)
+			}
 		}
-	}
 
-	// Process errors
-	if len(errs) == 1 {
-		err = errs[0]
-	} else if len(errs) > 1 {
-		err = astierror.NewMultiple(errs)
-	}
+		// Process errors
+		if len(errs) == 1 {
+			err = errs[0]
+		} else if len(errs) > 1 {
+			err = astierror.NewMultiple(errs)
+		}
+	})
 	return
 }
 

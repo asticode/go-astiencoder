@@ -116,6 +116,15 @@ func (w *Workflow) StartNode(n Node) {
 	n.Start(w.bn.Context(), w.t.NewSubTask)
 }
 
+// StartNodesInSubTask starts nodes in a new sub task
+func (w *Workflow) StartNodesInSubTask(ns ...Node) (t *astiworker.Task) {
+	t = w.t.NewSubTask()
+	for _, n := range ns {
+		n.Start(w.bn.Context(), t.NewSubTask)
+	}
+	return
+}
+
 // Stop stops the workflow
 func (w *Workflow) Stop() {
 	astilog.Debugf("astiencoder: stopping workflow %s", w.name)
