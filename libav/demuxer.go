@@ -15,24 +15,29 @@ import (
 	"github.com/pkg/errors"
 )
 
-var countDemuxer uint64
+var (
+	countDemuxer    uint64
+	defaultRational = avutil.NewRational(1, 1)
+)
 
 // Demuxer represents an object capable of demuxing packets out of an input
 type Demuxer struct {
 	*astiencoder.BaseNode
-	ctxFormat     *avformat.Context
-	d             *pktDispatcher
-	e             *astiencoder.EventEmitter
-	emulateRate   bool
-	interruptRet  *int
-	ss            map[int]*demuxerStream
-	statWorkRatio *astistat.DurationRatioStat
+	ctxFormat      *avformat.Context
+	d              *pktDispatcher
+	e              *astiencoder.EventEmitter
+	emulateRate    bool
+	interruptRet   *int
+	restampStartAt *time.Time
+	ss             map[int]*demuxerStream
+	statWorkRatio  *astistat.DurationRatioStat
 }
 
 type demuxerStream struct {
-	nextDts  time.Time
-	s        *avformat.Stream
-	timeBase avutil.Rational
+	nextDts       time.Time
+	restampOffset int64
+	s             *avformat.Stream
+	timeBase      avutil.Rational
 }
 
 // Timebase implements the Descriptor interface
@@ -42,11 +47,12 @@ func (s *demuxerStream) TimeBase() avutil.Rational {
 
 // DemuxerOptions represents demuxer options
 type DemuxerOptions struct {
-	Dict        string
-	EmulateRate bool
-	Format      *avformat.InputFormat
-	Timebase    func(s *avformat.Stream) avutil.Rational
-	URL         string
+	Dict           string
+	EmulateRate    bool
+	Format         *avformat.InputFormat
+	RestampStartAt *time.Time
+	Timebase       func(s *avformat.Stream) avutil.Rational
+	URL            string
 }
 
 // NewDemuxer creates a new demuxer
@@ -59,11 +65,12 @@ func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c *astiencoder.Cl
 			Label:       fmt.Sprintf("Demuxer #%d", count),
 			Name:        fmt.Sprintf("demuxer_%d", count),
 		}),
-		d:             newPktDispatcher(c),
-		e:             e,
-		emulateRate:   o.EmulateRate,
-		ss:            make(map[int]*demuxerStream),
-		statWorkRatio: astistat.NewDurationRatioStat(),
+		d:              newPktDispatcher(c),
+		e:              e,
+		emulateRate:    o.EmulateRate,
+		restampStartAt: o.RestampStartAt,
+		ss:             make(map[int]*demuxerStream),
+		statWorkRatio:  astistat.NewDurationRatioStat(),
 	}
 
 	// Dict
@@ -107,11 +114,14 @@ func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c *astiencoder.Cl
 	// Index streams
 	for _, s := range d.ctxFormat.Streams() {
 		ds := &demuxerStream{
-			s: s,
+			s:        s,
 			timeBase: s.TimeBase(),
 		}
 		if o.Timebase != nil {
 			ds.timeBase = o.Timebase(s)
+		}
+		if o.RestampStartAt != nil {
+			ds.restampOffset = avutil.AvRescaleQ(int64(time.Now().Sub(*o.RestampStartAt))-avutil.AvRescaleQ(s.CurDts()*1e9, s.TimeBase(), defaultRational), defaultRational, ds.timeBase) / 1e9
 		}
 		d.ss[s.Index()] = ds
 	}
@@ -210,6 +220,17 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 		return
 	}
 
+	// Rescale ts
+	pkt.AvPacketRescaleTs(s.s.TimeBase(), s.timeBase)
+
+	// Restamp
+	if d.restampStartAt != nil {
+		delta := pkt.Pts() - pkt.Dts()
+		dts := pkt.Dts() + s.restampOffset
+		pkt.SetDts(dts)
+		pkt.SetPts(dts + delta)
+	}
+
 	// Emulate rate
 	if d.emulateRate {
 		// Sleep until next DTS
@@ -218,15 +239,17 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 				astitime.Sleep(ctx, delta)
 			}
 		} else {
-			s.nextDts = time.Now()
+			// In case of restamp we use the first dts since we know when it should be
+			if d.restampStartAt != nil {
+				s.nextDts = d.restampStartAt.Add(time.Duration(avutil.AvRescaleQ(pkt.Dts()*1e9, s.timeBase, defaultRational)))
+			} else {
+				s.nextDts = time.Now()
+			}
 		}
 
 		// Compute next DTS
-		s.nextDts = s.nextDts.Add(time.Duration(avutil.AvRescaleQ(pkt.Duration()*1e9, s.s.TimeBase(), avutil.NewRational(1, 1))))
+		s.nextDts = s.nextDts.Add(time.Duration(avutil.AvRescaleQ(pkt.Duration()*1e9, s.timeBase, defaultRational)))
 	}
-
-	// Rescale ts
-	pkt.AvPacketRescaleTs(s.s.TimeBase(), s.timeBase)
 
 	// Dispatch pkt
 	d.d.dispatch(pkt, s)
