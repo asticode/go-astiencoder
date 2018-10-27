@@ -23,23 +23,23 @@ type Demuxer struct {
 	ctxFormat     *avformat.Context
 	d             *pktDispatcher
 	e             *astiencoder.EventEmitter
+	emulateRate   bool
 	interruptRet  *int
-	live          bool
 	ss            map[int]*demuxerStream
 	statWorkRatio *astistat.DurationRatioStat
 }
 
 type demuxerStream struct {
-	liveNextDts time.Time
-	s           *avformat.Stream
+	nextDts time.Time
+	s       *avformat.Stream
 }
 
 // DemuxerOptions represents demuxer options
 type DemuxerOptions struct {
-	Dict   string
-	Format *avformat.InputFormat
-	Live   bool
-	URL    string
+	Dict           string
+	EmulateRate    bool
+	Format         *avformat.InputFormat
+	URL            string
 }
 
 // NewDemuxer creates a new demuxer
@@ -54,7 +54,7 @@ func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c *astiencoder.Cl
 		}),
 		d:             newPktDispatcher(c),
 		e:             e,
-		live:          o.Live,
+		emulateRate:   o.EmulateRate,
 		ss:            make(map[int]*demuxerStream),
 		statWorkRatio: astistat.NewDurationRatioStat(),
 	}
@@ -196,19 +196,19 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 		return
 	}
 
-	// Simulate live
-	if d.live {
+	// Emulate rate
+	if d.emulateRate {
 		// Sleep until next DTS
-		if !s.liveNextDts.IsZero() {
-			if delta := s.liveNextDts.Sub(time.Now()); delta > 0 {
+		if !s.nextDts.IsZero() {
+			if delta := s.nextDts.Sub(time.Now()); delta > 0 {
 				astitime.Sleep(ctx, delta)
 			}
 		} else {
-			s.liveNextDts = time.Now()
+			s.nextDts = time.Now()
 		}
 
 		// Compute next DTS
-		s.liveNextDts = s.liveNextDts.Add(time.Duration(avutil.AvRescaleQ(pkt.Duration()*1e9, s.s.TimeBase(), avutil.NewRational(1, 1))))
+		s.nextDts = s.nextDts.Add(time.Duration(avutil.AvRescaleQ(pkt.Duration()*1e9, s.s.TimeBase(), avutil.NewRational(1,1))))
 	}
 
 	// Dispatch pkt
