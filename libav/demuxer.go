@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astitools/ptr"
 	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/time"
 	"github.com/asticode/go-astitools/worker"
@@ -23,19 +24,20 @@ var (
 // Demuxer represents an object capable of demuxing packets out of an input
 type Demuxer struct {
 	*astiencoder.BaseNode
-	ctxFormat      *avformat.Context
-	d              *pktDispatcher
-	e              *astiencoder.EventEmitter
-	emulateRate    bool
-	interruptRet   *int
-	restampStartAt *time.Time
-	ss             map[int]*demuxerStream
-	statWorkRatio  *astistat.DurationRatioStat
+	ctxFormat        *avformat.Context
+	d                *pktDispatcher
+	e                *astiencoder.EventEmitter
+	emulateRate      bool
+	findStreamInfoAt time.Time
+	interruptRet     *int
+	restampStartAt   *time.Time
+	ss               map[int]*demuxerStream
+	statWorkRatio    *astistat.DurationRatioStat
 }
 
 type demuxerStream struct {
 	nextDts       time.Time
-	restampOffset int64
+	restampOffset *int64
 	s             *avformat.Stream
 	timeBase      avutil.Rational
 }
@@ -106,6 +108,7 @@ func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c astiencoder.Clo
 	})
 
 	// Retrieve stream information
+	d.findStreamInfoAt = time.Now()
 	if ret := d.ctxFormat.AvformatFindStreamInfo(nil); ret < 0 {
 		err = errors.Wrapf(NewAvError(ret), "astilibav: ctxFormat.AvformatFindStreamInfo on %+v failed", o)
 		return
@@ -119,9 +122,6 @@ func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c astiencoder.Clo
 		}
 		if o.Timebase != nil {
 			ds.timeBase = o.Timebase(s)
-		}
-		if o.RestampStartAt != nil {
-			ds.restampOffset = avutil.AvRescaleQ(int64(time.Now().Sub(*o.RestampStartAt))-avutil.AvRescaleQ(s.CurDts()*1e9, s.TimeBase(), defaultRational), defaultRational, ds.timeBase) / 1e9
 		}
 		d.ss[s.Index()] = ds
 	}
@@ -243,8 +243,14 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 
 	// Restamp
 	if d.restampStartAt != nil {
+		// Compute offset
+		if s.restampOffset == nil {
+			s.restampOffset = astiptr.Int64(avutil.AvRescaleQ(int64(d.findStreamInfoAt.Sub(*d.restampStartAt))-avutil.AvRescaleQ(pkt.Dts()*1e9, s.timeBase, defaultRational), defaultRational, s.timeBase) / 1e9)
+		}
+
+		// Set dts and pts
 		delta := pkt.Pts() - pkt.Dts()
-		dts := pkt.Dts() + s.restampOffset
+		dts := pkt.Dts() + *s.restampOffset
 		pkt.SetDts(dts)
 		pkt.SetPts(dts + delta)
 	}
