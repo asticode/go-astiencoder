@@ -3,6 +3,7 @@ package astilibav
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiencoder"
@@ -21,17 +22,18 @@ var countFilterer uint64
 type Filterer struct {
 	*astiencoder.BaseNode
 	bufferSinkCtx    *avfilter.Context
-	bufferSrcCtx     *avfilter.Context
+	bufferSrcCtxs    map[astiencoder.Node]*avfilter.Context
 	d                *frameDispatcher
 	e                *astiencoder.EventEmitter
 	g                *avfilter.Graph
+	m                *sync.Mutex
 	q                *astisync.CtxQueue
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
 }
 
 // NewFilterer creates a new filterer
-func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (f *Filterer) {
+func NewFilterer(bufferSrcCtxs map[astiencoder.Node]*avfilter.Context, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (f *Filterer) {
 	count := atomic.AddUint64(&countFilterer, uint64(1))
 	f = &Filterer{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
@@ -40,9 +42,10 @@ func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Grap
 			Name:        fmt.Sprintf("filterer_%d", count),
 		}),
 		bufferSinkCtx:    bufferSinkCtx,
-		bufferSrcCtx:     bufferSrcCtx,
+		bufferSrcCtxs:    bufferSrcCtxs,
 		e:                e,
 		g:                g,
+		m:                &sync.Mutex{},
 		q:                astisync.NewCtxQueue(),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
@@ -55,7 +58,13 @@ func NewFilterer(bufferSrcCtx, bufferSinkCtx *avfilter.Context, g *avfilter.Grap
 // FiltererOptions represents filterer options
 type FiltererOptions struct {
 	Content string
-	Input   Context
+	Inputs  map[string]FiltererInput
+}
+
+// FiltererInput represents a filterer input
+type FiltererInput struct {
+	Context Context
+	Node    astiencoder.Node
 }
 
 // NewFiltererFromOptions creates a new filterer based on options
@@ -67,52 +76,63 @@ func NewFiltererFromOptions(o FiltererOptions, e *astiencoder.EventEmitter, c as
 		return nil
 	})
 
-	// Create buffers
-	bufferSrc := avfilter.AvfilterGetByName("buffer")
+	// Create buffer sink
 	bufferSink := avfilter.AvfilterGetByName("buffersink")
 
-	// Create filter in args
-	var args string
-	switch o.Input.CodecType {
-	case avcodec.AVMEDIA_TYPE_VIDEO:
-		args = fmt.Sprintf("video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d", o.Input.Width, o.Input.Height, o.Input.PixelFormat, o.Input.TimeBase.Num(), o.Input.TimeBase.Den(), o.Input.SampleAspectRatio.Num(), o.Input.SampleAspectRatio.Den())
-	default:
-		err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", o.Input.CodecType)
-		return
-	}
-
-	// Create filter in
-	var bufferSrcCtx *avfilter.Context
-	if ret := avfilter.AvfilterGraphCreateFilter(&bufferSrcCtx, bufferSrc, "in", args, nil, g); ret < 0 {
-		err = errors.Wrapf(NewAvError(ret), "astilibav: avfilter.AvfilterGraphCreateFilter on args %s failed", args)
-		return
-	}
-
-	// Create filter sink
+	// Create buffer sink ctx
 	var bufferSinkCtx *avfilter.Context
 	if ret := avfilter.AvfilterGraphCreateFilter(&bufferSinkCtx, bufferSink, "out", "", nil, g); ret < 0 {
 		err = errors.Wrap(NewAvError(ret), "astilibav: avfilter.AvfilterGraphCreateFilter on empty args failed")
 		return
 	}
 
-	// Create outputs
-	outputs := avfilter.AvfilterInoutAlloc()
-	defer avfilter.AvfilterInoutFree(&outputs)
-	outputs.SetName("in")
-	outputs.SetFilterCtx(bufferSrcCtx)
-	outputs.SetPadIdx(0)
-	outputs.SetNext(nil)
-
 	// Create inputs
 	inputs := avfilter.AvfilterInoutAlloc()
-	defer avfilter.AvfilterInoutFree(&inputs)
 	inputs.SetName("out")
 	inputs.SetFilterCtx(bufferSinkCtx)
 	inputs.SetPadIdx(0)
 	inputs.SetNext(nil)
 
+	// Loop through options inputs
+	var previousOutput *avfilter.Input
+	bufferSrcCtxs := make(map[astiencoder.Node]*avfilter.Context)
+	for n, i := range o.Inputs {
+		// Create buffer
+		bufferSrc := avfilter.AvfilterGetByName("buffer")
+
+		// Create filter in args
+		var args string
+		switch i.Context.CodecType {
+		case avcodec.AVMEDIA_TYPE_VIDEO:
+			args = fmt.Sprintf("video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d", i.Context.Width, i.Context.Height, i.Context.PixelFormat, i.Context.TimeBase.Num(), i.Context.TimeBase.Den(), i.Context.SampleAspectRatio.Num(), i.Context.SampleAspectRatio.Den())
+		default:
+			err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", i.Context.CodecType)
+			return
+		}
+
+		// Create ctx
+		var bufferSrcCtx *avfilter.Context
+		if ret := avfilter.AvfilterGraphCreateFilter(&bufferSrcCtx, bufferSrc, "in", args, nil, g); ret < 0 {
+			err = errors.Wrapf(NewAvError(ret), "astilibav: avfilter.AvfilterGraphCreateFilter on args %s failed", args)
+			return
+		}
+
+		// Create outputs
+		outputs := avfilter.AvfilterInoutAlloc()
+		outputs.SetName(n)
+		outputs.SetFilterCtx(bufferSrcCtx)
+		outputs.SetPadIdx(0)
+		outputs.SetNext(previousOutput)
+
+		// Store ctx
+		bufferSrcCtxs[i.Node] = bufferSrcCtx
+
+		// Set previous output
+		previousOutput = outputs
+	}
+
 	// Parse content
-	if ret := g.AvfilterGraphParsePtr(o.Content, &inputs, &outputs, nil); ret < 0 {
+	if ret := g.AvfilterGraphParsePtr(o.Content, &inputs, &previousOutput, nil); ret < 0 {
 		err = errors.Wrapf(NewAvError(ret), "astilibav: g.AvfilterGraphParsePtr on content %s failed", o.Content)
 		return
 	}
@@ -124,7 +144,7 @@ func NewFiltererFromOptions(o FiltererOptions, e *astiencoder.EventEmitter, c as
 	}
 
 	// Create filterer
-	return NewFilterer(bufferSrcCtx, bufferSinkCtx, g, e, c), nil
+	return NewFilterer(bufferSrcCtxs, bufferSinkCtx, g, e, c), nil
 }
 
 func (f *Filterer) addStats() {
@@ -190,9 +210,17 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Increment incoming rate
 			f.statIncomingRate.Add(1)
 
+			// Retrieve buffer ctx
+			f.m.Lock()
+			bufferSrcCtx, ok := f.bufferSrcCtxs[p.Node]
+			f.m.Unlock()
+			if !ok {
+				return
+			}
+
 			// Push frame in graph
 			f.statWorkRatio.Add(true)
-			if ret := f.g.AvBuffersrcAddFrameFlags(f.bufferSrcCtx, p.Frame, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
+			if ret := f.g.AvBuffersrcAddFrameFlags(bufferSrcCtx, p.Frame, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
 				f.statWorkRatio.Done(true)
 				emitAvError(f.e, ret, "f.g.AvBuffersrcAddFrameFlags failed")
 				return

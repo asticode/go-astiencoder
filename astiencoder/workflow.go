@@ -6,7 +6,6 @@ import (
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astiencoder/libav"
-	"github.com/asticode/go-astilog"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
@@ -235,11 +234,9 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 			// Create output ctx
 			outCtx := b.operationOutputCtx(o, inCtx, oos)
 
-			astilog.Warnf("in: %+v - out: %+v", inCtx, outCtx)
-
 			// Create filterer
 			var f *astilibav.Filterer
-			if f, err = b.createFilterer(bd, inCtx, outCtx); err != nil {
+			if f, err = b.createFilterer(bd, inCtx, outCtx, d); err != nil {
 				err = errors.Wrapf(err, "main: creating filterer for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
 				return
 			}
@@ -428,7 +425,7 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 	return
 }
 
-func (b *builder) createFilterer(bd *buildData, inCtx, outCtx astilibav.Context) (f *astilibav.Filterer, err error) {
+func (b *builder) createFilterer(bd *buildData, inCtx, outCtx astilibav.Context, n astiencoder.Node) (f *astilibav.Filterer, err error) {
 	// Create filters
 	var filters []string
 
@@ -452,7 +449,12 @@ func (b *builder) createFilterer(bd *buildData, inCtx, outCtx astilibav.Context)
 		// Create filterer options
 		fo := astilibav.FiltererOptions{
 			Content: strings.Join(filters, ","),
-			Input:   inCtx,
+			Inputs: map[string]astilibav.FiltererInput{
+				"in": {
+					Context: inCtx,
+					Node:    n,
+				},
+			},
 		}
 
 		// Create filterer
