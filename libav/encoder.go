@@ -22,12 +22,13 @@ var countEncoder uint64
 // Encoder represents an object capable of encoding frames
 type Encoder struct {
 	*astiencoder.BaseNode
-	ctxCodec         *avcodec.Context
-	d                *pktDispatcher
-	e                *astiencoder.EventEmitter
-	q                *astisync.CtxQueue
-	statIncomingRate *astistat.IncrementStat
-	statWorkRatio    *astistat.DurationRatioStat
+	ctxCodec           *avcodec.Context
+	d                  *pktDispatcher
+	e                  *astiencoder.EventEmitter
+	previousDescriptor Descriptor
+	q                  *astisync.CtxQueue
+	statIncomingRate   *astistat.IncrementStat
+	statWorkRatio      *astistat.DurationRatioStat
 }
 
 // NewEncoder creates a new encoder
@@ -192,11 +193,8 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
 		defer e.d.wait()
 
-		// We need to create a descriptor pool since the encoder keeps a buffer of frame
-		var dpl []Descriptor
-
 		// Make sure to flush the encoder
-		defer e.flush(&dpl)
+		defer e.flush()
 
 		// Make sure to stop the queue properly
 		defer e.q.Stop()
@@ -213,21 +211,16 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			e.statIncomingRate.Add(1)
 
 			// Encode
-			e.encode(p, &dpl)
+			e.encode(p)
 		})
 	})
 }
 
-func (e *Encoder) flush(dp *[]Descriptor) {
-	e.encode(&FrameHandlerPayload{}, dp)
+func (e *Encoder) flush() {
+	e.encode(&FrameHandlerPayload{})
 }
 
-func (e *Encoder) encode(p *FrameHandlerPayload, dp *[]Descriptor) {
-	// Add prev to pool
-	if p.Descriptor != nil {
-		*dp = append(*dp, p.Descriptor)
-	}
-
+func (e *Encoder) encode(p *FrameHandlerPayload) {
 	// Reset frame attributes
 	if p.Frame != nil {
 		switch e.ctxCodec.CodecType() {
@@ -247,16 +240,15 @@ func (e *Encoder) encode(p *FrameHandlerPayload, dp *[]Descriptor) {
 	e.statWorkRatio.Done(true)
 
 	// Loop
-	descriptor := Descriptor(nil)
 	for {
 		// Receive pkt
-		if stop := e.receivePkt(&descriptor, dp); stop {
+		if stop := e.receivePkt(p); stop {
 			return
 		}
 	}
 }
 
-func (e *Encoder) receivePkt(descriptor *Descriptor, dp *[]Descriptor) (stop bool) {
+func (e *Encoder) receivePkt(p *FrameHandlerPayload) (stop bool) {
 	// Get pkt from pool
 	pkt := e.d.p.get()
 	defer e.d.p.put(pkt)
@@ -275,14 +267,16 @@ func (e *Encoder) receivePkt(descriptor *Descriptor, dp *[]Descriptor) (stop boo
 
 	// TODO libx264 returns a pkt with a duration set to 0 here :(
 
-	// Get prev
-	if *descriptor == nil {
-		*descriptor = (*dp)[0]
-		*dp = (*dp)[1:]
+	// Get descriptor
+	d := p.Descriptor
+	if d == nil {
+		d = e.previousDescriptor
+	} else {
+		e.previousDescriptor = d
 	}
 
 	// Rescale timestamps
-	pkt.AvPacketRescaleTs((*descriptor).TimeBase(), e.ctxCodec.TimeBase())
+	pkt.AvPacketRescaleTs(d.TimeBase(), e.ctxCodec.TimeBase())
 
 	// Dispatch pkt
 	e.d.dispatch(pkt, newEncoderDescriptor(e.ctxCodec))
