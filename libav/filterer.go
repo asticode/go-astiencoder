@@ -76,8 +76,40 @@ func NewFiltererFromOptions(o FiltererOptions, e *astiencoder.EventEmitter, c as
 		return nil
 	})
 
-	// Create buffer sink
-	bufferSink := avfilter.AvfilterGetByName("buffersink")
+	// No inputs
+	if len(o.Inputs) == 0 {
+		err = errors.New("astilibav: no inputs in filterer options")
+		return
+	}
+
+	// Get codec type
+	codecType := avcodec.MediaType(avcodec.AVMEDIA_TYPE_UNKNOWN)
+	for n, i := range o.Inputs {
+		switch i.Context.CodecType {
+		case avcodec.AVMEDIA_TYPE_AUDIO, avcodec.AVMEDIA_TYPE_VIDEO:
+			if codecType == avcodec.AVMEDIA_TYPE_UNKNOWN {
+				codecType = i.Context.CodecType
+			} else if codecType != i.Context.CodecType {
+				err = fmt.Errorf("astilibav: codec type %d of input %s is different from chosen codec type %d", i.Context.CodecType, n, codecType)
+				return
+			}
+		default:
+			err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", i.Context.CodecType)
+			return
+		}
+	}
+
+	// Create buffer func and buffer sink
+	var bufferFunc func() *avfilter.Filter
+	var bufferSink *avfilter.Filter
+	switch codecType {
+	case avcodec.AVMEDIA_TYPE_AUDIO:
+		bufferFunc = func() *avfilter.Filter { return avfilter.AvfilterGetByName("abuffer") }
+		bufferSink = avfilter.AvfilterGetByName("abuffersink")
+	case avcodec.AVMEDIA_TYPE_VIDEO:
+		bufferFunc = func() *avfilter.Filter { return avfilter.AvfilterGetByName("buffer") }
+		bufferSink = avfilter.AvfilterGetByName("buffersink")
+	}
 
 	// Create buffer sink ctx
 	var bufferSinkCtx *avfilter.Context
@@ -98,11 +130,13 @@ func NewFiltererFromOptions(o FiltererOptions, e *astiencoder.EventEmitter, c as
 	bufferSrcCtxs := make(map[astiencoder.Node]*avfilter.Context)
 	for n, i := range o.Inputs {
 		// Create buffer
-		bufferSrc := avfilter.AvfilterGetByName("buffer")
+		bufferSrc := bufferFunc()
 
 		// Create filter in args
 		var args string
 		switch i.Context.CodecType {
+		case avcodec.AVMEDIA_TYPE_AUDIO:
+			args = fmt.Sprintf("channel_layout=%s:sample_fmt=%s:time_base=%d/%d:sample_rate=%d", avutil.AvGetChannelLayoutString(i.Context.ChannelLayout), avutil.AvGetSampleFmtName(int(i.Context.SampleFmt)), i.Context.TimeBase.Num(), i.Context.TimeBase.Den(), i.Context.SampleRate)
 		case avcodec.AVMEDIA_TYPE_VIDEO:
 			args = fmt.Sprintf("video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d", i.Context.Width, i.Context.Height, i.Context.PixelFormat, i.Context.TimeBase.Num(), i.Context.TimeBase.Den(), i.Context.SampleAspectRatio.Num(), i.Context.SampleAspectRatio.Den())
 		default:

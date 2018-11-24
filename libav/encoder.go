@@ -230,8 +230,11 @@ func (e *Encoder) encode(p *FrameHandlerPayload, dp *[]Descriptor) {
 
 	// Reset frame attributes
 	if p.Frame != nil {
-		p.Frame.Key_frame = 0
-		p.Frame.Pict_type = avutil.AV_PICTURE_TYPE_NONE
+		switch e.ctxCodec.CodecType() {
+		case avutil.AVMEDIA_TYPE_VIDEO:
+			p.Frame.SetKeyFrame(0)
+			p.Frame.SetPictType(avutil.AvPictureType(avutil.AV_PICTURE_TYPE_NONE))
+		}
 	}
 
 	// Send frame to encoder
