@@ -304,6 +304,11 @@ func (e *Encoder) AddStream(ctxFormat *avformat.Context) (o *avformat.Stream, er
 	return
 }
 
+// FrameSize returns the encoder frame size
+func (e *Encoder) FrameSize() int {
+	return e.ctxCodec.FrameSize()
+}
+
 type encoderDescriptor struct {
 	ctxCodec *avcodec.Context
 }
