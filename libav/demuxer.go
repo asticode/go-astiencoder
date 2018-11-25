@@ -37,8 +37,9 @@ type Demuxer struct {
 }
 
 type demuxerStream struct {
-	nextDts time.Time
-	s       *avformat.Stream
+	ctx               Context
+	emulateRateNextAt time.Time
+	s                 *avformat.Stream
 }
 
 type demuxerPkt struct {
@@ -127,7 +128,10 @@ func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c astiencoder.Clo
 
 	// Index streams
 	for _, s := range d.ctxFormat.Streams() {
-		d.ss[s.Index()] = &demuxerStream{s: s}
+		d.ss[s.Index()] = &demuxerStream{
+			ctx: NewContextFromStream(s),
+			s:   s,
+		}
 	}
 
 	// Add stats
@@ -262,20 +266,37 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 
 	// Emulate rate
 	if d.emulateRate {
-		// Sleep until next DTS
-		if !s.nextDts.IsZero() {
-			if delta := s.nextDts.Sub(time.Now()); delta > 0 {
+		// Sleep until next at
+		if !s.emulateRateNextAt.IsZero() {
+			if delta := s.emulateRateNextAt.Sub(time.Now()); delta > 0 {
 				astitime.Sleep(ctx, delta)
 			}
 		} else {
-			s.nextDts = time.Now()
+			s.emulateRateNextAt = time.Now()
 		}
 
-		// Compute next DTS
-		s.nextDts = s.nextDts.Add(time.Duration(avutil.AvRescaleQ(pkt.Duration(), s.s.TimeBase(), nanosecondRational)))
+		// Compute next at
+		s.emulateRateNextAt = s.emulateRateNextAt.Add(time.Duration(avutil.AvRescaleQ(d.emulateRatePktDuration(pkt, s.ctx), s.s.TimeBase(), nanosecondRational)))
 	}
 
 	// Dispatch pkt
 	d.d.dispatch(pkt, s.s)
 	return
+}
+
+func (d *Demuxer) emulateRatePktDuration(pkt *avcodec.Packet, ctx Context) int64 {
+	switch ctx.CodecType {
+	case avutil.AVMEDIA_TYPE_AUDIO:
+		// Get skip samples side data
+		sd := pkt.AvPacketGetSideData(avcodec.AV_PKT_DATA_SKIP_SAMPLES, nil)
+		if sd == nil {
+			return pkt.Duration()
+		}
+
+		// Substract number of samples
+		skipStart, skipEnd := avutil.AV_RL32(sd, 0), avutil.AV_RL32(sd, 4)
+		return pkt.Duration() - avutil.AvRescaleQ(int64(float64(skipStart+skipEnd)/float64(ctx.SampleRate)*1e9), nanosecondRational, ctx.TimeBase)
+	default:
+		return pkt.Duration()
+	}
 }
