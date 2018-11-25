@@ -108,9 +108,9 @@ func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c astiencoder.Clo
 		return nil
 	})
 
-	// In case of a live restamper, we need to store the time of the first packet
-	if v, ok := d.restamper.(*restamperLive); ok {
-		v.firstPacketAt = time.Now()
+	// First pkt
+	if d.restamper != nil {
+		d.restamper.FirstPkt()
 	}
 
 	// Retrieve stream information
@@ -234,9 +234,9 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 				stop = true
 			}
 
-			// Update restamper offset
+			// Update restamper offsets
 			if d.restamper != nil {
-				d.restamper.UpdateOffset(avutil.AvRescaleQ((d.loopLastPkt.dts+d.loopLastPkt.duration)*1e9, d.loopLastPkt.s.TimeBase(), defaultRational) - avutil.AvRescaleQ(d.loopFirstPkt.dts*1e9, d.loopFirstPkt.s.TimeBase(), defaultRational))
+				d.restamper.UpdateOffsets(avutil.AvRescaleQ((d.loopLastPkt.dts+d.loopLastPkt.duration)*1e9, d.loopLastPkt.s.TimeBase(), defaultRational) - avutil.AvRescaleQ(d.loopFirstPkt.dts*1e9, d.loopFirstPkt.s.TimeBase(), defaultRational))
 			}
 		}
 		return
