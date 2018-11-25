@@ -10,14 +10,15 @@ import (
 	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/time"
 	"github.com/asticode/go-astitools/worker"
+	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
 	"github.com/pkg/errors"
 )
 
 var (
-	countDemuxer    uint64
-	defaultRational = avutil.NewRational(1, 1)
+	countDemuxer       uint64
+	nanosecondRational = avutil.NewRational(1, 1e9)
 )
 
 // Demuxer represents an object capable of demuxing packets out of an input
@@ -30,10 +31,16 @@ type Demuxer struct {
 	interruptRet  *int
 	loop          bool
 	loopFirstPkt  *demuxerPkt
-	loopLastPkt   *demuxerPkt
 	restamper     Restamper
 	ss            map[int]*demuxerStream
 	statWorkRatio *astistat.DurationRatioStat
+}
+
+type demuxerStream struct {
+	loopFirstPkt *demuxerPkt
+	loopLastPkt  *demuxerPkt
+	nextDts      time.Time
+	s            *avformat.Stream
 }
 
 type demuxerPkt struct {
@@ -42,9 +49,12 @@ type demuxerPkt struct {
 	s        *avformat.Stream
 }
 
-type demuxerStream struct {
-	nextDts time.Time
-	s       *avformat.Stream
+func newDemuxerPkt(pkt *avcodec.Packet, s *avformat.Stream) *demuxerPkt {
+	return &demuxerPkt{
+		dts:      pkt.Dts(),
+		duration: pkt.Duration(),
+		s:        s,
+	}
 }
 
 // DemuxerOptions represents demuxer options
@@ -236,7 +246,11 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 
 			// Update restamper offsets
 			if d.restamper != nil {
-				d.restamper.UpdateOffsets(avutil.AvRescaleQ((d.loopLastPkt.dts+d.loopLastPkt.duration)*1e9, d.loopLastPkt.s.TimeBase(), defaultRational) - avutil.AvRescaleQ(d.loopFirstPkt.dts*1e9, d.loopFirstPkt.s.TimeBase(), defaultRational))
+				// Loop through streams
+				for _, s := range d.ss {
+					// Update restamper offset
+					d.restamper.UpdateOffset(s.loopLastPkt.dts+s.loopLastPkt.duration-s.loopFirstPkt.dts, s.s.Index())
+				}
 			}
 		}
 		return
@@ -251,21 +265,21 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 
 	// Update loop packets
 	if d.loop {
-		// Update first pkt
+		// Create demuxer pkt
+		dpkt := newDemuxerPkt(pkt, s.s)
+
+		// Update global first pkt
 		if d.loopFirstPkt == nil {
-			d.loopFirstPkt = &demuxerPkt{
-				dts:      pkt.Dts(),
-				duration: pkt.Duration(),
-				s:        s.s,
-			}
+			d.loopFirstPkt = dpkt
 		}
 
-		// Update last pkt
-		d.loopLastPkt = &demuxerPkt{
-			dts:      pkt.Dts(),
-			duration: pkt.Duration(),
-			s:        s.s,
+		// Update stream first pkt
+		if s.loopFirstPkt == nil {
+			s.loopFirstPkt = dpkt
 		}
+
+		// Update stream last pkt
+		s.loopLastPkt = dpkt
 	}
 
 	// Restamp
@@ -289,7 +303,7 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 		}
 
 		// Compute next DTS
-		s.nextDts = s.nextDts.Add(time.Duration(avutil.AvRescaleQ(pkt.Duration()*1e9, s.s.TimeBase(), defaultRational)))
+		s.nextDts = s.nextDts.Add(time.Duration(avutil.AvRescaleQ(pkt.Duration(), s.s.TimeBase(), nanosecondRational)))
 	}
 
 	// Dispatch pkt

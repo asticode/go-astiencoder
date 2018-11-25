@@ -14,9 +14,8 @@ type Restamper interface {
 	Restamp(pkt *avcodec.Packet, d Descriptor)
 	// Returns the time.Time of a restamped pkt ts
 	Time(ts int64, d Descriptor) time.Time
-	// Updates the restamper offsets
-	// duration must be a computation of timestamps FIRST multiplied by 1e9 THEN rescaled to a 1/1 timebase
-	UpdateOffsets(duration int64)
+	// Updates restamper stream offset with a duration in stream.time_base
+	UpdateOffset(duration int64, streamIdx int)
 }
 
 type restamperBase struct {
@@ -38,12 +37,14 @@ func (r *restamperBase) FirstPkt() {
 }
 
 // UpdateOffset implements the Restamper interface
-func (r *restamperBase) UpdateOffsets(delta int64) {
+func (r *restamperBase) UpdateOffset(delta int64, streamIdx int) {
 	r.m.Lock()
 	defer r.m.Unlock()
-	for k := range r.offsets {
-		r.offsets[k] += delta
+	offset , ok := r.offsets[streamIdx]
+	if !ok {
+		return
 	}
+	r.offsets[streamIdx] = offset + delta
 }
 
 func (r *restamperBase) restamp(pkt *avcodec.Packet, d Descriptor, fn func(pkt *avcodec.Packet, d Descriptor) int64) {
@@ -58,7 +59,7 @@ func (r *restamperBase) restamp(pkt *avcodec.Packet, d Descriptor, fn func(pkt *
 
 	// Restamp
 	delta := pkt.Pts() - pkt.Dts()
-	dts := pkt.Dts() + int64(avutil.AvRescaleQ(offset, defaultRational, d.TimeBase())/1e9)
+	dts := pkt.Dts() + offset
 	pkt.SetDts(dts)
 	pkt.SetPts(dts + delta)
 }
@@ -79,13 +80,13 @@ func NewRestamperLive(startAt time.Time) Restamper {
 // Restamp implements the Restamper interface
 func (r *restamperLive) Restamp(pkt *avcodec.Packet, d Descriptor) {
 	r.restamp(pkt, d, func(pkt *avcodec.Packet, d Descriptor) int64 {
-		return int64(r.firstPacketAt.Sub(r.startAt)) - avutil.AvRescaleQ(pkt.Dts()*1e9, d.TimeBase(), defaultRational)
+		return avutil.AvRescaleQ(int64(r.firstPacketAt.Sub(r.startAt)), nanosecondRational, d.TimeBase()) - pkt.Dts()
 	})
 }
 
 // Time implements the Restamper interface
 func (r *restamperLive) Time(ts int64, d Descriptor) time.Time {
-	return r.startAt.Add(time.Duration(avutil.AvRescaleQ(ts*1e9, d.TimeBase(), defaultRational)))
+	return r.startAt.Add(time.Duration(avutil.AvRescaleQ(ts, d.TimeBase(), nanosecondRational)))
 }
 
 type restamperZero struct {
@@ -100,11 +101,11 @@ func NewRestamperZero() Restamper {
 // Restamp implements the Restamper interface
 func (r *restamperZero) Restamp(pkt *avcodec.Packet, d Descriptor) {
 	r.restamp(pkt, d, func(pkt *avcodec.Packet, d Descriptor) int64 {
-		return -avutil.AvRescaleQ(pkt.Dts()*1e9, d.TimeBase(), defaultRational)
+		return -pkt.Dts()
 	})
 }
 
 // Time implements the Restamper interface
 func (r *restamperZero) Time(ts int64, d Descriptor) time.Time {
-	return r.firstPacketAt.Add(time.Duration(avutil.AvRescaleQ(ts*1e9, d.TimeBase(), defaultRational)))
+	return r.firstPacketAt.Add(time.Duration(avutil.AvRescaleQ(ts, d.TimeBase(), nanosecondRational)))
 }
