@@ -24,15 +24,24 @@ var (
 // Demuxer represents an object capable of demuxing packets out of an input
 type Demuxer struct {
 	*astiencoder.BaseNode
-	ctxFormat        *avformat.Context
-	d                *pktDispatcher
-	e                *astiencoder.EventEmitter
-	emulateRate      bool
-	findStreamInfoAt time.Time
-	interruptRet     *int
-	restampStartAt   *time.Time
-	ss               map[int]*demuxerStream
-	statWorkRatio    *astistat.DurationRatioStat
+	ctxFormat      *avformat.Context
+	d              *pktDispatcher
+	e              *astiencoder.EventEmitter
+	emulateRate    bool
+	firstPktAt     time.Time
+	interruptRet   *int
+	loop           bool
+	loopFirstPkt   *demuxerPkt
+	loopLastPkt    *demuxerPkt
+	restampStartAt *time.Time
+	ss             map[int]*demuxerStream
+	statWorkRatio  *astistat.DurationRatioStat
+}
+
+type demuxerPkt struct {
+	dts       int64
+	duration  int64
+	streamIdx int
 }
 
 type demuxerStream struct {
@@ -52,6 +61,7 @@ type DemuxerOptions struct {
 	Dict           string
 	EmulateRate    bool
 	Format         *avformat.InputFormat
+	Loop           bool
 	RestampStartAt *time.Time
 	Timebase       func(s *avformat.Stream) avutil.Rational
 	URL            string
@@ -70,6 +80,7 @@ func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c astiencoder.Clo
 		d:              newPktDispatcher(c),
 		e:              e,
 		emulateRate:    o.EmulateRate,
+		loop:           o.Loop,
 		restampStartAt: o.RestampStartAt,
 		ss:             make(map[int]*demuxerStream),
 		statWorkRatio:  astistat.NewDurationRatioStat(),
@@ -108,7 +119,7 @@ func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c astiencoder.Clo
 	})
 
 	// Retrieve stream information
-	d.findStreamInfoAt = time.Now()
+	d.firstPktAt = time.Now()
 	if ret := d.ctxFormat.AvformatFindStreamInfo(nil); ret < 0 {
 		err = errors.Wrapf(NewAvError(ret), "astilibav: ctxFormat.AvformatFindStreamInfo on %+v failed", o)
 		return
@@ -224,13 +235,47 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	d.statWorkRatio.Add(true)
 	if ret := d.ctxFormat.AvReadFrame(pkt); ret < 0 {
 		d.statWorkRatio.Done(true)
-		if ret != avutil.AVERROR_EOF {
-			emitAvError(d.e, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
+		if ret != avutil.AVERROR_EOF || !d.loop {
+			if ret != avutil.AVERROR_EOF {
+				emitAvError(d.e, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
+			}
+			stop = true
+		} else if d.loopFirstPkt != nil {
+			// Seek to first pkt
+			if ret = d.ctxFormat.AvSeekFrame(d.loopFirstPkt.streamIdx, d.loopFirstPkt.dts, avformat.AVSEEK_FLAG_BACKWARD); ret < 0 {
+				emitAvError(d.e, ret, "ctxFormat.AvSeekFrame on %s with stream idx %v and ts %v failed", d.ctxFormat.Filename(), d.loopFirstPkt.streamIdx, d.loopFirstPkt.dts)
+				stop = true
+			}
+
+			// Update restamp offset
+			if d.restampStartAt != nil {
+				for _, s := range d.ss {
+					*s.restampOffset += d.loopLastPkt.dts - d.loopFirstPkt.dts + d.loopLastPkt.duration
+				}
+			}
 		}
-		stop = true
 		return
 	}
 	d.statWorkRatio.Done(true)
+
+	// Update loop packets
+	if d.loop {
+		// Update first pkt
+		if d.loopFirstPkt == nil {
+			d.loopFirstPkt = &demuxerPkt{
+				dts:       pkt.Dts(),
+				duration:  pkt.Duration(),
+				streamIdx: pkt.StreamIndex(),
+			}
+		}
+
+		// Update last pkt
+		d.loopLastPkt = &demuxerPkt{
+			dts:       pkt.Dts(),
+			duration:  pkt.Duration(),
+			streamIdx: pkt.StreamIndex(),
+		}
+	}
 
 	// Get stream
 	s, ok := d.ss[pkt.StreamIndex()]
@@ -245,7 +290,7 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	if d.restampStartAt != nil {
 		// Compute offset
 		if s.restampOffset == nil {
-			s.restampOffset = astiptr.Int64(avutil.AvRescaleQ(int64(d.findStreamInfoAt.Sub(*d.restampStartAt))-avutil.AvRescaleQ(pkt.Dts()*1e9, s.timeBase, defaultRational), defaultRational, s.timeBase) / 1e9)
+			s.restampOffset = astiptr.Int64(avutil.AvRescaleQ(int64(d.firstPktAt.Sub(*d.restampStartAt))-avutil.AvRescaleQ(pkt.Dts()*1e9, s.timeBase, defaultRational), defaultRational, s.timeBase) / 1e9)
 		}
 
 		// Set dts and pts
