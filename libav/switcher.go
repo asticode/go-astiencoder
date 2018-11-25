@@ -22,13 +22,19 @@ type Switcher struct {
 	e                *astiencoder.EventEmitter
 	m                *sync.Mutex
 	q                *astisync.CtxQueue
+	restamper        FrameRestamper
 	rs               map[astiencoder.Node]bool
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
 }
 
+// SwitcherOptions represents switcher options
+type SwitcherOptions struct {
+	Restamper FrameRestamper
+}
+
 // NewSwitcher creates a new switcher
-func NewSwitcher(e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (s *Switcher) {
+func NewSwitcher(o SwitcherOptions, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (s *Switcher) {
 	count := atomic.AddUint64(&countSwitcher, uint64(1))
 	s = &Switcher{
 		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
@@ -38,6 +44,7 @@ func NewSwitcher(e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (s *
 		}),
 		m:                &sync.Mutex{},
 		q:                astisync.NewCtxQueue(),
+		restamper:        o.Restamper,
 		rs:               make(map[astiencoder.Node]bool),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
@@ -134,6 +141,11 @@ func (s *Switcher) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 				return
 			}
 			s.m.Unlock()
+
+			// Restamp frame
+			if s.restamper != nil {
+				s.restamper.Restamp(p.Frame, true)
+			}
 
 			// Dispatch frame
 			s.d.dispatch(p.Frame, p.Descriptor)

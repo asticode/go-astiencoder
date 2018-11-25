@@ -25,7 +25,7 @@ type Muxer struct {
 	e                *astiencoder.EventEmitter
 	o                *sync.Once
 	q                *astisync.CtxQueue
-	restamper        Restamper
+	restamper        PktRestamper
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
 }
@@ -34,7 +34,7 @@ type Muxer struct {
 type MuxerOptions struct {
 	Format     *avformat.OutputFormat
 	FormatName string
-	Restamper  Restamper
+	Restamper  PktRestamper
 	URL        string
 }
 
@@ -159,7 +159,7 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 			// Restamp
 			if m.restamper != nil {
-				m.restamper.Restamp(p.Pkt, p.Descriptor)
+				m.restamper.Restamp(p.Pkt)
 			}
 
 			// Write frame
