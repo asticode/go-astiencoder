@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"sync"
-
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
@@ -20,10 +18,9 @@ type Switcher struct {
 	*astiencoder.BaseNode
 	d                *frameDispatcher
 	e                *astiencoder.EventEmitter
-	m                *sync.Mutex
+	n astiencoder.Node
 	q                *astisync.CtxQueue
 	restamper        FrameRestamper
-	rs               map[astiencoder.Node]bool
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
 }
@@ -42,10 +39,8 @@ func NewSwitcher(o SwitcherOptions, e *astiencoder.EventEmitter, c astiencoder.C
 			Label:       fmt.Sprintf("Switcher #%d", count),
 			Name:        fmt.Sprintf("switcher_%d", count),
 		}),
-		m:                &sync.Mutex{},
 		q:                astisync.NewCtxQueue(),
 		restamper:        o.Restamper,
-		rs:               make(map[astiencoder.Node]bool),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
@@ -76,20 +71,9 @@ func (s *Switcher) addStats() {
 	s.q.AddStats(s.Stater())
 }
 
-// SetRule sets a rule
-func (s *Switcher) SetRule(n astiencoder.Node, v bool) {
-	s.m.Lock()
-	defer s.m.Unlock()
-	s.rs[n] = v
-}
-
-// SetRules sets all rules
-func (s *Switcher) SetRules(rs map[astiencoder.Node]bool) {
-	s.m.Lock()
-	defer s.m.Unlock()
-	for k, v := range rs {
-		s.rs[k] = v
-	}
+// Switch switches the source
+func (s *Switcher) Switch(n astiencoder.Node) {
+	s.n = n
 }
 
 // Connect implements the FrameHandlerConnector interface
@@ -133,14 +117,10 @@ func (s *Switcher) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Increment incoming rate
 			s.statIncomingRate.Add(1)
 
-			// Check whether the frame should be forwarded
-			s.statWorkRatio.Add(true)
-			s.m.Lock()
-			if v, ok := s.rs[p.Node]; !ok || !v {
-				s.m.Unlock()
+			// Check whether the frame should be dispatched
+			if s.n != p.Node {
 				return
 			}
-			s.m.Unlock()
 
 			// Restamp frame
 			if s.restamper != nil {
