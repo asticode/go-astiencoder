@@ -265,14 +265,17 @@ func (e *Encoder) receivePkt(p *FrameHandlerPayload) (stop bool) {
 	}
 	e.statWorkRatio.Done(true)
 
-	// TODO libx264 returns a pkt with a duration set to 0 here :(
-
 	// Get descriptor
 	d := p.Descriptor
 	if d == nil {
 		d = e.previousDescriptor
 	} else {
 		e.previousDescriptor = d
+	}
+
+	// Set pkt duration based on framerate
+	if f := e.ctxCodec.Framerate(); f.Num() > 0 {
+		pkt.SetDuration(avutil.AvRescaleQ(int64(1e9/f.ToDouble()), nanosecondRational, d.TimeBase()))
 	}
 
 	// Rescale timestamps
