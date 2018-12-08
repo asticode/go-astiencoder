@@ -300,21 +300,20 @@ func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
 }
 
 type filtererDescriptor struct {
-	bufferSinkCtx *avfilter.Context
-	prev          Descriptor
+	timeBase avutil.Rational
 }
 
-func newFiltererDescriptor(bufferSinkCtx *avfilter.Context, prev Descriptor) *filtererDescriptor {
-	return &filtererDescriptor{
-		bufferSinkCtx: bufferSinkCtx,
-		prev:          prev,
+func newFiltererDescriptor(bufferSinkCtx *avfilter.Context, prev Descriptor) (d *filtererDescriptor) {
+	d = &filtererDescriptor{}
+	if is := bufferSinkCtx.Inputs(); is != nil && len(is) > 0 {
+		d.timeBase = is[0].TimeBase()
+	} else {
+		d.timeBase = prev.TimeBase()
 	}
+	return
 }
 
 // TimeBase implements the Descriptor interface
 func (d *filtererDescriptor) TimeBase() avutil.Rational {
-	if d.bufferSinkCtx.NbInputs() == 0 {
-		return d.prev.TimeBase()
-	}
-	return d.bufferSinkCtx.Inputs()[0].TimeBase()
+	return d.timeBase
 }

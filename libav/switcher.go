@@ -9,6 +9,7 @@ import (
 	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
 	"github.com/asticode/go-astitools/worker"
+	"github.com/asticode/goav/avutil"
 )
 
 var countSwitcher uint64
@@ -18,8 +19,9 @@ type Switcher struct {
 	*astiencoder.BaseNode
 	d                *frameDispatcher
 	e                *astiencoder.EventEmitter
-	n astiencoder.Node
+	n                astiencoder.Node
 	q                *astisync.CtxQueue
+	rateEnforcer     RateEnforcer
 	restamper        FrameRestamper
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
@@ -27,7 +29,8 @@ type Switcher struct {
 
 // SwitcherOptions represents switcher options
 type SwitcherOptions struct {
-	Restamper FrameRestamper
+	RateEnforcer RateEnforcer
+	Restamper    FrameRestamper
 }
 
 // NewSwitcher creates a new switcher
@@ -40,6 +43,7 @@ func NewSwitcher(o SwitcherOptions, e *astiencoder.EventEmitter, c astiencoder.C
 			Name:        fmt.Sprintf("switcher_%d", count),
 		}),
 		q:                astisync.NewCtxQueue(),
+		rateEnforcer:     o.RateEnforcer,
 		restamper:        o.Restamper,
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
@@ -74,6 +78,9 @@ func (s *Switcher) addStats() {
 // Switch switches the source
 func (s *Switcher) Switch(n astiencoder.Node) {
 	s.n = n
+	if s.rateEnforcer != nil {
+		s.rateEnforcer.ReferencePtsChanged()
+	}
 }
 
 // Connect implements the FrameHandlerConnector interface
@@ -106,6 +113,12 @@ func (s *Switcher) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Make sure to stop the queue properly
 		defer s.q.Stop()
 
+		// Handle rate enforcer
+		if s.rateEnforcer != nil {
+			s.rateEnforcer.Start(s.Context(), s.dispatch)
+			defer s.rateEnforcer.Close()
+		}
+
 		// Start queue
 		s.q.Start(func(dp interface{}) {
 			// Handle pause
@@ -122,15 +135,24 @@ func (s *Switcher) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 				return
 			}
 
-			// Restamp frame
-			if s.restamper != nil {
-				s.restamper.Restamp(p.Frame, true)
+			// Dispatch
+			if s.rateEnforcer != nil {
+				s.rateEnforcer.Add(p.Frame, p.Descriptor)
+			} else {
+				s.dispatch(p.Frame, p.Descriptor)
 			}
-
-			// Dispatch frame
-			s.d.dispatch(p.Frame, p.Descriptor)
 		})
 	})
+}
+
+func (s *Switcher) dispatch(f *avutil.Frame, d Descriptor) {
+	// Restamp frame
+	if s.restamper != nil {
+		s.restamper.Restamp(f, true)
+	}
+
+	// Dispatch frame
+	s.d.dispatch(f, d)
 }
 
 // HandleFrame implements the FrameHandler interface
