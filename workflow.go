@@ -71,12 +71,50 @@ func (w *Workflow) indexNodesFunc(ns []Node) {
 	}
 }
 
-// Start starts the workflow
-func (w *Workflow) Start() {
-	w.start(w.nodes()...)
+// StartNodes starts nodes
+func (w *Workflow) StartNodes(ns ...Node) {
+	for _, n := range ns {
+		n.Start(w.bn.Context(), w.t.NewSubTask)
+	}
 }
 
-func (w *Workflow) start(ns ...Node) {
+// StartNodesInSubTask starts nodes in a new sub task
+func (w *Workflow) StartNodesInSubTask(ns ...Node) (t *astiworker.Task) {
+	t = w.t.NewSubTask()
+	for _, n := range ns {
+		n.Start(w.bn.Context(), t.NewSubTask)
+	}
+	return
+}
+
+// WorkflowStartOptions represents workflow start options
+type WorkflowStartOptions struct {
+	Groups []WorkflowStartGroup
+}
+
+// WorkflowStartGroup represents a workflow start group
+type WorkflowStartGroup struct {
+	Callback func(t *astiworker.Task)
+	Nodes    []Node
+}
+
+// Start starts the workflow
+func (w *Workflow) Start() {
+	w.start(w.nodes(), WorkflowStartOptions{})
+}
+
+// StartWithOptions starts the workflow with options
+func (w *Workflow) StartWithOptions(o WorkflowStartOptions) {
+	w.start(w.nodes(), o)
+}
+
+type workflowStartGroup struct {
+	fn func(t *astiworker.Task)
+	ns []Node
+	t  *astiworker.Task
+}
+
+func (w *Workflow) start(ns []Node, o WorkflowStartOptions) {
 	w.bn.Start(w.ctx, w.tf, func(t *astiworker.Task) {
 		// Log
 		astilog.Debugf("astiencoder: starting workflow %s", w.name)
@@ -84,9 +122,29 @@ func (w *Workflow) start(ns ...Node) {
 		// Store task
 		w.t = t
 
+		// Index groups
+		var gs []*workflowStartGroup
+		ngs := make(map[Node]*workflowStartGroup)
+		for _, og := range o.Groups {
+			g := &workflowStartGroup{fn: og.Callback}
+			for _, n := range og.Nodes {
+				ngs[n] = g
+			}
+			gs = append(gs, g)
+		}
+
 		// Loop through nodes
 		for _, n := range ns {
-			w.StartNode(n)
+			if g, ok := ngs[n]; ok {
+				g.ns = append(g.ns, n)
+			} else {
+				w.StartNodes(n)
+			}
+		}
+
+		// Loop through groups
+		for _, g := range gs {
+			g.t = w.StartNodesInSubTask(g.ns...)
 		}
 
 		// Send event
@@ -94,6 +152,13 @@ func (w *Workflow) start(ns ...Node) {
 			Name:    EventNameWorkflowStarted,
 			Payload: w.name,
 		})
+
+		// Execute groups callbacks
+		for _, g := range gs {
+			if g.fn != nil {
+				g.fn(g.t)
+			}
+		}
 
 		// Wait for task to be done
 		t.Wait()
@@ -109,20 +174,6 @@ func (w *Workflow) start(ns ...Node) {
 			Payload: w.name,
 		})
 	})
-}
-
-// StartNode starts a node
-func (w *Workflow) StartNode(n Node) {
-	n.Start(w.bn.Context(), w.t.NewSubTask)
-}
-
-// StartNodesInSubTask starts nodes in a new sub task
-func (w *Workflow) StartNodesInSubTask(ns ...Node) (t *astiworker.Task) {
-	t = w.t.NewSubTask()
-	for _, n := range ns {
-		n.Start(w.bn.Context(), t.NewSubTask)
-	}
-	return
 }
 
 // Stop stops the workflow

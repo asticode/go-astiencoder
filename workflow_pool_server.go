@@ -357,9 +357,9 @@ func (s *workflowPoolServer) handleNodePause() httprouter.Handle {
 func (s *workflowPoolServer) handleNodeStart() httprouter.Handle {
 	return s.handleNodeAction(func(w *Workflow, n Node) {
 		if w.Status() == StatusRunning {
-			w.StartNode(n)
+			w.StartNodes(n)
 		} else {
-			w.start(n)
+			w.start([]Node{n}, WorkflowStartOptions{})
 		}
 	})
 }
