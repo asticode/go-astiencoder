@@ -26,9 +26,6 @@ func addWorkflow(name string, j Job, e *encoder) (w *astiencoder.Workflow, err e
 		return
 	}
 
-	// Index nodes
-	w.IndexNodes()
-
 	// Add workflow to pool
 	e.wp.AddWorkflow(w)
 	return

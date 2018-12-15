@@ -2,16 +2,10 @@ package astiencoder
 
 import (
 	"context"
-	"sync"
 
 	"github.com/asticode/go-astilog"
 	"github.com/asticode/go-astitools/worker"
 	"github.com/pkg/errors"
-)
-
-// Errors
-var (
-	ErrNodeNotFound = errors.New("astiencoder: node.not.found")
 )
 
 // Workflow represents a workflow
@@ -20,9 +14,7 @@ type Workflow struct {
 	c    *Closer
 	ctx  context.Context
 	e    *EventEmitter
-	m    *sync.Mutex
 	name string
-	ns   map[string]Node
 	t    *astiworker.Task
 	tf   CreateTaskFunc
 }
@@ -38,36 +30,28 @@ func NewWorkflow(ctx context.Context, name string, e *EventEmitter, tf CreateTas
 		c:    c,
 		ctx:  ctx,
 		e:    e,
-		m:    &sync.Mutex{},
 		name: name,
-		ns:   make(map[string]Node),
 		tf:   tf,
 	}
 }
 
-// Closer returns the workflow closer
-func (w *Workflow) Closer() *Closer {
-	return w.c
+func (w *Workflow) nodes() (ns []Node) {
+	for _, n := range w.indexedNodes() {
+		ns = append(ns, n)
+	}
+	return
 }
 
-// IndexNodes indexes nodes
-func (w *Workflow) IndexNodes() {
-	// Lock
-	w.m.Lock()
-	defer w.m.Unlock()
-
-	// Index
-	w.indexNodesFunc(w.bn.Children())
+func (w *Workflow) indexedNodes() (ns map[string]Node) {
+	ns = make(map[string]Node)
+	w.indexedNodesFunc(ns, w.bn.Children())
+	return
 }
 
-func (w *Workflow) indexNodesFunc(ns []Node) {
-	// Loop through nodes
-	for _, n := range ns {
-		// Add node
-		w.ns[n.Metadata().Name] = n
-
-		// Index children nodes
-		w.indexNodesFunc(n.Children())
+func (w *Workflow) indexedNodesFunc(ns map[string]Node, children []Node) {
+	for _, n := range children {
+		ns[n.Metadata().Name] = n
+		w.indexedNodesFunc(ns, n.Children())
 	}
 }
 
@@ -250,25 +234,4 @@ func (w *Workflow) Children() []Node {
 // Status returns the workflow status
 func (w *Workflow) Status() string {
 	return w.bn.Status()
-}
-
-// Node retrieves a node from the workflow
-func (w *Workflow) Node(name string) (n Node, err error) {
-	w.m.Lock()
-	defer w.m.Unlock()
-	var ok bool
-	if n, ok = w.ns[name]; !ok {
-		err = ErrNodeNotFound
-		return
-	}
-	return
-}
-
-func (w *Workflow) nodes() (ns []Node) {
-	w.m.Lock()
-	defer w.m.Unlock()
-	for _, n := range w.ns {
-		ns = append(ns, n)
-	}
-	return
 }

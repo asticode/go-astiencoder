@@ -331,13 +331,9 @@ func (s *workflowPoolServer) handleWorkflowStart() httprouter.Handle {
 func (s *workflowPoolServer) handleNodeAction(fn func(w *Workflow, n Node)) httprouter.Handle {
 	return s.handleWorkflowAction(func(w *Workflow, rw http.ResponseWriter, p httprouter.Params) {
 		// Get node
-		n, err := w.Node(p.ByName("node"))
-		if err != nil {
-			if err == ErrNodeNotFound {
-				WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: node %s doesn't exist", p.ByName("node")))
-			} else {
-				WriteJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencoder: fetching node %s failed", p.ByName("node")))
-			}
+		n, ok := w.indexedNodes()[p.ByName("node")]
+		if !ok {
+			WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: node %s doesn't exist", p.ByName("node")))
 			return
 		}
 
