@@ -3,7 +3,6 @@ package astilibav
 import (
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiencoder"
@@ -26,7 +25,6 @@ type Filterer struct {
 	d                *frameDispatcher
 	e                *astiencoder.EventEmitter
 	g                *avfilter.Graph
-	m                *sync.Mutex
 	q                *astisync.CtxQueue
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
@@ -45,7 +43,6 @@ func NewFilterer(bufferSrcCtxs map[astiencoder.Node]*avfilter.Context, bufferSin
 		bufferSrcCtxs:    bufferSrcCtxs,
 		e:                e,
 		g:                g,
-		m:                &sync.Mutex{},
 		q:                astisync.NewCtxQueue(),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
@@ -245,9 +242,7 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			f.statIncomingRate.Add(1)
 
 			// Retrieve buffer ctx
-			f.m.Lock()
 			bufferSrcCtx, ok := f.bufferSrcCtxs[p.Node]
-			f.m.Unlock()
 			if !ok {
 				return
 			}
@@ -297,6 +292,16 @@ func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 // HandleFrame implements the FrameHandler interface
 func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
 	f.q.Send(p)
+}
+
+// SendCommand sends a command to the filterer
+func (f *Filterer) SendCommand(target, cmd, arg string, flags int) (err error) {
+	var res string
+	if ret := f.g.AvfilterGraphSendCommand(target, cmd, arg, res, 255, flags); ret < 0 {
+		err = errors.Wrapf(NewAvError(ret), "astilibav: f.g.AvfilterGraphSendCommand for target %s, cmd %s, arg %s and flag %d failed with res %s", target, cmd, arg, flags, res)
+		return
+	}
+	return
 }
 
 type filtererDescriptor struct {
