@@ -131,7 +131,7 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		var ret int
 		m.o.Do(func() { ret = m.ctxFormat.AvformatWriteHeader(nil) })
 		if ret < 0 {
-			emitAvError(m.e, ret, "m.ctxFormat.AvformatWriteHeader on %s failed", m.ctxFormat.Filename())
+			emitAvError(m, m.e, ret, "m.ctxFormat.AvformatWriteHeader on %s failed", m.ctxFormat.Filename())
 			return
 		}
 
@@ -166,7 +166,7 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			m.statWorkRatio.Add(true)
 			if ret := m.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(p.Pkt))); ret < 0 {
 				m.statWorkRatio.Done(true)
-				emitAvError(m.e, ret, "m.ctxFormat.AvInterleavedWriteFrame failed")
+				emitAvError(m, m.e, ret, "m.ctxFormat.AvInterleavedWriteFrame failed")
 				return
 			}
 			m.statWorkRatio.Done(true)

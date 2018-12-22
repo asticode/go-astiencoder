@@ -135,7 +135,7 @@ func NewEncoderFromContext(ctx Context, e astiencoder.EventEmitter, c astiencode
 	// Make sure the codec is closed
 	c.Add(func() error {
 		if ret := ctxCodec.AvcodecClose(); ret < 0 {
-			emitAvError(e, ret, "d.ctxCodec.AvcodecClose failed")
+			emitAvError(nil, e, ret, "d.ctxCodec.AvcodecClose failed")
 		}
 		return nil
 	})
@@ -234,7 +234,7 @@ func (e *Encoder) encode(p *FrameHandlerPayload) {
 	e.statWorkRatio.Add(true)
 	if ret := avcodec.AvcodecSendFrame(e.ctxCodec, p.Frame); ret < 0 {
 		e.statWorkRatio.Done(true)
-		emitAvError(e.e, ret, "avcodec.AvcodecSendFrame failed")
+		emitAvError(e, e.e, ret, "avcodec.AvcodecSendFrame failed")
 		return
 	}
 	e.statWorkRatio.Done(true)
@@ -258,7 +258,7 @@ func (e *Encoder) receivePkt(p *FrameHandlerPayload) (stop bool) {
 	if ret := avcodec.AvcodecReceivePacket(e.ctxCodec, pkt); ret < 0 {
 		e.statWorkRatio.Done(true)
 		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
-			emitAvError(e.e, ret, "avcodec.AvcodecReceivePacket failed")
+			emitAvError(e, e.e, ret, "avcodec.AvcodecReceivePacket failed")
 		}
 		stop = true
 		return

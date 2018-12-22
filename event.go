@@ -1,6 +1,7 @@
 package astiencoder
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/asticode/go-astilog"
@@ -34,10 +35,11 @@ type Event struct {
 }
 
 // EventError returns an error event
-func EventError(err error) Event {
+func EventError(target interface{}, err error) Event {
 	return Event{
 		Name:    EventNameError,
 		Payload: err,
+		Target:  target,
 	}
 }
 
@@ -58,7 +60,18 @@ func NewLoggerEventHandler() *LoggerEventHandler {
 func (h *LoggerEventHandler) HandleEvent(e Event) {
 	switch e.Name {
 	case EventNameError:
-		astilog.Error(e.Payload.(error))
+		var t string
+		if v, ok := e.Target.(Node); ok{
+			t = v.Metadata().Name
+		} else if v, ok := e.Target.(*Workflow); ok {
+			t = v.Name()
+		} else if e.Target != nil {
+			t = fmt.Sprintf("%p", e.Target)
+		}
+		if len(t) > 0 {
+			t = "(" + t + ")"
+		}
+		astilog.Errorf("%s%s", e.Payload.(error), t)
 	case EventNameNodeStarted:
 		astilog.Debugf("astiencoder: node %s is started", e.Target.(Node).Metadata().Name)
 	case EventNameNodeStopped:
@@ -78,9 +91,9 @@ type CallbackEventHandler struct {
 	// Indexed by target then by event name then by listener idx
 	// We use a map[int]Listener so that deletion is as smooth as possible
 	// It means it doesn't store listeners in order
-	cs map[interface{}]map[string]map[int]EventCallback
+	cs  map[interface{}]map[string]map[int]EventCallback
 	idx int
-	m  *sync.Mutex
+	m   *sync.Mutex
 }
 
 // NewCallbackEventHandler creates a new callback event handler

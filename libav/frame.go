@@ -92,7 +92,7 @@ func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
 		// Copy frame
 		hF := d.p.get()
 		if ret := avutil.AvFrameRef(hF, f); ret < 0 {
-			emitAvError(d.e, ret, "avutil.AvFrameRef failed")
+			emitAvError(d, d.e, ret, "avutil.AvFrameRef failed")
 			d.wg.Done()
 			continue
 		}

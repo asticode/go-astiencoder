@@ -127,7 +127,7 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 				buf := &bytes.Buffer{}
 				if err := d.t.Execute(buf, d.o.Data); err != nil {
 					d.statWorkRatio.Done(true)
-					d.e.Emit(astiencoder.EventError(errors.Wrapf(err, "astilibav: executing template %s with data %+v failed", d.o.Pattern, d.o.Data)))
+					d.e.Emit(astiencoder.EventError(d, errors.Wrapf(err, "astilibav: executing template %s with data %+v failed", d.o.Pattern, d.o.Data)))
 					return
 				}
 				d.statWorkRatio.Done(true)
@@ -140,7 +140,7 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			d.statWorkRatio.Add(true)
 			if err := d.o.Handler(p.Pkt, args); err != nil {
 				d.statWorkRatio.Done(true)
-				d.e.Emit(astiencoder.EventError(errors.Wrapf(err, "astilibav: pkt dump func with args %+v failed", args)))
+				d.e.Emit(astiencoder.EventError(d, errors.Wrapf(err, "astilibav: pkt dump func with args %+v failed", args)))
 				return
 			}
 			d.statWorkRatio.Done(true)

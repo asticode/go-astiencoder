@@ -27,7 +27,7 @@ func TestEvent(t *testing.T) {
 		Name:    "1",
 		Payload: "1",
 	}
-	e2 := EventError(errors.New("2"))
+	e2 := EventError(nil, errors.New("2"))
 	ee.Emit(e1)
 	ee.Emit(e2)
 	assert.Equal(t, []Event{e1, e2}, h.es)

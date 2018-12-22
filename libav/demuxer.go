@@ -234,13 +234,13 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 		d.statWorkRatio.Done(true)
 		if ret != avutil.AVERROR_EOF || !d.loop {
 			if ret != avutil.AVERROR_EOF {
-				emitAvError(d.e, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
+				emitAvError(d, d.e, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
 			}
 			stop = true
 		} else if d.loopFirstPkt != nil {
 			// Seek to first pkt
 			if ret = d.ctxFormat.AvSeekFrame(d.loopFirstPkt.s.Index(), d.loopFirstPkt.dts, avformat.AVSEEK_FLAG_BACKWARD); ret < 0 {
-				emitAvError(d.e, ret, "ctxFormat.AvSeekFrame on %s with stream idx %v and ts %v failed", d.ctxFormat.Filename(), d.loopFirstPkt.s.Index(), d.loopFirstPkt.dts)
+				emitAvError(d, d.e, ret, "ctxFormat.AvSeekFrame on %s with stream idx %v and ts %v failed", d.ctxFormat.Filename(), d.loopFirstPkt.s.Index(), d.loopFirstPkt.dts)
 				stop = true
 			}
 		}

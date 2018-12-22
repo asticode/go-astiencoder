@@ -251,7 +251,7 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			f.statWorkRatio.Add(true)
 			if ret := f.g.AvBuffersrcAddFrameFlags(bufferSrcCtx, p.Frame, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
 				f.statWorkRatio.Done(true)
-				emitAvError(f.e, ret, "f.g.AvBuffersrcAddFrameFlags failed")
+				emitAvError(f, f.e, ret, "f.g.AvBuffersrcAddFrameFlags failed")
 				return
 			}
 			f.statWorkRatio.Done(true)
@@ -277,7 +277,7 @@ func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 	if ret := f.g.AvBuffersinkGetFrame(f.bufferSinkCtx, fm); ret < 0 {
 		f.statWorkRatio.Done(true)
 		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
-			emitAvError(f.e, ret, "f.g.AvBuffersinkGetFrame failed")
+			emitAvError(f, f.e, ret, "f.g.AvBuffersinkGetFrame failed")
 		}
 		stop = true
 		return

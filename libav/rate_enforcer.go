@@ -176,7 +176,7 @@ func (r *RateEnforcer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) 
 
 			// Copy frame
 			if ret := avutil.AvFrameRef(i.f, p.Frame); ret < 0 {
-				emitAvError(r.e, ret, "avutil.AvFrameRef failed")
+				emitAvError(r, r.e, ret, "avutil.AvFrameRef failed")
 				return
 			}
 
@@ -333,7 +333,7 @@ func (r *RateEnforcer) current() (i *rateEnforcerItem, previous bool) {
 
 		// Copy frame
 		if ret := avutil.AvFrameRef(r.previousItem.f, i.f); ret < 0 {
-			emitAvError(r.e, ret, "avutil.AvFrameRef failed")
+			emitAvError(r, r.e, ret, "avutil.AvFrameRef failed")
 			r.p.put(r.previousItem.f)
 			r.previousItem = nil
 		}
