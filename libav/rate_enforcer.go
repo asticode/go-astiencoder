@@ -2,126 +2,207 @@ package astilibav
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astitools/time"
+
+	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astitools/stat"
+	"github.com/asticode/go-astitools/sync"
+	"github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avutil"
 )
 
-// RateEnforcer represents an object that can enforce rate
-type RateEnforcer interface {
-	Add(f *avutil.Frame, d Descriptor)
-	Close()
-	ReferencePtsChanged()
-	Start(ctx context.Context, fn func(f *avutil.Frame, d Descriptor))
-}
+var countRateEnforcer uint64
 
-// RateEnforcerDefault represents the default rate enforcer
-type RateEnforcerDefault struct {
-	buf             []*rateEnforcerItem
-	c               *astiencoder.Closer
-	e               *astiencoder.EventEmitter
-	m               *sync.Mutex
-	p               *framePool
-	period          time.Duration
-	previousItem    *rateEnforcerItem
-	referencePtsIdx int
-	slotsCount      int
-	slots           []*rateEnforcerSlot
-	timeBase        avutil.Rational
+// RateEnforcer represents an object capable of enforcing rate when switching between multiple inputs
+type RateEnforcer struct {
+	*astiencoder.BaseNode
+	buf              []*rateEnforcerItem
+	d                *frameDispatcher
+	e                *astiencoder.EventEmitter
+	m                *sync.Mutex
+	n                astiencoder.Node
+	p                *framePool
+	period           time.Duration
+	previousItem     *rateEnforcerItem
+	q                *astisync.CtxQueue
+	restamper        FrameRestamper
+	slotsCount       int
+	slots            []*rateEnforcerSlot
+	statIncomingRate *astistat.IncrementStat
+	statWorkRatio    *astistat.DurationRatioStat
+	timeBase         avutil.Rational
 }
 
 type rateEnforcerSlot struct {
-	d               Descriptor
-	i               *rateEnforcerItem
-	referencePtsIdx int
-	ptsMax          int64
-	ptsMin          int64
+	i      *rateEnforcerItem
+	n      astiencoder.Node
+	ptsMax int64
+	ptsMin int64
 }
 
 type rateEnforcerItem struct {
-	d               Descriptor
-	f               *avutil.Frame
-	referencePtsIdx int
+	d Descriptor
+	f *avutil.Frame
+	n astiencoder.Node
 }
 
-// NewRateEnforcerDefault creates a new default rate enforcer
-func NewRateEnforcerDefault(frameRate avutil.Rational, framesDelay int, e *astiencoder.EventEmitter) (r *RateEnforcerDefault) {
-	r = &RateEnforcerDefault{
-		c:          astiencoder.NewCloser(),
-		e:          e,
-		m:          &sync.Mutex{},
-		period:     time.Duration(float64(1e9) / frameRate.ToDouble()),
-		slotsCount: int(math.Max(float64(framesDelay), 1)),
-		slots:      []*rateEnforcerSlot{nil},
-		timeBase:   avutil.NewRational(frameRate.Den(), frameRate.Num()),
+// RateEnforcerOptions represents rate enforcer options
+type RateEnforcerOptions struct {
+	Delay     int
+	FrameRate avutil.Rational
+	Restamper FrameRestamper
+}
+
+// NewRateEnforcer creates a new rate enforcer
+func NewRateEnforcer(o RateEnforcerOptions, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (r *RateEnforcer) {
+	count := atomic.AddUint64(&countRateEnforcer, uint64(1))
+	r = &RateEnforcer{
+		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
+			Description: "Rate Enforcer",
+			Label:       fmt.Sprintf("Rate Enforcer #%d", count),
+			Name:        fmt.Sprintf("rate_enforcer_%d", count),
+		}),
+		e:                e,
+		m:                &sync.Mutex{},
+		p:                newFramePool(c),
+		period:           time.Duration(float64(1e9) / o.FrameRate.ToDouble()),
+		q:                astisync.NewCtxQueue(),
+		restamper:        o.Restamper,
+		slots:            []*rateEnforcerSlot{nil},
+		slotsCount:       int(math.Max(float64(o.Delay), 1)),
+		statIncomingRate: astistat.NewIncrementStat(),
+		statWorkRatio:    astistat.NewDurationRatioStat(),
+		timeBase:         avutil.NewRational(o.FrameRate.Den(), o.FrameRate.Num()),
 	}
-	r.p = newFramePool(r.c)
+	r.d = newFrameDispatcher(r, e, c)
+	r.addStats()
 	return
 }
 
-// Close implements the RateEnforcer interface
-func (r *RateEnforcerDefault) Close() {
-	r.c.Close()
+func (r *RateEnforcer) addStats() {
+	// Add incoming rate
+	r.Stater().AddStat(astistat.StatMetadata{
+		Description: "Number of frames coming in per second",
+		Label:       "Incoming rate",
+		Unit:        "fps",
+	}, r.statIncomingRate)
+
+	// Add work ratio
+	r.Stater().AddStat(astistat.StatMetadata{
+		Description: "Percentage of time spent doing some actual work",
+		Label:       "Work ratio",
+		Unit:        "%",
+	}, r.statWorkRatio)
+
+	// Add dispatcher stats
+	r.d.addStats(r.Stater())
+
+	// Add queue stats
+	r.q.AddStats(r.Stater())
 }
 
-// ReferencePtsChanged implements the RateEnforcer interface
-func (r *RateEnforcerDefault) ReferencePtsChanged() {
+// Switch switches the source
+func (r *RateEnforcer) Switch(n astiencoder.Node) {
 	r.m.Lock()
 	defer r.m.Unlock()
-	r.referencePtsIdx++
+	r.n = n
 }
 
-func (r *RateEnforcerDefault) nextPts(pts int64, timeBase avutil.Rational) int64 {
-	return pts + int64(r.timeBase.ToDouble()/timeBase.ToDouble())
+// Connect implements the FrameHandlerConnector interface
+func (r *RateEnforcer) Connect(h FrameHandler) {
+	// Add handler
+	r.d.addHandler(h)
+
+	// Connect nodes
+	astiencoder.ConnectNodes(r, h)
 }
 
-func (r *RateEnforcerDefault) newRateEnforcerSlot(pts int64, d Descriptor, referencePtsIdx int) *rateEnforcerSlot {
+// Disconnect implements the FrameHandlerConnector interface
+func (r *RateEnforcer) Disconnect(h FrameHandler) {
+	// Delete handler
+	r.d.delHandler(h)
+
+	// Disconnect nodes
+	astiencoder.DisconnectNodes(r, h)
+}
+
+// Start starts the rate enforcer
+func (r *RateEnforcer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
+	r.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
+		// Handle context
+		go r.q.HandleCtx(r.Context())
+
+		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
+		defer r.d.wait()
+
+		// Make sure to stop the queue properly
+		defer r.q.Stop()
+
+		// Start tick
+		r.startTick(r.Context())
+
+		// Start queue
+		r.q.Start(func(dp interface{}) {
+			// Handle pause
+			defer r.HandlePause()
+
+			// Assert payload
+			p := dp.(*FrameHandlerPayload)
+
+			// Increment incoming rate
+			r.statIncomingRate.Add(1)
+
+			// Lock
+			r.m.Lock()
+			defer r.m.Unlock()
+
+			// We update the last slot if:
+			//   - there are no slots
+			//   - the node of the last slot is different from the desired node AND the payload's node is the desired
+			//   node. That way, if the desired node doesn't frames for some time, we fallback to the previous node
+			//   instead of the previous item
+			if r.slots[len(r.slots)-1] == nil || (r.n != r.slots[len(r.slots)-1].n && r.n == p.Node) {
+				r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(p)
+			}
+
+			// Create item
+			i := r.newRateEnforcerItem(p)
+
+			// Copy frame
+			if ret := avutil.AvFrameRef(i.f, p.Frame); ret < 0 {
+				emitAvError(r.e, ret, "avutil.AvFrameRef failed")
+				return
+			}
+
+			// Append item
+			r.buf = append(r.buf, i)
+		})
+	})
+}
+
+func (r *RateEnforcer) newRateEnforcerSlot(p *FrameHandlerPayload) *rateEnforcerSlot {
 	return &rateEnforcerSlot{
-		d:               d,
-		referencePtsIdx: referencePtsIdx,
-		ptsMax:          r.nextPts(pts, d.TimeBase()),
-		ptsMin:          pts,
+		n:      r.n,
+		ptsMax: p.Frame.Pts() + int64(r.timeBase.ToDouble()/p.Descriptor.TimeBase().ToDouble()),
+		ptsMin: p.Frame.Pts(),
 	}
 }
 
-func (r *RateEnforcerDefault) newRateEnforcerItem(d Descriptor) *rateEnforcerItem {
+func (r *RateEnforcer) newRateEnforcerItem(p *FrameHandlerPayload) *rateEnforcerItem {
 	return &rateEnforcerItem{
-		d:               d,
-		referencePtsIdx: r.referencePtsIdx,
-		f:               r.p.get(),
+		d: p.Descriptor,
+		f: r.p.get(),
+		n: p.Node,
 	}
 }
 
-// Add implements the RateEnforcer interface
-func (r *RateEnforcerDefault) Add(f *avutil.Frame, d Descriptor) {
-	// Lock
-	r.m.Lock()
-	defer r.m.Unlock()
-
-	// Stream changed
-	if r.slots[len(r.slots)-1] == nil || r.referencePtsIdx > r.slots[len(r.slots)-1].referencePtsIdx {
-		r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(f.Pts(), d, r.referencePtsIdx)
-	}
-
-	// Create item
-	i := r.newRateEnforcerItem(d)
-
-	// Copy frame
-	if ret := avutil.AvFrameRef(i.f, f); ret < 0 {
-		emitAvError(r.e, ret, "avutil.AvFrameRef failed")
-		return
-	}
-
-	// Append item
-	r.buf = append(r.buf, i)
-}
-
-// Start implements the RateEnforcer interface
-func (r *RateEnforcerDefault) Start(ctx context.Context, fn func(f *avutil.Frame, d Descriptor)) {
+func (r *RateEnforcer) startTick(ctx context.Context) {
 	go func() {
 		nextAt := time.Now()
 		for {
@@ -147,7 +228,7 @@ func (r *RateEnforcerDefault) Start(ctx context.Context, fn func(f *avutil.Frame
 				defer func() {
 					var s *rateEnforcerSlot
 					if ps := r.slots[len(r.slots)-1]; ps != nil {
-						s = r.newRateEnforcerSlot(ps.ptsMax, ps.d, ps.referencePtsIdx)
+						s = ps.next()
 					}
 					r.slots = append(r.slots, s)
 				}()
@@ -163,7 +244,13 @@ func (r *RateEnforcerDefault) Start(ctx context.Context, fn func(f *avutil.Frame
 				// Dispatch
 				i, previous := r.current()
 				if i != nil {
-					fn(i.f, i.d)
+					// Restamp frame
+					if r.restamper != nil {
+						r.restamper.Restamp(i.f, true)
+					}
+
+					// Dispatch frame
+					r.d.dispatch(i.f, i.d)
 				}
 
 				// Remove first slot
@@ -176,7 +263,22 @@ func (r *RateEnforcerDefault) Start(ctx context.Context, fn func(f *avutil.Frame
 	}()
 }
 
-func (r *RateEnforcerDefault) distribute() {
+func (s *rateEnforcerSlot) next() *rateEnforcerSlot {
+	return &rateEnforcerSlot{
+		n:      s.n,
+		ptsMin: s.ptsMax,
+		ptsMax: s.ptsMax - s.ptsMin + s.ptsMax,
+	}
+}
+func (r *RateEnforcer) distribute() {
+	// Get useful nodes
+	ns := make(map[astiencoder.Node]bool)
+	for _, s := range r.slots {
+		if s != nil && s.n != nil {
+			ns[s.n] = true
+		}
+	}
+
 	// Loop through slots
 	for _, s := range r.slots {
 		// Slot is empty or already has an item
@@ -186,10 +288,13 @@ func (r *RateEnforcerDefault) distribute() {
 
 		// Loop through buffer
 		for idx := 0; idx < len(r.buf); idx++ {
-			// Not the same stream idx
-			if r.buf[idx].referencePtsIdx != s.referencePtsIdx {
-				if r.buf[idx].referencePtsIdx < s.referencePtsIdx {
+			// Not the same node
+			if r.buf[idx].n != s.n {
+				// Node is useless
+				if _, ok := ns[r.buf[idx].n]; !ok {
+					r.p.put(r.buf[idx].f)
 					r.buf = append(r.buf[:idx], r.buf[idx+1:]...)
+					idx--
 				}
 				continue
 			}
@@ -198,17 +303,19 @@ func (r *RateEnforcerDefault) distribute() {
 			if s.ptsMin <= r.buf[idx].f.Pts() && s.ptsMax > r.buf[idx].f.Pts() {
 				s.i = r.buf[idx]
 				r.buf = append(r.buf[:idx], r.buf[idx+1:]...)
+				idx--
 				continue
 			} else if s.ptsMin > r.buf[idx].f.Pts() {
 				r.p.put(r.buf[idx].f)
 				r.buf = append(r.buf[:idx], r.buf[idx+1:]...)
+				idx--
 				continue
 			}
 		}
 	}
 }
 
-func (r *RateEnforcerDefault) current() (i *rateEnforcerItem, previous bool) {
+func (r *RateEnforcer) current() (i *rateEnforcerItem, previous bool) {
 	if r.slots[0] != nil && r.slots[0].i != nil {
 		// Get item
 		i = r.slots[0].i
@@ -235,4 +342,9 @@ func (r *RateEnforcerDefault) current() (i *rateEnforcerItem, previous bool) {
 		previous = true
 	}
 	return
+}
+
+// HandleFrame implements the FrameHandler interface
+func (r *RateEnforcer) HandleFrame(p *FrameHandlerPayload) {
+	r.q.Send(p)
 }
