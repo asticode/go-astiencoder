@@ -38,37 +38,38 @@ func EventError(err error) Event {
 	}
 }
 
-// LoggerEventHandler is the logger event handler
-var LoggerEventHandler = EventHandlerOptions{
-	Blocking: true,
-	Handler: func(e Event) {
-		switch e.Name {
-		case EventNameError:
-			astilog.Error(e.Payload.(error))
-		case EventNameNodeStarted:
-			astilog.Debugf("astiencoder: node %s is started", e.Payload.(Node).Metadata().Name)
-		case EventNameNodeStopped:
-			astilog.Debugf("astiencoder: node %s is stopped", e.Payload.(Node).Metadata().Name)
-		case EventNameWorkflowStarted:
-			astilog.Debugf("astiencoder: workflow %s is started", e.Payload.(*Workflow).Name())
-		case EventNameWorkflowStopped:
-			astilog.Debugf("astiencoder: workflow %s is stopped", e.Payload.(*Workflow).Name())
-		}
-	},
+// EventHandler represents an object that can handle events
+type EventHandler interface {
+	HandleEvent(e Event)
 }
 
-// EventHandler returns a method that can handle events coming out of the encoder
-type EventHandler func(e Event)
+// LoggerEventHandler represents then logger event handler
+type LoggerEventHandler struct {}
 
-// EventHandlerOptions represents event handler options
-type EventHandlerOptions struct {
-	Blocking bool
-	Handler  EventHandler
+// NewLoggerEventHandler creates a new event handler
+func NewLoggerEventHandler() *LoggerEventHandler {
+	return &LoggerEventHandler{}
+}
+
+// Handle implements the EventHandler interface
+func (h *LoggerEventHandler) HandleEvent(e Event) {
+	switch e.Name {
+	case EventNameError:
+		astilog.Error(e.Payload.(error))
+	case EventNameNodeStarted:
+		astilog.Debugf("astiencoder: node %s is started", e.Payload.(Node).Metadata().Name)
+	case EventNameNodeStopped:
+		astilog.Debugf("astiencoder: node %s is stopped", e.Payload.(Node).Metadata().Name)
+	case EventNameWorkflowStarted:
+		astilog.Debugf("astiencoder: workflow %s is started", e.Payload.(*Workflow).Name())
+	case EventNameWorkflowStopped:
+		astilog.Debugf("astiencoder: workflow %s is stopped", e.Payload.(*Workflow).Name())
+	}
 }
 
 // EventEmitter represents an object capable of emitting events
 type EventEmitter struct {
-	hs []EventHandlerOptions
+	hs []EventHandler
 	m  *sync.Mutex
 }
 
@@ -78,10 +79,10 @@ func NewEventEmitter() *EventEmitter {
 }
 
 // AddHandler adds a new handler
-func (e *EventEmitter) AddHandler(o EventHandlerOptions) {
+func (e *EventEmitter) AddHandler(h EventHandler) {
 	e.m.Lock()
 	defer e.m.Unlock()
-	e.hs = append(e.hs, o)
+	e.hs = append(e.hs, h)
 }
 
 // Emit emits a new event
@@ -89,11 +90,7 @@ func (e *EventEmitter) Emit(evt Event) {
 	e.m.Lock()
 	defer e.m.Unlock()
 	for _, h := range e.hs {
-		if h.Blocking {
-			h.Handler(evt)
-		} else {
-			go h.Handler(evt)
-		}
+		h.HandleEvent(evt)
 	}
 }
 

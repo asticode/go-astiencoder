@@ -44,7 +44,7 @@ func main() {
 	ee := astiencoder.NewEventEmitter()
 
 	// Add logger event handler
-	ee.AddHandler(astiencoder.LoggerEventHandler)
+	ee.AddHandler(astiencoder.NewLoggerEventHandler())
 
 	// Create workflow pool
 	wp := astiencoder.NewWorkflowPool()

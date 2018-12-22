@@ -15,17 +15,14 @@ func newMockedEventHandler() *mockedEventHandler {
 	return &mockedEventHandler{}
 }
 
-func (h *mockedEventHandler) handleEvent(e Event) {
+func (h *mockedEventHandler) HandleEvent(e Event) {
 	h.es = append(h.es, e)
 }
 
 func TestEvent(t *testing.T) {
 	ee := NewEventEmitter()
 	h := newMockedEventHandler()
-	ee.AddHandler(EventHandlerOptions{
-		Blocking: true,
-		Handler: h.handleEvent,
-	})
+	ee.AddHandler(h)
 	e1 := Event{
 		Name:    "1",
 		Payload: "1",

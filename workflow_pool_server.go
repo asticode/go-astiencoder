@@ -396,7 +396,8 @@ func (s *workflowPoolServer) handleWebsocketPing(c *astiws.Client, eventName str
 	return nil
 }
 
-func (s *workflowPoolServer) handleEvent(e Event) {
+// HandleEvent implements the EventHandler interface
+func (s *workflowPoolServer) HandleEvent(e Event) {
 	var p interface{}
 	switch e.Name {
 	case EventNameError:

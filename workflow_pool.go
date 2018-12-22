@@ -66,7 +66,7 @@ func (wp *WorkflowPool) Serve(ee *EventEmitter, pathWeb string, fn func(http.Han
 	}
 
 	// Handle events
-	ee.AddHandler(EventHandlerOptions{Handler: s.handleEvent})
+	ee.AddHandler(s)
 
 	// Serve
 	fn(s.handler())

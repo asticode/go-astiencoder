@@ -25,11 +25,12 @@ func newEncoder(c *ConfigurationEncoder, ee *astiencoder.EventEmitter, wp *astie
 		wp:        wp,
 		wsStarted: make(map[string]bool),
 	}
-	e.ee.AddHandler(astiencoder.EventHandlerOptions{Handler: e.handleEvents})
+	e.ee.AddHandler(e)
 	return
 }
 
-func (e *encoder) handleEvents(evt astiencoder.Event) {
+// HandleEvent implements the EventHandler interface
+func (e *encoder) HandleEvent(evt astiencoder.Event) {
 	switch evt.Name {
 	case astiencoder.EventNameWorkflowStarted:
 		e.m.Lock()
