@@ -18,6 +18,10 @@ var (
 	EventNameWorkflowPaused    = "workflow.paused"
 	EventNameWorkflowStarted   = "workflow.started"
 	EventNameWorkflowStopped   = "workflow.stopped"
+	EventTypeContinued         = "continued"
+	EventTypePaused            = "paused"
+	EventTypeStarted           = "started"
+	EventTypeStopped           = "stopped"
 )
 
 // Event is an event coming out of the encoder
@@ -42,13 +46,13 @@ var LoggerEventHandler = EventHandlerOptions{
 		case EventNameError:
 			astilog.Error(e.Payload.(error))
 		case EventNameNodeStarted:
-			astilog.Debugf("astiencoder: node %s is started", e.Payload.(string))
+			astilog.Debugf("astiencoder: node %s is started", e.Payload.(Node).Metadata().Name)
 		case EventNameNodeStopped:
-			astilog.Debugf("astiencoder: node %s is stopped", e.Payload.(string))
+			astilog.Debugf("astiencoder: node %s is stopped", e.Payload.(Node).Metadata().Name)
 		case EventNameWorkflowStarted:
-			astilog.Debugf("astiencoder: workflow %s is started", e.Payload.(string))
+			astilog.Debugf("astiencoder: workflow %s is started", e.Payload.(*Workflow).Name())
 		case EventNameWorkflowStopped:
-			astilog.Debugf("astiencoder: workflow %s is stopped", e.Payload.(string))
+			astilog.Debugf("astiencoder: workflow %s is stopped", e.Payload.(*Workflow).Name())
 		}
 	},
 }
@@ -90,5 +94,62 @@ func (e *EventEmitter) Emit(evt Event) {
 		} else {
 			go h.Handler(evt)
 		}
+	}
+}
+
+// EventGenerator represents an object capable of generating an event based on its type
+type EventGenerator interface {
+	Event(eventType string) Event
+}
+
+// EventGeneratorNode represents a node event generator
+type EventGeneratorNode struct {
+	n Node
+}
+
+// NewEventGeneratorNode creates a new node event generator
+func NewEventGeneratorNode(n Node) *EventGeneratorNode {
+	return &EventGeneratorNode{n: n}
+}
+
+// Event implements the EventGenerator interface
+func (g EventGeneratorNode) Event(eventType string) Event {
+	switch eventType {
+	case EventTypeContinued:
+		return Event{Name: EventNameNodeContinued, Payload: g.n}
+	case EventTypePaused:
+		return Event{Name: EventNameNodePaused, Payload: g.n}
+	case EventTypeStarted:
+		return Event{Name: EventNameNodeStarted, Payload: g.n}
+	case EventTypeStopped:
+		return Event{Name: EventNameNodeStopped, Payload: g.n}
+	default:
+		return Event{}
+	}
+}
+
+// EventGeneratorWorkflow represents a workflow event generator
+type EventGeneratorWorkflow struct {
+	w *Workflow
+}
+
+// NewEventGeneratorWorkflow creates a new workflow event generator
+func NewEventGeneratorWorkflow(w *Workflow) *EventGeneratorWorkflow {
+	return &EventGeneratorWorkflow{w: w}
+}
+
+// Event implements the EventGenerator interface
+func (g EventGeneratorWorkflow) Event(eventType string) Event {
+	switch eventType {
+	case EventTypeContinued:
+		return Event{Name: EventNameWorkflowContinued, Payload: g.w}
+	case EventTypePaused:
+		return Event{Name: EventNameWorkflowPaused, Payload: g.w}
+	case EventTypeStarted:
+		return Event{Name: EventNameWorkflowStarted, Payload: g.w}
+	case EventTypeStopped:
+		return Event{Name: EventNameWorkflowStopped, Payload: g.w}
+	default:
+		return Event{}
 	}
 }

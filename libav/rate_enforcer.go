@@ -63,11 +63,6 @@ type RateEnforcerOptions struct {
 func NewRateEnforcer(o RateEnforcerOptions, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (r *RateEnforcer) {
 	count := atomic.AddUint64(&countRateEnforcer, uint64(1))
 	r = &RateEnforcer{
-		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
-			Description: "Rate Enforcer",
-			Label:       fmt.Sprintf("Rate Enforcer #%d", count),
-			Name:        fmt.Sprintf("rate_enforcer_%d", count),
-		}),
 		e:                e,
 		m:                &sync.Mutex{},
 		p:                newFramePool(c),
@@ -80,6 +75,11 @@ func NewRateEnforcer(o RateEnforcerOptions, e *astiencoder.EventEmitter, c astie
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 		timeBase:         avutil.NewRational(o.FrameRate.Den(), o.FrameRate.Num()),
 	}
+	r.BaseNode = astiencoder.NewBaseNode(astiencoder.NewEventGeneratorNode(r), e, astiencoder.NodeMetadata{
+		Description: "Rate Enforcer",
+		Label:       fmt.Sprintf("Rate Enforcer #%d", count),
+		Name:        fmt.Sprintf("rate_enforcer_%d", count),
+	})
 	r.d = newFrameDispatcher(r, e, c)
 	r.addStats()
 	return

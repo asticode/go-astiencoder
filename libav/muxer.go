@@ -43,11 +43,6 @@ func NewMuxer(o MuxerOptions, e *astiencoder.EventEmitter, c astiencoder.CloseFu
 	// Create muxer
 	count := atomic.AddUint64(&countMuxer, uint64(1))
 	m = &Muxer{
-		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
-			Description: fmt.Sprintf("Muxes to %s", o.URL),
-			Label:       fmt.Sprintf("Muxer #%d", count),
-			Name:        fmt.Sprintf("muxer_%d", count),
-		}),
 		c:                c,
 		e:                e,
 		o:                &sync.Once{},
@@ -56,6 +51,11 @@ func NewMuxer(o MuxerOptions, e *astiencoder.EventEmitter, c astiencoder.CloseFu
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
+	m.BaseNode = astiencoder.NewBaseNode(astiencoder.NewEventGeneratorNode(m), e, astiencoder.NodeMetadata{
+		Description: fmt.Sprintf("Muxes to %s", o.URL),
+		Label:       fmt.Sprintf("Muxer #%d", count),
+		Name:        fmt.Sprintf("muxer_%d", count),
+	})
 
 	// Alloc format context
 	var ctxFormat *avformat.Context

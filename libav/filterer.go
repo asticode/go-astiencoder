@@ -34,11 +34,6 @@ type Filterer struct {
 func NewFilterer(bufferSrcCtxs map[astiencoder.Node]*avfilter.Context, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (f *Filterer) {
 	count := atomic.AddUint64(&countFilterer, uint64(1))
 	f = &Filterer{
-		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
-			Description: "Filters",
-			Label:       fmt.Sprintf("Filterer #%d", count),
-			Name:        fmt.Sprintf("filterer_%d", count),
-		}),
 		bufferSinkCtx:    bufferSinkCtx,
 		bufferSrcCtxs:    bufferSrcCtxs,
 		e:                e,
@@ -47,6 +42,11 @@ func NewFilterer(bufferSrcCtxs map[astiencoder.Node]*avfilter.Context, bufferSin
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
+	f.BaseNode = astiencoder.NewBaseNode(astiencoder.NewEventGeneratorNode(f), e, astiencoder.NodeMetadata{
+		Description: "Filters",
+		Label:       fmt.Sprintf("Filterer #%d", count),
+		Name:        fmt.Sprintf("filterer_%d", count),
+	})
 	f.d = newFrameDispatcher(f, e, c)
 	f.addStats()
 	return

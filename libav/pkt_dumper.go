@@ -49,17 +49,17 @@ func NewPktDumper(o PktDumperOptions, e *astiencoder.EventEmitter) (d *PktDumper
 	// Create pkt dumper
 	count := atomic.AddUint64(&countPktDumper, uint64(1))
 	d = &PktDumper{
-		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
-			Description: "Dump packets",
-			Label:       fmt.Sprintf("Pkt dumper #%d", count),
-			Name:        fmt.Sprintf("pkt_dumper_%d", count),
-		}),
 		e:                e,
 		o:                o,
 		q:                astisync.NewCtxQueue(),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
+	d.BaseNode = astiencoder.NewBaseNode(astiencoder.NewEventGeneratorNode(d), e, astiencoder.NodeMetadata{
+		Description: "Dump packets",
+		Label:       fmt.Sprintf("Pkt dumper #%d", count),
+		Name:        fmt.Sprintf("pkt_dumper_%d", count),
+	})
 	d.addStats()
 
 	// Parse pattern

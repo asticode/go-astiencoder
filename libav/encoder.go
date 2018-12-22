@@ -35,11 +35,6 @@ type Encoder struct {
 func NewEncoder(ctxCodec *avcodec.Context, ee *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (e *Encoder) {
 	count := atomic.AddUint64(&countEncoder, uint64(1))
 	e = &Encoder{
-		BaseNode: astiencoder.NewBaseNode(ee, astiencoder.NodeMetadata{
-			Description: "Encodes",
-			Label:       fmt.Sprintf("Encoder #%d", count),
-			Name:        fmt.Sprintf("encoder_%d", count),
-		}),
 		ctxCodec:         ctxCodec,
 		d:                newPktDispatcher(c),
 		e:                ee,
@@ -47,6 +42,11 @@ func NewEncoder(ctxCodec *avcodec.Context, ee *astiencoder.EventEmitter, c astie
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
+	e.BaseNode = astiencoder.NewBaseNode(astiencoder.NewEventGeneratorNode(e), ee, astiencoder.NodeMetadata{
+		Description: "Encodes",
+		Label:       fmt.Sprintf("Encoder #%d", count),
+		Name:        fmt.Sprintf("encoder_%d", count),
+	})
 	e.addStats()
 	return
 }

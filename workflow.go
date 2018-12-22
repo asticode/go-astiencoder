@@ -3,7 +3,6 @@ package astiencoder
 import (
 	"context"
 
-	"github.com/asticode/go-astilog"
 	"github.com/asticode/go-astitools/worker"
 	"github.com/pkg/errors"
 )
@@ -20,19 +19,25 @@ type Workflow struct {
 }
 
 // NewWorkflow creates a new workflow
-func NewWorkflow(ctx context.Context, name string, e *EventEmitter, tf CreateTaskFunc, c *Closer) *Workflow {
-	return &Workflow{
-		bn: NewBaseNode(nil, NodeMetadata{
-			Description: "root",
-			Label:       "root",
-			Name:        "root",
-		}),
+func NewWorkflow(ctx context.Context, name string, e *EventEmitter, tf CreateTaskFunc, c *Closer) (w *Workflow) {
+	w = &Workflow{
 		c:    c,
 		ctx:  ctx,
 		e:    e,
 		name: name,
 		tf:   tf,
 	}
+	w.bn = NewBaseNode(NewEventGeneratorWorkflow(w), e, NodeMetadata{
+		Description: "root",
+		Label:       "root",
+		Name:        "root",
+	})
+	return
+}
+
+// Name returns the workflow name
+func (w *Workflow) Name() string {
+	return w.name
 }
 
 func (w *Workflow) nodes() (ns []Node) {
@@ -100,9 +105,6 @@ type workflowStartGroup struct {
 
 func (w *Workflow) start(ns []Node, o WorkflowStartOptions) {
 	w.bn.Start(w.ctx, w.tf, func(t *astiworker.Task) {
-		// Log
-		astilog.Debugf("astiencoder: starting workflow %s", w.name)
-
 		// Store task
 		w.t = t
 
@@ -131,12 +133,6 @@ func (w *Workflow) start(ns []Node, o WorkflowStartOptions) {
 			g.t = w.StartNodesInSubTask(g.ns...)
 		}
 
-		// Send event
-		w.e.Emit(Event{
-			Name:    EventNameWorkflowStarted,
-			Payload: w.name,
-		})
-
 		// Execute groups callbacks
 		for _, g := range gs {
 			if g.fn != nil {
@@ -151,68 +147,29 @@ func (w *Workflow) start(ns []Node, o WorkflowStartOptions) {
 		if err := w.c.Close(); err != nil {
 			w.e.Emit(EventError(errors.Wrapf(err, "astiencoder: closing workflow %s failed", w.name)))
 		}
-
-		// Send event
-		w.e.Emit(Event{
-			Name:    EventNameWorkflowStopped,
-			Payload: w.name,
-		})
 	})
 }
 
 // Stop stops the workflow
 func (w *Workflow) Stop() {
-	astilog.Debugf("astiencoder: stopping workflow %s", w.name)
 	w.bn.Stop()
 }
 
 // Pause pauses the workflow
 func (w *Workflow) Pause() {
-	// Workflow is not running
-	if w.bn.Status() != StatusRunning {
-		return
-	}
-
-	// Pause
-	astilog.Debugf("astiencoder: pausing workflow %s", w.name)
-	for _, n := range w.nodes() {
-		n.Pause()
-	}
-
-	// Update status
-	w.bn.m.Lock()
-	w.bn.status = StatusPaused
-	w.bn.m.Unlock()
-
-	// Send event
-	w.e.Emit(Event{
-		Name:    EventNameWorkflowPaused,
-		Payload: w.name,
+	w.bn.pause(func() {
+		for _, n := range w.nodes() {
+			n.Pause()
+		}
 	})
 }
 
 // Continue continues the workflow
 func (w *Workflow) Continue() {
-	// Workflow is not paused
-	if w.bn.Status() != StatusPaused {
-		return
-	}
-
-	// Continue
-	astilog.Debugf("astiencoder: continuing workflow %s", w.name)
-	for _, n := range w.nodes() {
-		n.Continue()
-	}
-
-	// Update status
-	w.bn.m.Lock()
-	w.bn.status = StatusRunning
-	w.bn.m.Unlock()
-
-	// Send event
-	w.e.Emit(Event{
-		Name:    EventNameWorkflowStarted,
-		Payload: w.name,
+	w.bn.continuE(func() {
+		for _, n := range w.nodes() {
+			n.Continue()
+		}
 	})
 }
 

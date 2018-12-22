@@ -31,17 +31,17 @@ type Decoder struct {
 func NewDecoder(ctxCodec *avcodec.Context, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (d *Decoder) {
 	count := atomic.AddUint64(&countDecoder, uint64(1))
 	d = &Decoder{
-		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
-			Description: "Decodes",
-			Label:       fmt.Sprintf("Decoder #%d", count),
-			Name:        fmt.Sprintf("decoder_%d", count),
-		}),
 		ctxCodec:         ctxCodec,
 		e:                e,
 		q:                astisync.NewCtxQueue(),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
+	d.BaseNode = astiencoder.NewBaseNode(astiencoder.NewEventGeneratorNode(d), e, astiencoder.NodeMetadata{
+		Description: "Decodes",
+		Label:       fmt.Sprintf("Decoder #%d", count),
+		Name:        fmt.Sprintf("decoder_%d", count),
+	})
 	d.d = newFrameDispatcher(d, e, c)
 	d.addStats()
 	return

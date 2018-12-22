@@ -70,11 +70,6 @@ func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c astiencoder.Clo
 	// Create demuxer
 	count := atomic.AddUint64(&countDemuxer, uint64(1))
 	d = &Demuxer{
-		BaseNode: astiencoder.NewBaseNode(e, astiencoder.NodeMetadata{
-			Description: fmt.Sprintf("Demuxes %s", o.URL),
-			Label:       fmt.Sprintf("Demuxer #%d", count),
-			Name:        fmt.Sprintf("demuxer_%d", count),
-		}),
 		d:             newPktDispatcher(c),
 		e:             e,
 		emulateRate:   o.EmulateRate,
@@ -82,6 +77,11 @@ func NewDemuxer(o DemuxerOptions, e *astiencoder.EventEmitter, c astiencoder.Clo
 		ss:            make(map[int]*demuxerStream),
 		statWorkRatio: astistat.NewDurationRatioStat(),
 	}
+	d.BaseNode = astiencoder.NewBaseNode(astiencoder.NewEventGeneratorNode(d), e, astiencoder.NodeMetadata{
+		Description: fmt.Sprintf("Demuxes %s", o.URL),
+		Label:       fmt.Sprintf("Demuxer #%d", count),
+		Name:        fmt.Sprintf("demuxer_%d", count),
+	})
 
 	// If loop is enabled, we need to add a restamper
 	if d.loop {

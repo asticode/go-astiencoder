@@ -397,12 +397,24 @@ func (s *workflowPoolServer) handleWebsocketPing(c *astiws.Client, eventName str
 }
 
 func (s *workflowPoolServer) handleEvent(e Event) {
+	var p interface{}
 	switch e.Name {
 	case EventNameError:
-		s.sendEventToWebsocket(e.Name, errors.Cause(e.Payload.(error)))
-	default:
-		s.sendEventToWebsocket(e.Name, e.Payload)
+		p = errors.Cause(e.Payload.(error))
+	case EventNameWorkflowContinued:
+	case EventNameWorkflowPaused:
+	case EventNameWorkflowStarted:
+	case EventNameWorkflowStopped:
+		p = e.Payload.(*Workflow).Name()
+	case EventNameStats:
+		p = e.Payload
+	case EventNameNodeContinued:
+	case EventNameNodePaused:
+	case EventNameNodeStarted:
+	case EventNameNodeStopped:
+		p = e.Payload.(Node).Metadata().Name
 	}
+	s.sendEventToWebsocket(e.Name, p)
 }
 
 func (s *workflowPoolServer) sendEventToWebsocket(eventName string, payload interface{}) {

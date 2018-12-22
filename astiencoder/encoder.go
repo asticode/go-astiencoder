@@ -34,14 +34,11 @@ func (e *encoder) handleEvents(evt astiencoder.Event) {
 	case astiencoder.EventNameWorkflowStarted:
 		e.m.Lock()
 		defer e.m.Unlock()
-		if _, err := e.wp.Workflow(evt.Payload.(string)); err != nil {
-			return
-		}
-		e.wsStarted[evt.Payload.(string)] = true
+		e.wsStarted[evt.Payload.(*astiencoder.Workflow).Name()] = true
 	case astiencoder.EventNameWorkflowStopped:
 		e.m.Lock()
 		defer e.m.Unlock()
-		delete(e.wsStarted, evt.Payload.(string))
+		delete(e.wsStarted, evt.Payload.(*astiencoder.Workflow).Name())
 		if e.c.Exec.StopWhenWorkflowsAreStopped && len(e.wsStarted) == 0 {
 			e.w.Stop()
 		}

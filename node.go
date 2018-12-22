@@ -100,7 +100,8 @@ type BaseNode struct {
 	childrenStarted map[string]bool
 	ctx             context.Context
 	ctxPause        context.Context
-	e               *EventEmitter
+	ee              *EventEmitter
+	eg              EventGenerator
 	m               *sync.Mutex
 	md              NodeMetadata
 	oStart          *sync.Once
@@ -112,12 +113,13 @@ type BaseNode struct {
 }
 
 // NewBaseNode creates a new base node
-func NewBaseNode(e *EventEmitter, m NodeMetadata) (n *BaseNode) {
+func NewBaseNode(eg EventGenerator, ee *EventEmitter, m NodeMetadata) (n *BaseNode) {
 	n = &BaseNode{
 		children:        make(map[string]Node),
 		childrenStarted: make(map[string]bool),
 		m:               &sync.Mutex{},
-		e:               e,
+		ee:              ee,
+		eg:              eg,
 		md:              m,
 		oStart:          &sync.Once{},
 		oStop:           &sync.Once{},
@@ -125,7 +127,7 @@ func NewBaseNode(e *EventEmitter, m NodeMetadata) (n *BaseNode) {
 		parentsStarted:  make(map[string]bool),
 		status:          StatusStopped,
 	}
-	if e != nil {
+	if ee != nil {
 		n.s = astistat.NewStater(2*time.Second, n.statsHandleFunc)
 	}
 	return
@@ -185,26 +187,16 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 		n.status = StatusRunning
 		n.m.Unlock()
 
-		// Send event
-		if n.e != nil {
-			n.e.Emit(Event{
-				Name:    EventNameNodeStarted,
-				Payload: n.md.Name,
-			})
-		}
+		// Send started event
+		n.ee.Emit(n.eg.Event(EventTypeStarted))
 
 		// Execute the rest in a goroutine
 		go func() {
 			// Task is done
 			defer t.Done()
 
-			// Send event
-			if n.e != nil {
-				defer n.e.Emit(Event{
-					Name:    EventNameNodeStopped,
-					Payload: n.md.Name,
-				})
-			}
+			// Send stopped event
+			defer n.ee.Emit(n.eg.Event(EventTypeStopped))
 
 			// Make sure the status is updated once everything is done
 			defer func() {
@@ -260,52 +252,55 @@ func (n *BaseNode) Stop() {
 
 // Pause implements the Starter interface
 func (n *BaseNode) Pause() {
+	n.pause(func() {
+		n.ctxPause, n.cancelPause = context.WithCancel(n.ctx)
+	})
+}
+
+// Pause implements the Starter interface
+func (n *BaseNode) pause(fn func()) {
 	// Status is not running
 	if n.Status() != StatusRunning {
 		return
 	}
 
-	// Reset ctx
-	n.ctxPause, n.cancelPause = context.WithCancel(n.ctx)
+	// Callback
+	fn()
 
 	// Update status
 	n.m.Lock()
 	n.status = StatusPaused
 	n.m.Unlock()
 
-	// Send event
-	if n.e != nil {
-		n.e.Emit(Event{
-			Name:    EventNameNodePaused,
-			Payload: n.md.Name,
-		})
-	}
+	// Send paused event
+	n.ee.Emit(n.eg.Event(EventTypePaused))
 }
 
 // Continue implements the Starter interface
 func (n *BaseNode) Continue() {
+	n.continuE(func() {
+		if n.cancelPause != nil {
+			n.cancelPause()
+		}
+	})
+}
+
+func (n *BaseNode) continuE(fn func()) {
 	// Status is not paused
 	if n.Status() != StatusPaused {
 		return
 	}
 
-	// Cancel ctx
-	if n.cancelPause != nil {
-		n.cancelPause()
-	}
+	// Callback
+	fn()
 
 	// Update status
 	n.m.Lock()
 	n.status = StatusRunning
 	n.m.Unlock()
 
-	// Send event
-	if n.e != nil {
-		n.e.Emit(Event{
-			Name:    EventNameNodeContinued,
-			Payload: n.md.Name,
-		})
-	}
+	// Send continued event
+	n.ee.Emit(n.eg.Event(EventTypeContinued))
 }
 
 // HandlePause handles the pause
@@ -476,7 +471,7 @@ func (n *BaseNode) statsHandleFunc(stats []astistat.Stat) {
 	}
 
 	// Send event
-	n.e.Emit(Event{
+	n.ee.Emit(Event{
 		Name:    EventNameStats,
 		Payload: e,
 	})
