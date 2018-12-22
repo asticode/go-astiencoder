@@ -74,7 +74,6 @@ func NewDemuxer(o DemuxerOptions, e astiencoder.EventEmitter, c astiencoder.Clos
 
 	// Create demuxer
 	d = &Demuxer{
-		ctxFormat:     avformat.AvformatAllocContext(),
 		d:             newPktDispatcher(c),
 		e:             e,
 		emulateRate:   o.EmulateRate,
@@ -103,12 +102,14 @@ func NewDemuxer(o DemuxerOptions, e astiencoder.EventEmitter, c astiencoder.Clos
 		defer avutil.AvDictFree(&dict)
 	}
 
+	// Alloc ctx
+	ctxFormat := avformat.AvformatAllocContext()
+
 	// Set interrupt callback
-	d.interruptRet = d.ctxFormat.SetInterruptCallback()
+	d.interruptRet = ctxFormat.SetInterruptCallback()
 
 	// Open input
 	// We need to create an intermediate variable to avoid "cgo argument has Go pointer to Go pointer" errors
-	var ctxFormat *avformat.Context
 	if ret := avformat.AvformatOpenInput(&ctxFormat, o.URL, o.Format, &dict); ret < 0 {
 		err = errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvformatOpenInput on %+v failed", o)
 		return
