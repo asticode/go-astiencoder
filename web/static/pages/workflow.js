@@ -127,6 +127,7 @@ const page = {
                 if (typeof page.nodes[payload] !== "undefined") page.nodes[payload].status = status
                 break
             case "stats":
+                console.info(payload)
                 // Get element
                 const el = document.getElementById(payload.name)
 

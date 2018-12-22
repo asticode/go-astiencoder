@@ -50,13 +50,13 @@ type openedOutput struct {
 type buildData struct {
 	c        *astiencoder.Closer
 	decoders map[*astilibav.Demuxer]map[*avformat.Stream]*astilibav.Decoder
-	ee       *astiencoder.EventEmitter
+	ee       astiencoder.EventEmitter
 	inputs   map[string]openedInput
 	outputs  map[string]openedOutput
 	w        *astiencoder.Workflow
 }
 
-func newBuildData(w *astiencoder.Workflow, ee *astiencoder.EventEmitter, c *astiencoder.Closer) *buildData {
+func newBuildData(w *astiencoder.Workflow, ee astiencoder.EventEmitter, c *astiencoder.Closer) *buildData {
 	return &buildData{
 		c:        c,
 		ee:       ee,
@@ -65,7 +65,7 @@ func newBuildData(w *astiencoder.Workflow, ee *astiencoder.EventEmitter, c *asti
 	}
 }
 
-func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow, ee *astiencoder.EventEmitter, c *astiencoder.Closer) (err error) {
+func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow, ee astiencoder.EventEmitter, c *astiencoder.Closer) (err error) {
 	// Create build data
 	bd := newBuildData(w, ee, c)
 

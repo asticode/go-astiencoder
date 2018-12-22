@@ -12,22 +12,25 @@ var (
 	EventNameNodeContinued     = "node.continued"
 	EventNameNodePaused        = "node.paused"
 	EventNameNodeStarted       = "node.started"
+	EventNameNodeStats         = "node.stats"
 	EventNameNodeStopped       = "node.stopped"
-	EventNameStats             = "stats"
 	EventNameWorkflowContinued = "workflow.continued"
 	EventNameWorkflowPaused    = "workflow.paused"
 	EventNameWorkflowStarted   = "workflow.started"
+	EventNameWorkflowStats     = "workflow.stats"
 	EventNameWorkflowStopped   = "workflow.stopped"
 	EventTypeContinued         = "continued"
 	EventTypePaused            = "paused"
 	EventTypeStarted           = "started"
+	EventTypeStats             = "stats"
 	EventTypeStopped           = "stopped"
 )
 
 // Event is an event coming out of the encoder
 type Event struct {
-	Name    string      `json:"name"`
-	Payload interface{} `json:"payload,omitempty"`
+	Name    string
+	Payload interface{}
+	Target  interface{}
 }
 
 // EventError returns an error event
@@ -44,7 +47,7 @@ type EventHandler interface {
 }
 
 // LoggerEventHandler represents then logger event handler
-type LoggerEventHandler struct {}
+type LoggerEventHandler struct{}
 
 // NewLoggerEventHandler creates a new event handler
 func NewLoggerEventHandler() *LoggerEventHandler {
@@ -57,36 +60,41 @@ func (h *LoggerEventHandler) HandleEvent(e Event) {
 	case EventNameError:
 		astilog.Error(e.Payload.(error))
 	case EventNameNodeStarted:
-		astilog.Debugf("astiencoder: node %s is started", e.Payload.(Node).Metadata().Name)
+		astilog.Debugf("astiencoder: node %s is started", e.Target.(Node).Metadata().Name)
 	case EventNameNodeStopped:
-		astilog.Debugf("astiencoder: node %s is stopped", e.Payload.(Node).Metadata().Name)
+		astilog.Debugf("astiencoder: node %s is stopped", e.Target.(Node).Metadata().Name)
 	case EventNameWorkflowStarted:
-		astilog.Debugf("astiencoder: workflow %s is started", e.Payload.(*Workflow).Name())
+		astilog.Debugf("astiencoder: workflow %s is started", e.Target.(*Workflow).Name())
 	case EventNameWorkflowStopped:
-		astilog.Debugf("astiencoder: workflow %s is stopped", e.Payload.(*Workflow).Name())
+		astilog.Debugf("astiencoder: workflow %s is stopped", e.Target.(*Workflow).Name())
 	}
 }
 
 // EventEmitter represents an object capable of emitting events
-type EventEmitter struct {
+type EventEmitter interface {
+	Emit(e Event)
+}
+
+// DefaultEventEmitter represents the default event emitter
+type DefaultEventEmitter struct {
 	hs []EventHandler
 	m  *sync.Mutex
 }
 
-// NewEventEmitter creates a new event emitter
-func NewEventEmitter() *EventEmitter {
-	return &EventEmitter{m: &sync.Mutex{}}
+// NewDefaultEventEmitter creates a new default event emitter
+func NewDefaultEventEmitter() *DefaultEventEmitter {
+	return &DefaultEventEmitter{m: &sync.Mutex{}}
 }
 
 // AddHandler adds a new handler
-func (e *EventEmitter) AddHandler(h EventHandler) {
+func (e *DefaultEventEmitter) AddHandler(h EventHandler) {
 	e.m.Lock()
 	defer e.m.Unlock()
 	e.hs = append(e.hs, h)
 }
 
-// Emit emits a new event
-func (e *EventEmitter) Emit(evt Event) {
+// Emit emits an event
+func (e *DefaultEventEmitter) Emit(evt Event) {
 	e.m.Lock()
 	defer e.m.Unlock()
 	for _, h := range e.hs {
@@ -96,7 +104,7 @@ func (e *EventEmitter) Emit(evt Event) {
 
 // EventGenerator represents an object capable of generating an event based on its type
 type EventGenerator interface {
-	Event(eventType string) Event
+	Event(eventType string, payload interface{}) Event
 }
 
 // EventGeneratorNode represents a node event generator
@@ -110,16 +118,18 @@ func NewEventGeneratorNode(n Node) *EventGeneratorNode {
 }
 
 // Event implements the EventGenerator interface
-func (g EventGeneratorNode) Event(eventType string) Event {
+func (g EventGeneratorNode) Event(eventType string, payload interface{}) Event {
 	switch eventType {
 	case EventTypeContinued:
-		return Event{Name: EventNameNodeContinued, Payload: g.n}
+		return Event{Name: EventNameNodeContinued, Target: g.n}
 	case EventTypePaused:
-		return Event{Name: EventNameNodePaused, Payload: g.n}
+		return Event{Name: EventNameNodePaused, Target: g.n}
 	case EventTypeStarted:
-		return Event{Name: EventNameNodeStarted, Payload: g.n}
+		return Event{Name: EventNameNodeStarted, Target: g.n}
+	case EventTypeStats:
+		return Event{Name: EventNameNodeStats, Payload: payload, Target: g.n}
 	case EventTypeStopped:
-		return Event{Name: EventNameNodeStopped, Payload: g.n}
+		return Event{Name: EventNameNodeStopped, Target: g.n}
 	default:
 		return Event{}
 	}
@@ -136,16 +146,18 @@ func NewEventGeneratorWorkflow(w *Workflow) *EventGeneratorWorkflow {
 }
 
 // Event implements the EventGenerator interface
-func (g EventGeneratorWorkflow) Event(eventType string) Event {
+func (g EventGeneratorWorkflow) Event(eventType string, payload interface{}) Event {
 	switch eventType {
 	case EventTypeContinued:
-		return Event{Name: EventNameWorkflowContinued, Payload: g.w}
+		return Event{Name: EventNameWorkflowContinued, Target: g.w}
 	case EventTypePaused:
-		return Event{Name: EventNameWorkflowPaused, Payload: g.w}
+		return Event{Name: EventNameWorkflowPaused, Target: g.w}
 	case EventTypeStarted:
-		return Event{Name: EventNameWorkflowStarted, Payload: g.w}
+		return Event{Name: EventNameWorkflowStarted, Target: g.w}
+	case EventTypeStats:
+		return Event{Name: EventNameWorkflowStats, Payload: payload, Target: g.w}
 	case EventTypeStopped:
-		return Event{Name: EventNameWorkflowStopped, Payload: g.w}
+		return Event{Name: EventNameWorkflowStopped, Target: g.w}
 	default:
 		return Event{}
 	}

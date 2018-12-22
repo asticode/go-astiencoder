@@ -19,7 +19,7 @@ func init() {
 
 func testJob(t *testing.T, jobPath string, assertPaths func(j Job) map[string]string) {
 	// Create event emitter
-	ee := astiencoder.NewEventEmitter()
+	ee := astiencoder.NewDefaultEventEmitter()
 
 	// Create workflow pool
 	wp := astiencoder.NewWorkflowPool()

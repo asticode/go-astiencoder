@@ -100,7 +100,7 @@ type BaseNode struct {
 	childrenStarted map[string]bool
 	ctx             context.Context
 	ctxPause        context.Context
-	ee              *EventEmitter
+	ee              EventEmitter
 	eg              EventGenerator
 	m               *sync.Mutex
 	md              NodeMetadata
@@ -113,7 +113,7 @@ type BaseNode struct {
 }
 
 // NewBaseNode creates a new base node
-func NewBaseNode(eg EventGenerator, ee *EventEmitter, m NodeMetadata) (n *BaseNode) {
+func NewBaseNode(eg EventGenerator, ee EventEmitter, m NodeMetadata) (n *BaseNode) {
 	n = &BaseNode{
 		children:        make(map[string]Node),
 		childrenStarted: make(map[string]bool),
@@ -188,7 +188,7 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 		n.m.Unlock()
 
 		// Send started event
-		n.ee.Emit(n.eg.Event(EventTypeStarted))
+		n.ee.Emit(n.eg.Event(EventTypeStarted, nil))
 
 		// Execute the rest in a goroutine
 		go func() {
@@ -196,7 +196,7 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 			defer t.Done()
 
 			// Send stopped event
-			defer n.ee.Emit(n.eg.Event(EventTypeStopped))
+			defer n.ee.Emit(n.eg.Event(EventTypeStopped, nil))
 
 			// Make sure the status is updated once everything is done
 			defer func() {
@@ -273,7 +273,7 @@ func (n *BaseNode) pause(fn func()) {
 	n.m.Unlock()
 
 	// Send paused event
-	n.ee.Emit(n.eg.Event(EventTypePaused))
+	n.ee.Emit(n.eg.Event(EventTypePaused, nil))
 }
 
 // Continue implements the Starter interface
@@ -300,7 +300,7 @@ func (n *BaseNode) continuE(fn func()) {
 	n.m.Unlock()
 
 	// Send continued event
-	n.ee.Emit(n.eg.Event(EventTypeContinued))
+	n.ee.Emit(n.eg.Event(EventTypeContinued, nil))
 }
 
 // HandlePause handles the pause
@@ -434,18 +434,12 @@ func (n *BaseNode) Stater() *astistat.Stater {
 	return n.s
 }
 
-// EventStats represents stats event
-type EventStats struct {
-	Name  string      `json:"name"`
-	Stats []EventStat `json:"stats"`
-}
-
 // EventStat represents a stat event
 type EventStat struct {
-	Description string      `json:"description"`
-	Label       string      `json:"label"`
-	Unit        string      `json:"unit"`
-	Value       interface{} `json:"value"`
+	Description string
+	Label       string
+	Unit        string
+	Value       interface{}
 }
 
 func (n *BaseNode) statsHandleFunc(stats []astistat.Stat) {
@@ -454,15 +448,10 @@ func (n *BaseNode) statsHandleFunc(stats []astistat.Stat) {
 		return
 	}
 
-	// Create event
-	e := EventStats{
-		Name:  n.md.Name,
-		Stats: []EventStat{},
-	}
-
 	// Loop through stats
+	ss := []EventStat{}
 	for _, s := range stats {
-		e.Stats = append(e.Stats, EventStat{
+		ss = append(ss, EventStat{
 			Description: s.Description,
 			Label:       s.Label,
 			Unit:        s.Unit,
@@ -471,8 +460,5 @@ func (n *BaseNode) statsHandleFunc(stats []astistat.Stat) {
 	}
 
 	// Send event
-	n.ee.Emit(Event{
-		Name:    EventNameStats,
-		Payload: e,
-	})
+	n.ee.Emit(n.eg.Event(EventTypeStats, ss))
 }

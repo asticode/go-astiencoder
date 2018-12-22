@@ -22,7 +22,7 @@ type Muxer struct {
 	*astiencoder.BaseNode
 	c                astiencoder.CloseFuncAdder
 	ctxFormat        *avformat.Context
-	e                *astiencoder.EventEmitter
+	e                astiencoder.EventEmitter
 	o                *sync.Once
 	q                *astisync.CtxQueue
 	restamper        PktRestamper
@@ -39,7 +39,7 @@ type MuxerOptions struct {
 }
 
 // NewMuxer creates a new muxer
-func NewMuxer(o MuxerOptions, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (m *Muxer, err error) {
+func NewMuxer(o MuxerOptions, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (m *Muxer, err error) {
 	// Create muxer
 	count := atomic.AddUint64(&countMuxer, uint64(1))
 	m = &Muxer{

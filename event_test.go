@@ -20,7 +20,7 @@ func (h *mockedEventHandler) HandleEvent(e Event) {
 }
 
 func TestEvent(t *testing.T) {
-	ee := NewEventEmitter()
+	ee := NewDefaultEventEmitter()
 	h := newMockedEventHandler()
 	ee.AddHandler(h)
 	e1 := Event{

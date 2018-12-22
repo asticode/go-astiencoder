@@ -19,6 +19,6 @@ func NewAvError(ret int) AvError {
 	return AvError(ret)
 }
 
-func emitAvError(e *astiencoder.EventEmitter, ret int, format string, args ...interface{}) {
+func emitAvError(e astiencoder.EventEmitter, ret int, format string, args ...interface{}) {
 	e.Emit(astiencoder.EventError(errors.Wrapf(NewAvError(ret), "astilibav: "+format, args...)))
 }

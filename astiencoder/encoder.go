@@ -9,14 +9,14 @@ import (
 
 type encoder struct {
 	c         *ConfigurationEncoder
-	ee        *astiencoder.EventEmitter
+	ee        *astiencoder.DefaultEventEmitter
 	m         *sync.Mutex
 	w         *astiworker.Worker
 	wp        *astiencoder.WorkflowPool
 	wsStarted map[string]bool
 }
 
-func newEncoder(c *ConfigurationEncoder, ee *astiencoder.EventEmitter, wp *astiencoder.WorkflowPool) (e *encoder) {
+func newEncoder(c *ConfigurationEncoder, ee *astiencoder.DefaultEventEmitter, wp *astiencoder.WorkflowPool) (e *encoder) {
 	e = &encoder{
 		c:         c,
 		ee:        ee,
@@ -35,11 +35,11 @@ func (e *encoder) HandleEvent(evt astiencoder.Event) {
 	case astiencoder.EventNameWorkflowStarted:
 		e.m.Lock()
 		defer e.m.Unlock()
-		e.wsStarted[evt.Payload.(*astiencoder.Workflow).Name()] = true
+		e.wsStarted[evt.Target.(*astiencoder.Workflow).Name()] = true
 	case astiencoder.EventNameWorkflowStopped:
 		e.m.Lock()
 		defer e.m.Unlock()
-		delete(e.wsStarted, evt.Payload.(*astiencoder.Workflow).Name())
+		delete(e.wsStarted, evt.Target.(*astiencoder.Workflow).Name())
 		if e.c.Exec.StopWhenWorkflowsAreStopped && len(e.wsStarted) == 0 {
 			e.w.Stop()
 		}

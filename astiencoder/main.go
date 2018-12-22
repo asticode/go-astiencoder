@@ -41,7 +41,7 @@ func main() {
 	astilog.SetLogger(astilog.New(c.Logger))
 
 	// Create event emitter
-	ee := astiencoder.NewEventEmitter()
+	ee := astiencoder.NewDefaultEventEmitter()
 
 	// Add logger event handler
 	ee.AddHandler(astiencoder.NewLoggerEventHandler())

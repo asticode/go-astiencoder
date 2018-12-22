@@ -396,26 +396,50 @@ func (s *workflowPoolServer) handleWebsocketPing(c *astiws.Client, eventName str
 	return nil
 }
 
+// ExposedStats represents exposed stats
+type ExposedStats struct {
+	Name  string        `json:"name"`
+	Stats []ExposedStat `json:"stats"`
+}
+
+// ExposedStat represents an exposed stat
+type ExposedStat struct {
+	Description string      `json:"description"`
+	Label       string      `json:"label"`
+	Unit        string      `json:"unit"`
+	Value       interface{} `json:"value"`
+}
+
 // HandleEvent implements the EventHandler interface
 func (s *workflowPoolServer) HandleEvent(e Event) {
+	n := e.Name
 	var p interface{}
 	switch e.Name {
 	case EventNameError:
 		p = errors.Cause(e.Payload.(error))
-	case EventNameWorkflowContinued:
-	case EventNameWorkflowPaused:
-	case EventNameWorkflowStarted:
-	case EventNameWorkflowStopped:
-		p = e.Payload.(*Workflow).Name()
-	case EventNameStats:
-		p = e.Payload
-	case EventNameNodeContinued:
-	case EventNameNodePaused:
-	case EventNameNodeStarted:
-	case EventNameNodeStopped:
-		p = e.Payload.(Node).Metadata().Name
+	case EventNameWorkflowContinued, EventNameWorkflowPaused, EventNameWorkflowStarted, EventNameWorkflowStopped:
+		p = e.Target.(*Workflow).Name()
+	case EventNameNodeStats, EventNameWorkflowStats:
+		np := ExposedStats{}
+		if e.Name == EventNameNodeStats {
+			np.Name = e.Target.(Node).Metadata().Name
+		} else {
+			np.Name = e.Target.(*Workflow).Name()
+		}
+		for _, s := range e.Payload.([]EventStat) {
+			np.Stats = append(np.Stats, ExposedStat{
+				Description: s.Description,
+				Label:       s.Label,
+				Unit:        s.Unit,
+				Value:       s.Value,
+			})
+		}
+		n = "stats"
+		p = np
+	case EventNameNodeContinued, EventNameNodePaused, EventNameNodeStarted, EventNameNodeStopped:
+		p = e.Target.(Node).Metadata().Name
 	}
-	s.sendEventToWebsocket(e.Name, p)
+	s.sendEventToWebsocket(n, p)
 }
 
 func (s *workflowPoolServer) sendEventToWebsocket(eventName string, payload interface{}) {

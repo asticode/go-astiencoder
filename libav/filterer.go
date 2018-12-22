@@ -23,7 +23,7 @@ type Filterer struct {
 	bufferSinkCtx    *avfilter.Context
 	bufferSrcCtxs    map[astiencoder.Node]*avfilter.Context
 	d                *frameDispatcher
-	e                *astiencoder.EventEmitter
+	e                astiencoder.EventEmitter
 	g                *avfilter.Graph
 	q                *astisync.CtxQueue
 	statIncomingRate *astistat.IncrementStat
@@ -31,7 +31,7 @@ type Filterer struct {
 }
 
 // NewFilterer creates a new filterer
-func NewFilterer(bufferSrcCtxs map[astiencoder.Node]*avfilter.Context, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (f *Filterer) {
+func NewFilterer(bufferSrcCtxs map[astiencoder.Node]*avfilter.Context, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (f *Filterer) {
 	count := atomic.AddUint64(&countFilterer, uint64(1))
 	f = &Filterer{
 		bufferSinkCtx:    bufferSinkCtx,
@@ -65,7 +65,7 @@ type FiltererInput struct {
 }
 
 // NewFiltererFromOptions creates a new filterer based on options
-func NewFiltererFromOptions(o FiltererOptions, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (_ *Filterer, err error) {
+func NewFiltererFromOptions(o FiltererOptions, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (_ *Filterer, err error) {
 	// Create graph
 	g := avfilter.AvfilterGraphAlloc()
 	c.Add(func() error {

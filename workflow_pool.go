@@ -57,7 +57,7 @@ func (wp *WorkflowPool) Workflows() (ws []*Workflow) {
 }
 
 // Serve spawns the workflow pool server
-func (wp *WorkflowPool) Serve(ee *EventEmitter, pathWeb string, fn func(http.Handler)) (err error) {
+func (wp *WorkflowPool) Serve(ee *DefaultEventEmitter, pathWeb string, fn func(http.Handler)) (err error) {
 	// Create server
 	var s *workflowPoolServer
 	if s, err = newWorkflowPoolServer(wp, pathWeb); err != nil {

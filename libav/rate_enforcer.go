@@ -24,7 +24,7 @@ type RateEnforcer struct {
 	*astiencoder.BaseNode
 	buf              []*rateEnforcerItem
 	d                *frameDispatcher
-	e                *astiencoder.EventEmitter
+	e                astiencoder.EventEmitter
 	m                *sync.Mutex
 	n                astiencoder.Node
 	p                *framePool
@@ -60,7 +60,7 @@ type RateEnforcerOptions struct {
 }
 
 // NewRateEnforcer creates a new rate enforcer
-func NewRateEnforcer(o RateEnforcerOptions, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (r *RateEnforcer) {
+func NewRateEnforcer(o RateEnforcerOptions, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (r *RateEnforcer) {
 	count := atomic.AddUint64(&countRateEnforcer, uint64(1))
 	r = &RateEnforcer{
 		e:                e,

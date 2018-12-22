@@ -24,7 +24,7 @@ var countPktDumper uint64
 type PktDumper struct {
 	*astiencoder.BaseNode
 	count            uint32
-	e                *astiencoder.EventEmitter
+	e                astiencoder.EventEmitter
 	o                PktDumperOptions
 	q                *astisync.CtxQueue
 	statIncomingRate *astistat.IncrementStat
@@ -45,7 +45,7 @@ type PktDumperHandlerArgs struct {
 }
 
 // NewPktDumper creates a new pk dumper
-func NewPktDumper(o PktDumperOptions, e *astiencoder.EventEmitter) (d *PktDumper, err error) {
+func NewPktDumper(o PktDumperOptions, e astiencoder.EventEmitter) (d *PktDumper, err error) {
 	// Create pkt dumper
 	count := atomic.AddUint64(&countPktDumper, uint64(1))
 	d = &PktDumper{

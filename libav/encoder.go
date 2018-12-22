@@ -24,7 +24,7 @@ type Encoder struct {
 	*astiencoder.BaseNode
 	ctxCodec           *avcodec.Context
 	d                  *pktDispatcher
-	e                  *astiencoder.EventEmitter
+	e                  astiencoder.EventEmitter
 	previousDescriptor Descriptor
 	q                  *astisync.CtxQueue
 	statIncomingRate   *astistat.IncrementStat
@@ -32,7 +32,7 @@ type Encoder struct {
 }
 
 // NewEncoder creates a new encoder
-func NewEncoder(ctxCodec *avcodec.Context, ee *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (e *Encoder) {
+func NewEncoder(ctxCodec *avcodec.Context, ee astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (e *Encoder) {
 	count := atomic.AddUint64(&countEncoder, uint64(1))
 	e = &Encoder{
 		ctxCodec:         ctxCodec,
@@ -52,7 +52,7 @@ func NewEncoder(ctxCodec *avcodec.Context, ee *astiencoder.EventEmitter, c astie
 }
 
 // NewEncoderFromContext creates a new encoder based on a context
-func NewEncoderFromContext(ctx Context, e *astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (_ *Encoder, err error) {
+func NewEncoderFromContext(ctx Context, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (_ *Encoder, err error) {
 	// Find encoder
 	var cdc *avcodec.Codec
 	if len(ctx.CodecName) > 0 {

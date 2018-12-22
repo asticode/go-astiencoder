@@ -12,14 +12,14 @@ type Workflow struct {
 	bn   *BaseNode
 	c    *Closer
 	ctx  context.Context
-	e    *EventEmitter
+	e    EventEmitter
 	name string
 	t    *astiworker.Task
 	tf   CreateTaskFunc
 }
 
 // NewWorkflow creates a new workflow
-func NewWorkflow(ctx context.Context, name string, e *EventEmitter, tf CreateTaskFunc, c *Closer) (w *Workflow) {
+func NewWorkflow(ctx context.Context, name string, e EventEmitter, tf CreateTaskFunc, c *Closer) (w *Workflow) {
 	w = &Workflow{
 		c:    c,
 		ctx:  ctx,
