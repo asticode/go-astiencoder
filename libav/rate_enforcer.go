@@ -217,61 +217,66 @@ func (r *RateEnforcer) startTick(ctx context.Context) {
 	go func() {
 		nextAt := time.Now()
 		for {
-			func() {
-				// Compute next at
-				nextAt = nextAt.Add(r.period)
-
-				// Sleep until next at
-				if delta := nextAt.Sub(time.Now()); delta > 0 {
-					astitime.Sleep(ctx, delta)
-				}
-
-				// Check context
-				if ctx.Err() != nil {
-					return
-				}
-
-				// Lock
-				r.m.Lock()
-				defer r.m.Unlock()
-
-				// Make sure to add next slot
-				defer func() {
-					var s *rateEnforcerSlot
-					if ps := r.slots[len(r.slots)-1]; ps != nil {
-						s = ps.next()
-					}
-					r.slots = append(r.slots, s)
-				}()
-
-				// Not enough slots
-				if len(r.slots) < r.slotsCount {
-					return
-				}
-
-				// Distribute
-				r.distribute()
-
-				// Dispatch
-				i, previous := r.current()
-				if i != nil {
-					// Restamp frame
-					if r.restamper != nil {
-						r.restamper.Restamp(i.f, true)
-					}
-
-					// Dispatch frame
-					r.d.dispatch(i.f, i.d)
-				}
-
-				// Remove first slot
-				if !previous {
-					r.p.put(i.f)
-				}
-				r.slots = r.slots[1:]
-			}()
+			if stop := r.tickFunc(ctx, &nextAt); stop {
+				return
+			}
 		}
 	}()
+}
+
+func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time) (stop bool) {
+	// Compute next at
+	*nextAt = nextAt.Add(r.period)
+
+	// Sleep until next at
+	if delta := nextAt.Sub(time.Now()); delta > 0 {
+		astitime.Sleep(ctx, delta)
+	}
+
+	// Check context
+	if ctx.Err() != nil {
+		return true
+	}
+
+	// Lock
+	r.m.Lock()
+	defer r.m.Unlock()
+
+	// Make sure to add next slot
+	defer func() {
+		var s *rateEnforcerSlot
+		if ps := r.slots[len(r.slots)-1]; ps != nil {
+			s = ps.next()
+		}
+		r.slots = append(r.slots, s)
+	}()
+
+	// Not enough slots
+	if len(r.slots) < r.slotsCount {
+		return
+	}
+
+	// Distribute
+	r.distribute()
+
+	// Dispatch
+	i, previous := r.current()
+	if i != nil {
+		// Restamp frame
+		if r.restamper != nil {
+			r.restamper.Restamp(i.f, true)
+		}
+
+		// Dispatch frame
+		r.d.dispatch(i.f, i.d)
+	}
+
+	// Remove first slot
+	if !previous {
+		r.p.put(i.f)
+	}
+	r.slots = r.slots[1:]
+	return
 }
 
 func (s *rateEnforcerSlot) next() *rateEnforcerSlot {
