@@ -17,6 +17,11 @@ import (
 	"github.com/asticode/goav/avutil"
 )
 
+// Event names
+const (
+	EventNameRateEnforcerSwitched = "rate.enforcer.switched"
+)
+
 var countRateEnforcer uint64
 
 // RateEnforcer represents an object capable of enforcing rate when switching between multiple inputs
@@ -56,7 +61,7 @@ type rateEnforcerItem struct {
 type RateEnforcerOptions struct {
 	Delay     int
 	FrameRate avutil.Rational
-	Node astiencoder.NodeOptions
+	Node      astiencoder.NodeOptions
 	Restamper FrameRestamper
 }
 
@@ -170,6 +175,11 @@ func (r *RateEnforcer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) 
 			//   instead of the previous item
 			if r.slots[len(r.slots)-1] == nil || (r.n != r.slots[len(r.slots)-1].n && r.n == p.Node) {
 				r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(p)
+				r.e.Emit(astiencoder.Event{
+					Name:    EventNameRateEnforcerSwitched,
+					Payload: p.Node,
+					Target:  r,
+				})
 			}
 
 			// Create item
