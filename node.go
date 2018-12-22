@@ -31,6 +31,20 @@ type NodeMetadata struct {
 	Name        string
 }
 
+// Extend extends the node metadata
+func (m NodeMetadata) Extend(name, label, description string) NodeMetadata {
+	if len(m.Description) == 0 {
+		m.Description = description
+	}
+	if len(m.Label) == 0 {
+		m.Label = label
+	}
+	if len(m.Name) == 0 {
+		m.Name = name
+	}
+	return m
+}
+
 // NodeChild represents an object with parent nodes
 type NodeChild interface {
 	NodeChildMapper
@@ -92,6 +106,11 @@ func DisconnectNodes(parent, child Node) {
 	child.DelParent(parent)
 }
 
+// NodeOptions represents node options
+type NodeOptions struct {
+	Metadata NodeMetadata
+}
+
 // BaseNode represents a base node
 type BaseNode struct {
 	cancel          context.CancelFunc
@@ -102,8 +121,8 @@ type BaseNode struct {
 	ctxPause        context.Context
 	ee              EventEmitter
 	eg              EventGenerator
+	o               NodeOptions
 	m               *sync.Mutex
-	md              NodeMetadata
 	oStart          *sync.Once
 	oStop           *sync.Once
 	parents         map[string]Node
@@ -113,23 +132,21 @@ type BaseNode struct {
 }
 
 // NewBaseNode creates a new base node
-func NewBaseNode(eg EventGenerator, ee EventEmitter, m NodeMetadata) (n *BaseNode) {
+func NewBaseNode(o NodeOptions, eg EventGenerator, ee EventEmitter) (n *BaseNode) {
 	n = &BaseNode{
 		children:        make(map[string]Node),
 		childrenStarted: make(map[string]bool),
 		m:               &sync.Mutex{},
 		ee:              ee,
 		eg:              eg,
-		md:              m,
+		o:               o,
 		oStart:          &sync.Once{},
 		oStop:           &sync.Once{},
 		parents:         make(map[string]Node),
 		parentsStarted:  make(map[string]bool),
 		status:          StatusStopped,
 	}
-	if ee != nil {
-		n.s = astistat.NewStater(2*time.Second, n.statsHandleFunc)
-	}
+	n.s = astistat.NewStater(2*time.Second, n.statsHandleFunc)
 	return
 }
 
@@ -174,12 +191,12 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 
 		// Loop through children
 		for _, c := range n.Children() {
-			c.ParentIsStarted(n.md)
+			c.ParentIsStarted(n.o.Metadata)
 		}
 
 		// Loop through parents
 		for _, p := range n.Parents() {
-			p.ChildIsStarted(n.md)
+			p.ChildIsStarted(n.o.Metadata)
 		}
 
 		// Update status
@@ -209,12 +226,12 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 			defer func() {
 				// Loop through children
 				for _, c := range n.Children() {
-					c.ParentIsStopped(n.md)
+					c.ParentIsStopped(n.o.Metadata)
 				}
 
 				// Loop through parents
 				for _, p := range n.Parents() {
-					p.ChildIsStopped(n.md)
+					p.ChildIsStopped(n.o.Metadata)
 				}
 			}()
 
@@ -426,7 +443,7 @@ func (n *BaseNode) Parents() (ns []Node) {
 
 // Metadata implements the Node interface
 func (n *BaseNode) Metadata() NodeMetadata {
-	return n.md
+	return n.o.Metadata
 }
 
 // Stater returns the node stater

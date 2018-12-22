@@ -36,6 +36,7 @@ type PktDumper struct {
 type PktDumperOptions struct {
 	Data    map[string]interface{}
 	Handler func(pkt *avcodec.Packet, args PktDumperHandlerArgs) error
+	Node astiencoder.NodeOptions
 	Pattern string
 }
 
@@ -46,8 +47,11 @@ type PktDumperHandlerArgs struct {
 
 // NewPktDumper creates a new pk dumper
 func NewPktDumper(o PktDumperOptions, e astiencoder.EventEmitter) (d *PktDumper, err error) {
-	// Create pkt dumper
+	// Extend node metadata
 	count := atomic.AddUint64(&countPktDumper, uint64(1))
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("pkt_dumper_%d", count), fmt.Sprintf("Pkt Dumper #%d", count), "Dumps packets")
+
+	// Create pkt dumper
 	d = &PktDumper{
 		e:                e,
 		o:                o,
@@ -55,11 +59,7 @@ func NewPktDumper(o PktDumperOptions, e astiencoder.EventEmitter) (d *PktDumper,
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
-	d.BaseNode = astiencoder.NewBaseNode(astiencoder.NewEventGeneratorNode(d), e, astiencoder.NodeMetadata{
-		Description: "Dump packets",
-		Label:       fmt.Sprintf("Pkt dumper #%d", count),
-		Name:        fmt.Sprintf("pkt_dumper_%d", count),
-	})
+	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), e)
 	d.addStats()
 
 	// Parse pattern

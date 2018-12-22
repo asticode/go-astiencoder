@@ -31,38 +31,39 @@ type Encoder struct {
 	statWorkRatio      *astistat.DurationRatioStat
 }
 
+// EncoderOptions represents encoder options
+type EncoderOptions struct {
+	Ctx Context
+	Node astiencoder.NodeOptions
+}
+
 // NewEncoder creates a new encoder
-func NewEncoder(ctxCodec *avcodec.Context, ee astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (e *Encoder) {
+func NewEncoder(o EncoderOptions, ee astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (e *Encoder, err error) {
+	// Extend node metadata
 	count := atomic.AddUint64(&countEncoder, uint64(1))
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("encoder_%d", count), fmt.Sprintf("Encoder #%d", count), "Encodes")
+
+	// Create encoder
 	e = &Encoder{
-		ctxCodec:         ctxCodec,
 		d:                newPktDispatcher(c),
 		e:                ee,
 		q:                astisync.NewCtxQueue(),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
-	e.BaseNode = astiencoder.NewBaseNode(astiencoder.NewEventGeneratorNode(e), ee, astiencoder.NodeMetadata{
-		Description: "Encodes",
-		Label:       fmt.Sprintf("Encoder #%d", count),
-		Name:        fmt.Sprintf("encoder_%d", count),
-	})
+	e.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(e), ee)
 	e.addStats()
-	return
-}
 
-// NewEncoderFromContext creates a new encoder based on a context
-func NewEncoderFromContext(ctx Context, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (_ *Encoder, err error) {
 	// Find encoder
 	var cdc *avcodec.Codec
-	if len(ctx.CodecName) > 0 {
-		if cdc = avcodec.AvcodecFindEncoderByName(ctx.CodecName); cdc == nil {
-			err = fmt.Errorf("astilibav: no encoder with name %s", ctx.CodecName)
+	if len(o.Ctx.CodecName) > 0 {
+		if cdc = avcodec.AvcodecFindEncoderByName(o.Ctx.CodecName); cdc == nil {
+			err = fmt.Errorf("astilibav: no encoder with name %s", o.Ctx.CodecName)
 			return
 		}
-	} else if ctx.CodecID > 0 {
-		if cdc = avcodec.AvcodecFindEncoder(ctx.CodecID); cdc == nil {
-			err = fmt.Errorf("astilibav: no encoder with id %+v", ctx.CodecID)
+	} else if o.Ctx.CodecID > 0 {
+		if cdc = avcodec.AvcodecFindEncoder(o.Ctx.CodecID); cdc == nil {
+			err = fmt.Errorf("astilibav: no encoder with id %+v", o.Ctx.CodecID)
 			return
 		}
 	} else {
@@ -71,54 +72,53 @@ func NewEncoderFromContext(ctx Context, e astiencoder.EventEmitter, c astiencode
 	}
 
 	// Check whether the context is valid with the codec
-	if err = ctx.validWithCodec(cdc); err != nil {
+	if err = o.Ctx.validWithCodec(cdc); err != nil {
 		err = errors.Wrap(err, "astilibav: checking whether the context is valid with the codec failed")
 		return
 	}
 
 	// Alloc context
-	var ctxCodec *avcodec.Context
-	if ctxCodec = cdc.AvcodecAllocContext3(); ctxCodec == nil {
+	if e.ctxCodec = cdc.AvcodecAllocContext3(); e.ctxCodec == nil {
 		err = errors.New("astilibav: no context allocated")
 		return
 	}
 
 	// Set shared context parameters
-	if ctx.GlobalHeader {
-		ctxCodec.SetFlags(ctxCodec.Flags() | avcodec.AV_CODEC_FLAG_GLOBAL_HEADER)
+	if o.Ctx.GlobalHeader {
+		e.ctxCodec.SetFlags(e.ctxCodec.Flags() | avcodec.AV_CODEC_FLAG_GLOBAL_HEADER)
 	}
-	if ctx.ThreadCount != nil {
-		ctxCodec.SetThreadCount(*ctx.ThreadCount)
+	if o.Ctx.ThreadCount != nil {
+		e.ctxCodec.SetThreadCount(*o.Ctx.ThreadCount)
 	}
 
 	// Set media type-specific context parameters
-	switch ctx.CodecType {
+	switch o.Ctx.CodecType {
 	case avutil.AVMEDIA_TYPE_AUDIO:
-		ctxCodec.SetBitRate(int64(ctx.BitRate))
-		ctxCodec.SetChannelLayout(ctx.ChannelLayout)
-		ctxCodec.SetChannels(ctx.Channels)
-		ctxCodec.SetSampleFmt(ctx.SampleFmt)
-		ctxCodec.SetSampleRate(ctx.SampleRate)
+		e.ctxCodec.SetBitRate(int64(o.Ctx.BitRate))
+		e.ctxCodec.SetChannelLayout(o.Ctx.ChannelLayout)
+		e.ctxCodec.SetChannels(o.Ctx.Channels)
+		e.ctxCodec.SetSampleFmt(o.Ctx.SampleFmt)
+		e.ctxCodec.SetSampleRate(o.Ctx.SampleRate)
 	case avutil.AVMEDIA_TYPE_VIDEO:
-		ctxCodec.SetBitRate(int64(ctx.BitRate))
-		ctxCodec.SetFramerate(ctx.FrameRate)
-		ctxCodec.SetGopSize(ctx.GopSize)
-		ctxCodec.SetHeight(ctx.Height)
-		ctxCodec.SetPixFmt(ctx.PixelFormat)
-		ctxCodec.SetSampleAspectRatio(ctx.SampleAspectRatio)
-		ctxCodec.SetTimeBase(ctx.TimeBase)
-		ctxCodec.SetWidth(ctx.Width)
+		e.ctxCodec.SetBitRate(int64(o.Ctx.BitRate))
+		e.ctxCodec.SetFramerate(o.Ctx.FrameRate)
+		e.ctxCodec.SetGopSize(o.Ctx.GopSize)
+		e.ctxCodec.SetHeight(o.Ctx.Height)
+		e.ctxCodec.SetPixFmt(o.Ctx.PixelFormat)
+		e.ctxCodec.SetSampleAspectRatio(o.Ctx.SampleAspectRatio)
+		e.ctxCodec.SetTimeBase(o.Ctx.TimeBase)
+		e.ctxCodec.SetWidth(o.Ctx.Width)
 	default:
-		err = fmt.Errorf("astilibav: encoder doesn't handle %v codec type", ctx.CodecType)
+		err = fmt.Errorf("astilibav: encoder doesn't handle %v codec type", o.Ctx.CodecType)
 		return
 	}
 
 	// Dict
 	var dict *avutil.Dictionary
-	if len(ctx.Dict) > 0 {
+	if len(o.Ctx.Dict) > 0 {
 		// Parse dict
-		if ret := avutil.AvDictParseString(&dict, ctx.Dict, "=", ",", 0); ret < 0 {
-			err = errors.Wrapf(NewAvError(ret), "astilibav: avutil.AvDictParseString on %s failed", ctx.Dict)
+		if ret := avutil.AvDictParseString(&dict, o.Ctx.Dict, "=", ",", 0); ret < 0 {
+			err = errors.Wrapf(NewAvError(ret), "astilibav: avutil.AvDictParseString on %s failed", o.Ctx.Dict)
 			return
 		}
 
@@ -127,21 +127,19 @@ func NewEncoderFromContext(ctx Context, e astiencoder.EventEmitter, c astiencode
 	}
 
 	// Open codec
-	if ret := ctxCodec.AvcodecOpen2(cdc, &dict); ret < 0 {
-		err = errors.Wrap(NewAvError(ret), "astilibav: d.ctxCodec.AvcodecOpen2 failed")
+	if ret := e.ctxCodec.AvcodecOpen2(cdc, &dict); ret < 0 {
+		err = errors.Wrap(NewAvError(ret), "astilibav: d.e.ctxCodec.AvcodecOpen2 failed")
 		return
 	}
 
 	// Make sure the codec is closed
 	c.Add(func() error {
-		if ret := ctxCodec.AvcodecClose(); ret < 0 {
-			emitAvError(nil, e, ret, "d.ctxCodec.AvcodecClose failed")
+		if ret := e.ctxCodec.AvcodecClose(); ret < 0 {
+			emitAvError(nil, ee, ret, "d.e.ctxCodec.AvcodecClose failed")
 		}
 		return nil
 	})
-
-	// Create encoder
-	return NewEncoder(ctxCodec, e, c), nil
+	return
 }
 
 func (e *Encoder) addStats() {

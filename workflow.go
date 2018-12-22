@@ -27,11 +27,11 @@ func NewWorkflow(ctx context.Context, name string, e EventEmitter, tf CreateTask
 		name: name,
 		tf:   tf,
 	}
-	w.bn = NewBaseNode(NewEventGeneratorWorkflow(w), e, NodeMetadata{
+	w.bn = NewBaseNode(NodeOptions{Metadata: NodeMetadata{
 		Description: "root",
 		Label:       "root",
 		Name:        "root",
-	})
+	}}, NewEventGeneratorWorkflow(w), e)
 	return
 }
 

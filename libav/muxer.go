@@ -34,14 +34,18 @@ type Muxer struct {
 type MuxerOptions struct {
 	Format     *avformat.OutputFormat
 	FormatName string
+	Node       astiencoder.NodeOptions
 	Restamper  PktRestamper
 	URL        string
 }
 
 // NewMuxer creates a new muxer
 func NewMuxer(o MuxerOptions, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (m *Muxer, err error) {
-	// Create muxer
+	// Extend node metadata
 	count := atomic.AddUint64(&countMuxer, uint64(1))
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("muxer_%d", count), fmt.Sprintf("Muxer #%d", count), fmt.Sprintf("Muxes to %s", o.URL))
+
+	// Create muxer
 	m = &Muxer{
 		c:                c,
 		e:                e,
@@ -51,13 +55,11 @@ func NewMuxer(o MuxerOptions, e astiencoder.EventEmitter, c astiencoder.CloseFun
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
-	m.BaseNode = astiencoder.NewBaseNode(astiencoder.NewEventGeneratorNode(m), e, astiencoder.NodeMetadata{
-		Description: fmt.Sprintf("Muxes to %s", o.URL),
-		Label:       fmt.Sprintf("Muxer #%d", count),
-		Name:        fmt.Sprintf("muxer_%d", count),
-	})
+	m.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(m), e)
+	m.addStats()
 
 	// Alloc format context
+	// We need to create an intermediate variable to avoid "cgo argument has Go pointer to Go pointer" errors
 	var ctxFormat *avformat.Context
 	if ret := avformat.AvformatAllocOutputContext2(&ctxFormat, o.Format, o.FormatName, o.URL); ret < 0 {
 		err = errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvformatAllocOutputContext2 on %+v failed", o)
@@ -91,9 +93,6 @@ func NewMuxer(o MuxerOptions, e astiencoder.EventEmitter, c astiencoder.CloseFun
 			return nil
 		})
 	}
-
-	// Add stats
-	m.addStats()
 	return
 }
 

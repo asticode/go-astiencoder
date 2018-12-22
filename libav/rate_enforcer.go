@@ -56,12 +56,17 @@ type rateEnforcerItem struct {
 type RateEnforcerOptions struct {
 	Delay     int
 	FrameRate avutil.Rational
+	Node astiencoder.NodeOptions
 	Restamper FrameRestamper
 }
 
 // NewRateEnforcer creates a new rate enforcer
 func NewRateEnforcer(o RateEnforcerOptions, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (r *RateEnforcer) {
+	// Extend node metadata
 	count := atomic.AddUint64(&countRateEnforcer, uint64(1))
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("rate_enforcer_%d", count), fmt.Sprintf("Rate Enforcer #%d", count), "Enforces rate")
+
+	// Create rate enforcer
 	r = &RateEnforcer{
 		e:                e,
 		m:                &sync.Mutex{},
@@ -75,11 +80,7 @@ func NewRateEnforcer(o RateEnforcerOptions, e astiencoder.EventEmitter, c astien
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 		timeBase:         avutil.NewRational(o.FrameRate.Den(), o.FrameRate.Num()),
 	}
-	r.BaseNode = astiencoder.NewBaseNode(astiencoder.NewEventGeneratorNode(r), e, astiencoder.NodeMetadata{
-		Description: "Rate Enforcer",
-		Label:       fmt.Sprintf("Rate Enforcer #%d", count),
-		Name:        fmt.Sprintf("rate_enforcer_%d", count),
-	})
+	r.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(r), e)
 	r.d = newFrameDispatcher(r, e, c)
 	r.addStats()
 	return

@@ -30,32 +30,11 @@ type Filterer struct {
 	statWorkRatio    *astistat.DurationRatioStat
 }
 
-// NewFilterer creates a new filterer
-func NewFilterer(bufferSrcCtxs map[astiencoder.Node]*avfilter.Context, bufferSinkCtx *avfilter.Context, g *avfilter.Graph, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (f *Filterer) {
-	count := atomic.AddUint64(&countFilterer, uint64(1))
-	f = &Filterer{
-		bufferSinkCtx:    bufferSinkCtx,
-		bufferSrcCtxs:    bufferSrcCtxs,
-		e:                e,
-		g:                g,
-		q:                astisync.NewCtxQueue(),
-		statIncomingRate: astistat.NewIncrementStat(),
-		statWorkRatio:    astistat.NewDurationRatioStat(),
-	}
-	f.BaseNode = astiencoder.NewBaseNode(astiencoder.NewEventGeneratorNode(f), e, astiencoder.NodeMetadata{
-		Description: "Filters",
-		Label:       fmt.Sprintf("Filterer #%d", count),
-		Name:        fmt.Sprintf("filterer_%d", count),
-	})
-	f.d = newFrameDispatcher(f, e, c)
-	f.addStats()
-	return
-}
-
 // FiltererOptions represents filterer options
 type FiltererOptions struct {
 	Content string
 	Inputs  map[string]FiltererInput
+	Node    astiencoder.NodeOptions
 }
 
 // FiltererInput represents a filterer input
@@ -64,12 +43,28 @@ type FiltererInput struct {
 	Node    astiencoder.Node
 }
 
-// NewFiltererFromOptions creates a new filterer based on options
-func NewFiltererFromOptions(o FiltererOptions, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (_ *Filterer, err error) {
+// NewFilterer creates a new filterer
+func NewFilterer(o FiltererOptions, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (f *Filterer, err error) {
+	// Extend node metadata
+	count := atomic.AddUint64(&countFilterer, uint64(1))
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("filterer_%d", count), fmt.Sprintf("Filterer #%d", count), "Filters")
+
+	// Create filterer
+	f = &Filterer{
+		bufferSrcCtxs:    make(map[astiencoder.Node]*avfilter.Context),
+		e:                e,
+		g:                avfilter.AvfilterGraphAlloc(),
+		q:                astisync.NewCtxQueue(),
+		statIncomingRate: astistat.NewIncrementStat(),
+		statWorkRatio:    astistat.NewDurationRatioStat(),
+	}
+	f.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(f), e)
+	f.d = newFrameDispatcher(f, e, c)
+	f.addStats()
+
 	// Create graph
-	g := avfilter.AvfilterGraphAlloc()
 	c.Add(func() error {
-		g.AvfilterGraphFree()
+		f.g.AvfilterGraphFree()
 		return nil
 	})
 
@@ -109,22 +104,23 @@ func NewFiltererFromOptions(o FiltererOptions, e astiencoder.EventEmitter, c ast
 	}
 
 	// Create buffer sink ctx
+	// We need to create an intermediate variable to avoid "cgo argument has Go pointer to Go pointer" errors
 	var bufferSinkCtx *avfilter.Context
-	if ret := avfilter.AvfilterGraphCreateFilter(&bufferSinkCtx, bufferSink, "out", "", nil, g); ret < 0 {
+	if ret := avfilter.AvfilterGraphCreateFilter(&bufferSinkCtx, bufferSink, "out", "", nil, f.g); ret < 0 {
 		err = errors.Wrap(NewAvError(ret), "astilibav: avfilter.AvfilterGraphCreateFilter on empty args failed")
 		return
 	}
+	f.bufferSinkCtx = bufferSinkCtx
 
 	// Create inputs
 	inputs := avfilter.AvfilterInoutAlloc()
 	inputs.SetName("out")
-	inputs.SetFilterCtx(bufferSinkCtx)
+	inputs.SetFilterCtx(f.bufferSinkCtx)
 	inputs.SetPadIdx(0)
 	inputs.SetNext(nil)
 
 	// Loop through options inputs
 	var previousOutput *avfilter.Input
-	bufferSrcCtxs := make(map[astiencoder.Node]*avfilter.Context)
 	for n, i := range o.Inputs {
 		// Create buffer
 		bufferSrc := bufferFunc()
@@ -143,7 +139,7 @@ func NewFiltererFromOptions(o FiltererOptions, e astiencoder.EventEmitter, c ast
 
 		// Create ctx
 		var bufferSrcCtx *avfilter.Context
-		if ret := avfilter.AvfilterGraphCreateFilter(&bufferSrcCtx, bufferSrc, "in", args, nil, g); ret < 0 {
+		if ret := avfilter.AvfilterGraphCreateFilter(&bufferSrcCtx, bufferSrc, "in", args, nil, f.g); ret < 0 {
 			err = errors.Wrapf(NewAvError(ret), "astilibav: avfilter.AvfilterGraphCreateFilter on args %s failed", args)
 			return
 		}
@@ -156,26 +152,24 @@ func NewFiltererFromOptions(o FiltererOptions, e astiencoder.EventEmitter, c ast
 		outputs.SetNext(previousOutput)
 
 		// Store ctx
-		bufferSrcCtxs[i.Node] = bufferSrcCtx
+		f.bufferSrcCtxs[i.Node] = bufferSrcCtx
 
 		// Set previous output
 		previousOutput = outputs
 	}
 
 	// Parse content
-	if ret := g.AvfilterGraphParsePtr(o.Content, &inputs, &previousOutput, nil); ret < 0 {
+	if ret := f.g.AvfilterGraphParsePtr(o.Content, &inputs, &previousOutput, nil); ret < 0 {
 		err = errors.Wrapf(NewAvError(ret), "astilibav: g.AvfilterGraphParsePtr on content %s failed", o.Content)
 		return
 	}
 
 	// Configure
-	if ret := g.AvfilterGraphConfig(nil); ret < 0 {
+	if ret := f.g.AvfilterGraphConfig(nil); ret < 0 {
 		err = errors.Wrap(NewAvError(ret), "astilibav: g.AvfilterGraphConfig failed")
 		return
 	}
-
-	// Create filterer
-	return NewFilterer(bufferSrcCtxs, bufferSinkCtx, g, e, c), nil
+	return
 }
 
 func (f *Filterer) addStats() {

@@ -27,64 +27,61 @@ type Decoder struct {
 	statWorkRatio    *astistat.DurationRatioStat
 }
 
+// DecoderOptions represents decoder options
+type DecoderOptions struct {
+	CodecParams *avcodec.CodecParameters
+	Node        astiencoder.NodeOptions
+}
+
 // NewDecoder creates a new decoder
-func NewDecoder(ctxCodec *avcodec.Context, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (d *Decoder) {
+func NewDecoder(o DecoderOptions, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (d *Decoder, err error) {
+	// Extend node metadata
 	count := atomic.AddUint64(&countDecoder, uint64(1))
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("decoder_%d", count), fmt.Sprintf("Decoder #%d", count), "Decodes")
+
+	// Create decoder
 	d = &Decoder{
-		ctxCodec:         ctxCodec,
 		e:                e,
 		q:                astisync.NewCtxQueue(),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
-	d.BaseNode = astiencoder.NewBaseNode(astiencoder.NewEventGeneratorNode(d), e, astiencoder.NodeMetadata{
-		Description: "Decodes",
-		Label:       fmt.Sprintf("Decoder #%d", count),
-		Name:        fmt.Sprintf("decoder_%d", count),
-	})
+	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), e)
 	d.d = newFrameDispatcher(d, e, c)
 	d.addStats()
-	return
-}
 
-// NewDecoderFromCodecParams creates a new decoder from codec params
-func NewDecoderFromCodecParams(codecParams *avcodec.CodecParameters, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (d *Decoder, err error) {
 	// Find decoder
 	var cdc *avcodec.Codec
-	if cdc = avcodec.AvcodecFindDecoder(codecParams.CodecId()); cdc == nil {
-		err = fmt.Errorf("astilibav: no decoder found for codec id %+v", codecParams.CodecId())
+	if cdc = avcodec.AvcodecFindDecoder(o.CodecParams.CodecId()); cdc == nil {
+		err = fmt.Errorf("astilibav: no decoder found for codec id %+v", o.CodecParams.CodecId())
 		return
 	}
 
 	// Alloc context
-	var ctxCodec *avcodec.Context
-	if ctxCodec = cdc.AvcodecAllocContext3(); ctxCodec == nil {
+	if d.ctxCodec = cdc.AvcodecAllocContext3(); d.ctxCodec == nil {
 		err = fmt.Errorf("astilibav: no context allocated for codec %+v", cdc)
 		return
 	}
 
 	// Copy codec parameters
-	if ret := avcodec.AvcodecParametersToContext(ctxCodec, codecParams); ret < 0 {
+	if ret := avcodec.AvcodecParametersToContext(d.ctxCodec, o.CodecParams); ret < 0 {
 		err = errors.Wrap(NewAvError(ret), "astilibav: avcodec.AvcodecParametersToContext failed")
 		return
 	}
 
 	// Open codec
-	if ret := ctxCodec.AvcodecOpen2(cdc, nil); ret < 0 {
+	if ret := d.ctxCodec.AvcodecOpen2(cdc, nil); ret < 0 {
 		err = errors.Wrap(NewAvError(ret), "astilibav: d.ctxCodec.AvcodecOpen2 failed")
 		return
 	}
 
 	// Make sure the codec is closed
 	c.Add(func() error {
-		if ret := ctxCodec.AvcodecClose(); ret < 0 {
+		if ret := d.ctxCodec.AvcodecClose(); ret < 0 {
 			emitAvError(nil, e, ret, "d.ctxCodec.AvcodecClose failed")
 		}
 		return nil
 	})
-
-	// Create decoder
-	d = NewDecoder(ctxCodec, e, c)
 	return
 }
 
