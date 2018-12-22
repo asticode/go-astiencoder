@@ -46,7 +46,7 @@ type EventHandler interface {
 	HandleEvent(e Event)
 }
 
-// LoggerEventHandler represents then logger event handler
+// LoggerEventHandler represents a logger event handler
 type LoggerEventHandler struct{}
 
 // NewLoggerEventHandler creates a new event handler
@@ -67,6 +67,78 @@ func (h *LoggerEventHandler) HandleEvent(e Event) {
 		astilog.Debugf("astiencoder: workflow %s is started", e.Target.(*Workflow).Name())
 	case EventNameWorkflowStopped:
 		astilog.Debugf("astiencoder: workflow %s is stopped", e.Target.(*Workflow).Name())
+	}
+}
+
+// EventCallback represents an event callback
+type EventCallback func(e Event) (deleteListener bool)
+
+// CallbackEventHandler represents a callback event handler
+type CallbackEventHandler struct {
+	// Indexed by target then by event name then by listener idx
+	// We use a map[int]Listener so that deletion is as smooth as possible
+	// It means it doesn't store listeners in order
+	cs map[interface{}]map[string]map[int]EventCallback
+	idx int
+	m  *sync.Mutex
+}
+
+// NewCallbackEventHandler creates a new callback event handler
+func NewCallbackEventHandler() *CallbackEventHandler {
+	return &CallbackEventHandler{
+		cs: make(map[interface{}]map[string]map[int]EventCallback),
+		m:  &sync.Mutex{},
+	}
+}
+
+// Add adds a new callback
+func (h *CallbackEventHandler) Add(target interface{}, eventName string, c EventCallback) {
+	h.m.Lock()
+	defer h.m.Unlock()
+	if _, ok := h.cs[target]; !ok {
+		h.cs[target] = make(map[string]map[int]EventCallback)
+	}
+	if _, ok := h.cs[target][eventName]; !ok {
+		h.cs[target][eventName] = make(map[int]EventCallback)
+	}
+	h.idx++
+	h.cs[target][eventName][h.idx] = c
+}
+
+func (h *CallbackEventHandler) del(target interface{}, eventName string, idx int) {
+	h.m.Lock()
+	defer h.m.Unlock()
+	if _, ok := h.cs[target]; !ok {
+		return
+	}
+	if _, ok := h.cs[target][eventName]; !ok {
+		return
+	}
+	delete(h.cs[target][eventName], idx)
+}
+
+func (h *CallbackEventHandler) callbacks(target interface{}, eventName string) (cs map[int]EventCallback) {
+	h.m.Lock()
+	defer h.m.Unlock()
+	cs = map[int]EventCallback{}
+	if _, ok := h.cs[target]; !ok {
+		return
+	}
+	if _, ok := h.cs[target][eventName]; !ok {
+		return
+	}
+	for k, v := range h.cs[target][eventName] {
+		cs[k] = v
+	}
+	return
+}
+
+// HandleEvent implements the EventHandler interface
+func (h *CallbackEventHandler) HandleEvent(e Event) {
+	for idx, c := range h.callbacks(e.Target, e.Name) {
+		if c(e) {
+			h.del(e.Target, e.Name, idx)
+		}
 	}
 }
 
