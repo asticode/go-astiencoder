@@ -157,7 +157,7 @@ func (w *Workflow) Stop() {
 
 // Pause pauses the workflow
 func (w *Workflow) Pause() {
-	w.bn.pause(func() {
+	w.bn.pauseFunc(func() {
 		for _, n := range w.nodes() {
 			n.Pause()
 		}
@@ -166,7 +166,7 @@ func (w *Workflow) Pause() {
 
 // Continue continues the workflow
 func (w *Workflow) Continue() {
-	w.bn.continuE(func() {
+	w.bn.continueFunc(func() {
 		for _, n := range w.nodes() {
 			n.Continue()
 		}

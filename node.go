@@ -108,7 +108,8 @@ func DisconnectNodes(parent, child Node) {
 
 // NodeOptions represents node options
 type NodeOptions struct {
-	Metadata NodeMetadata
+	Metadata       NodeMetadata
+	NoIndirectStop bool
 }
 
 // BaseNode represents a base node
@@ -269,13 +270,13 @@ func (n *BaseNode) Stop() {
 
 // Pause implements the Starter interface
 func (n *BaseNode) Pause() {
-	n.pause(func() {
+	n.pauseFunc(func() {
 		n.ctxPause, n.cancelPause = context.WithCancel(n.ctx)
 	})
 }
 
 // Pause implements the Starter interface
-func (n *BaseNode) pause(fn func()) {
+func (n *BaseNode) pauseFunc(fn func()) {
 	// Status is not running
 	if n.Status() != StatusRunning {
 		return
@@ -295,14 +296,14 @@ func (n *BaseNode) pause(fn func()) {
 
 // Continue implements the Starter interface
 func (n *BaseNode) Continue() {
-	n.continuE(func() {
+	n.continueFunc(func() {
 		if n.cancelPause != nil {
 			n.cancelPause()
 		}
 	})
 }
 
-func (n *BaseNode) continuE(fn func()) {
+func (n *BaseNode) continueFunc(fn func()) {
 	// Status is not paused
 	if n.Status() != StatusPaused {
 		return
@@ -366,7 +367,7 @@ func (n *BaseNode) ChildIsStopped(m NodeMetadata) {
 		return
 	}
 	delete(n.childrenStarted, m.Name)
-	if len(n.childrenStarted) == 0 {
+	if len(n.childrenStarted) == 0 && !n.o.NoIndirectStop {
 		n.Stop()
 	}
 }
@@ -421,7 +422,7 @@ func (n *BaseNode) ParentIsStopped(m NodeMetadata) {
 		return
 	}
 	delete(n.parentsStarted, m.Name)
-	if len(n.parentsStarted) == 0 {
+	if len(n.parentsStarted) == 0 && !n.o.NoIndirectStop {
 		n.Stop()
 	}
 }
