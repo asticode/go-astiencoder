@@ -24,7 +24,7 @@ type Encoder struct {
 	*astiencoder.BaseNode
 	ctxCodec           *avcodec.Context
 	d                  *pktDispatcher
-	e                  astiencoder.EventEmitter
+	eh                 *astiencoder.EventHandler
 	previousDescriptor Descriptor
 	q                  *astisync.CtxQueue
 	statIncomingRate   *astistat.IncrementStat
@@ -33,12 +33,12 @@ type Encoder struct {
 
 // EncoderOptions represents encoder options
 type EncoderOptions struct {
-	Ctx Context
+	Ctx  Context
 	Node astiencoder.NodeOptions
 }
 
 // NewEncoder creates a new encoder
-func NewEncoder(o EncoderOptions, ee astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (e *Encoder, err error) {
+func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astiencoder.Closer) (e *Encoder, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countEncoder, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("encoder_%d", count), fmt.Sprintf("Encoder #%d", count), "Encodes")
@@ -46,12 +46,12 @@ func NewEncoder(o EncoderOptions, ee astiencoder.EventEmitter, c astiencoder.Clo
 	// Create encoder
 	e = &Encoder{
 		d:                newPktDispatcher(c),
-		e:                ee,
+		eh:               eh,
 		q:                astisync.NewCtxQueue(),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
-	e.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(e), ee)
+	e.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(e), eh)
 	e.addStats()
 
 	// Find encoder
@@ -135,7 +135,7 @@ func NewEncoder(o EncoderOptions, ee astiencoder.EventEmitter, c astiencoder.Clo
 	// Make sure the codec is closed
 	c.Add(func() error {
 		if ret := e.ctxCodec.AvcodecClose(); ret < 0 {
-			emitAvError(nil, ee, ret, "d.e.ctxCodec.AvcodecClose failed")
+			emitAvError(nil, eh, ret, "d.e.ctxCodec.AvcodecClose failed")
 		}
 		return nil
 	})
@@ -232,7 +232,7 @@ func (e *Encoder) encode(p *FrameHandlerPayload) {
 	e.statWorkRatio.Add(true)
 	if ret := avcodec.AvcodecSendFrame(e.ctxCodec, p.Frame); ret < 0 {
 		e.statWorkRatio.Done(true)
-		emitAvError(e, e.e, ret, "avcodec.AvcodecSendFrame failed")
+		emitAvError(e, e.eh, ret, "avcodec.AvcodecSendFrame failed")
 		return
 	}
 	e.statWorkRatio.Done(true)
@@ -256,7 +256,7 @@ func (e *Encoder) receivePkt(p *FrameHandlerPayload) (stop bool) {
 	if ret := avcodec.AvcodecReceivePacket(e.ctxCodec, pkt); ret < 0 {
 		e.statWorkRatio.Done(true)
 		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
-			emitAvError(e, e.e, ret, "avcodec.AvcodecReceivePacket failed")
+			emitAvError(e, e.eh, ret, "avcodec.AvcodecReceivePacket failed")
 		}
 		stop = true
 		return

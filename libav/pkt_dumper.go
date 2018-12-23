@@ -24,7 +24,7 @@ var countPktDumper uint64
 type PktDumper struct {
 	*astiencoder.BaseNode
 	count            uint32
-	e                astiencoder.EventEmitter
+	eh               *astiencoder.EventHandler
 	o                PktDumperOptions
 	q                *astisync.CtxQueue
 	statIncomingRate *astistat.IncrementStat
@@ -36,7 +36,7 @@ type PktDumper struct {
 type PktDumperOptions struct {
 	Data    map[string]interface{}
 	Handler func(pkt *avcodec.Packet, args PktDumperHandlerArgs) error
-	Node astiencoder.NodeOptions
+	Node    astiencoder.NodeOptions
 	Pattern string
 }
 
@@ -46,20 +46,20 @@ type PktDumperHandlerArgs struct {
 }
 
 // NewPktDumper creates a new pk dumper
-func NewPktDumper(o PktDumperOptions, e astiencoder.EventEmitter) (d *PktDumper, err error) {
+func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler) (d *PktDumper, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countPktDumper, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("pkt_dumper_%d", count), fmt.Sprintf("Pkt Dumper #%d", count), "Dumps packets")
 
 	// Create pkt dumper
 	d = &PktDumper{
-		e:                e,
+		eh:               eh,
 		o:                o,
 		q:                astisync.NewCtxQueue(),
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
-	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), e)
+	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)
 	d.addStats()
 
 	// Parse pattern
@@ -127,7 +127,7 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 				buf := &bytes.Buffer{}
 				if err := d.t.Execute(buf, d.o.Data); err != nil {
 					d.statWorkRatio.Done(true)
-					d.e.Emit(astiencoder.EventError(d, errors.Wrapf(err, "astilibav: executing template %s with data %+v failed", d.o.Pattern, d.o.Data)))
+					d.eh.Emit(astiencoder.EventError(d, errors.Wrapf(err, "astilibav: executing template %s with data %+v failed", d.o.Pattern, d.o.Data)))
 					return
 				}
 				d.statWorkRatio.Done(true)
@@ -140,7 +140,7 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			d.statWorkRatio.Add(true)
 			if err := d.o.Handler(p.Pkt, args); err != nil {
 				d.statWorkRatio.Done(true)
-				d.e.Emit(astiencoder.EventError(d, errors.Wrapf(err, "astilibav: pkt dump func with args %+v failed", args)))
+				d.eh.Emit(astiencoder.EventError(d, errors.Wrapf(err, "astilibav: pkt dump func with args %+v failed", args)))
 				return
 			}
 			d.statWorkRatio.Done(true)

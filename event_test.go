@@ -3,32 +3,48 @@ package astiencoder
 import (
 	"testing"
 
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 )
 
-type mockedEventHandler struct {
-	es []Event
-}
-
-func newMockedEventHandler() *mockedEventHandler {
-	return &mockedEventHandler{}
-}
-
-func (h *mockedEventHandler) HandleEvent(e Event) {
-	h.es = append(h.es, e)
-}
-
 func TestEvent(t *testing.T) {
-	ee := NewDefaultEventEmitter()
-	h := newMockedEventHandler()
-	ee.AddHandler(h)
-	e1 := Event{
-		Name:    "1",
-		Payload: "1",
-	}
-	e2 := EventError(nil, errors.New("2"))
-	ee.Emit(e1)
-	ee.Emit(e2)
-	assert.Equal(t, []Event{e1, e2}, h.es)
+	// Setup
+	eh := NewEventHandler()
+	var es []string
+
+	// Callbacks
+	eh.Add("test-1", "test-1", func(evt Event) bool {
+		es = append(es, "1")
+		return true
+	})
+	eh.Add("test-2", "test-2", func(evt Event) bool {
+		es = append(es, "2")
+		return false
+	})
+	eh.AddForTarget("test-1", func(evt Event) bool {
+		es = append(es, "3")
+		return false
+	})
+	eh.AddForEventName("test-2", func(evt Event) bool {
+		es = append(es, "4")
+		return false
+	})
+	eh.AddForAll(func(evt Event) bool {
+		es = append(es, "5")
+		return false
+	})
+
+	// Emit #1
+	eh.Emit(Event{
+		Name:   "test-1",
+		Target: "test-1",
+	})
+	assert.Equal(t, []string{"1", "3", "5"}, es)
+	es = []string(nil)
+
+	// Emit #2
+	eh.Emit(Event{
+		Name:   "test-2",
+		Target: "test-2",
+	})
+	assert.Equal(t, []string{"2", "4", "5"}, es)
 }

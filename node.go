@@ -120,7 +120,7 @@ type BaseNode struct {
 	childrenStarted map[string]bool
 	ctx             context.Context
 	ctxPause        context.Context
-	ee              EventEmitter
+	eh              *EventHandler
 	eg              EventGenerator
 	o               NodeOptions
 	m               *sync.Mutex
@@ -133,12 +133,12 @@ type BaseNode struct {
 }
 
 // NewBaseNode creates a new base node
-func NewBaseNode(o NodeOptions, eg EventGenerator, ee EventEmitter) (n *BaseNode) {
+func NewBaseNode(o NodeOptions, eg EventGenerator, eh *EventHandler) (n *BaseNode) {
 	n = &BaseNode{
 		children:        make(map[string]Node),
 		childrenStarted: make(map[string]bool),
 		m:               &sync.Mutex{},
-		ee:              ee,
+		eh:              eh,
 		eg:              eg,
 		o:               o,
 		oStart:          &sync.Once{},
@@ -206,7 +206,7 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 		n.m.Unlock()
 
 		// Send started event
-		n.ee.Emit(n.eg.Event(EventTypeStarted, nil))
+		n.eh.Emit(n.eg.Event(EventTypeStarted, nil))
 
 		// Execute the rest in a goroutine
 		go func() {
@@ -214,7 +214,7 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 			defer t.Done()
 
 			// Send stopped event
-			defer n.ee.Emit(n.eg.Event(EventTypeStopped, nil))
+			defer n.eh.Emit(n.eg.Event(EventTypeStopped, nil))
 
 			// Make sure the status is updated once everything is done
 			defer func() {
@@ -291,7 +291,7 @@ func (n *BaseNode) pauseFunc(fn func()) {
 	n.m.Unlock()
 
 	// Send paused event
-	n.ee.Emit(n.eg.Event(EventTypePaused, nil))
+	n.eh.Emit(n.eg.Event(EventTypePaused, nil))
 }
 
 // Continue implements the Starter interface
@@ -318,7 +318,7 @@ func (n *BaseNode) continueFunc(fn func()) {
 	n.m.Unlock()
 
 	// Send continued event
-	n.ee.Emit(n.eg.Event(EventTypeContinued, nil))
+	n.eh.Emit(n.eg.Event(EventTypeContinued, nil))
 }
 
 // HandlePause handles the pause
@@ -478,5 +478,5 @@ func (n *BaseNode) statsHandleFunc(stats []astistat.Stat) {
 	}
 
 	// Send event
-	n.ee.Emit(n.eg.Event(EventTypeStats, ss))
+	n.eh.Emit(n.eg.Event(EventTypeStats, ss))
 }

@@ -20,9 +20,9 @@ var countMuxer uint64
 // Muxer represents an object capable of muxing packets into an output
 type Muxer struct {
 	*astiencoder.BaseNode
-	c                astiencoder.CloseFuncAdder
+	c                *astiencoder.Closer
 	ctxFormat        *avformat.Context
-	e                astiencoder.EventEmitter
+	eh               *astiencoder.EventHandler
 	o                *sync.Once
 	q                *astisync.CtxQueue
 	restamper        PktRestamper
@@ -40,7 +40,7 @@ type MuxerOptions struct {
 }
 
 // NewMuxer creates a new muxer
-func NewMuxer(o MuxerOptions, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (m *Muxer, err error) {
+func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astiencoder.Closer) (m *Muxer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countMuxer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("muxer_%d", count), fmt.Sprintf("Muxer #%d", count), fmt.Sprintf("Muxes to %s", o.URL))
@@ -48,14 +48,14 @@ func NewMuxer(o MuxerOptions, e astiencoder.EventEmitter, c astiencoder.CloseFun
 	// Create muxer
 	m = &Muxer{
 		c:                c,
-		e:                e,
+		eh:               eh,
 		o:                &sync.Once{},
 		q:                astisync.NewCtxQueue(),
 		restamper:        o.Restamper,
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
-	m.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(m), e)
+	m.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(m), eh)
 	m.addStats()
 
 	// Alloc format context
@@ -130,7 +130,7 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		var ret int
 		m.o.Do(func() { ret = m.ctxFormat.AvformatWriteHeader(nil) })
 		if ret < 0 {
-			emitAvError(m, m.e, ret, "m.ctxFormat.AvformatWriteHeader on %s failed", m.ctxFormat.Filename())
+			emitAvError(m, m.eh, ret, "m.ctxFormat.AvformatWriteHeader on %s failed", m.ctxFormat.Filename())
 			return
 		}
 
@@ -165,7 +165,7 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			m.statWorkRatio.Add(true)
 			if ret := m.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(p.Pkt))); ret < 0 {
 				m.statWorkRatio.Done(true)
-				emitAvError(m, m.e, ret, "m.ctxFormat.AvInterleavedWriteFrame failed")
+				emitAvError(m, m.eh, ret, "m.ctxFormat.AvInterleavedWriteFrame failed")
 				return
 			}
 			m.statWorkRatio.Done(true)

@@ -411,35 +411,38 @@ type ExposedStat struct {
 }
 
 // HandleEvent implements the EventHandler interface
-func (s *workflowPoolServer) HandleEvent(e Event) {
-	n := e.Name
-	var p interface{}
-	switch e.Name {
-	case EventNameError:
-		p = errors.Cause(e.Payload.(error))
-	case EventNameWorkflowContinued, EventNameWorkflowPaused, EventNameWorkflowStarted, EventNameWorkflowStopped:
-		p = e.Target.(*Workflow).Name()
-	case EventNameNodeStats, EventNameWorkflowStats:
-		np := ExposedStats{}
-		if e.Name == EventNameNodeStats {
-			np.Name = e.Target.(Node).Metadata().Name
-		} else {
-			np.Name = e.Target.(*Workflow).Name()
+func (s *workflowPoolServer) adaptEventHandler(eh *EventHandler) {
+	eh.AddForAll(func(e Event) bool {
+		n := e.Name
+		var p interface{}
+		switch e.Name {
+		case EventNameError:
+			p = errors.Cause(e.Payload.(error))
+		case EventNameWorkflowContinued, EventNameWorkflowPaused, EventNameWorkflowStarted, EventNameWorkflowStopped:
+			p = e.Target.(*Workflow).Name()
+		case EventNameNodeStats, EventNameWorkflowStats:
+			np := ExposedStats{}
+			if e.Name == EventNameNodeStats {
+				np.Name = e.Target.(Node).Metadata().Name
+			} else {
+				np.Name = e.Target.(*Workflow).Name()
+			}
+			for _, s := range e.Payload.([]EventStat) {
+				np.Stats = append(np.Stats, ExposedStat{
+					Description: s.Description,
+					Label:       s.Label,
+					Unit:        s.Unit,
+					Value:       s.Value,
+				})
+			}
+			n = "stats"
+			p = np
+		case EventNameNodeContinued, EventNameNodePaused, EventNameNodeStarted, EventNameNodeStopped:
+			p = e.Target.(Node).Metadata().Name
 		}
-		for _, s := range e.Payload.([]EventStat) {
-			np.Stats = append(np.Stats, ExposedStat{
-				Description: s.Description,
-				Label:       s.Label,
-				Unit:        s.Unit,
-				Value:       s.Value,
-			})
-		}
-		n = "stats"
-		p = np
-	case EventNameNodeContinued, EventNameNodePaused, EventNameNodeStarted, EventNameNodeStopped:
-		p = e.Target.(Node).Metadata().Name
-	}
-	s.sendEventToWebsocket(n, p)
+		s.sendEventToWebsocket(n, p)
+		return false
+	})
 }
 
 func (s *workflowPoolServer) sendEventToWebsocket(eventName string, payload interface{}) {

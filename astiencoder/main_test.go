@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"encoding/json"
-	"github.com/asticode/goav/avutil"
 	"io/ioutil"
 	"os"
 	"testing"
+
+	"github.com/asticode/goav/avutil"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/pkg/errors"
@@ -18,8 +19,8 @@ func init() {
 }
 
 func testJob(t *testing.T, jobPath string, assertPaths func(j Job) map[string]string) {
-	// Create event emitter
-	ee := astiencoder.NewDefaultEventEmitter()
+	// Create event handler
+	eh := astiencoder.NewEventHandler()
 
 	// Create workflow pool
 	wp := astiencoder.NewWorkflowPool()
@@ -27,7 +28,7 @@ func testJob(t *testing.T, jobPath string, assertPaths func(j Job) map[string]st
 	// Create encoder
 	cfg := &ConfigurationEncoder{}
 	cfg.Exec.StopWhenWorkflowsAreStopped = true
-	e := newEncoder(cfg, ee, wp)
+	e := newEncoder(cfg, eh, wp)
 
 	// Open job
 	j, err := openJob(jobPath)

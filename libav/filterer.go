@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"sync"
+
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
@@ -22,19 +24,23 @@ type Filterer struct {
 	*astiencoder.BaseNode
 	bufferSinkCtx    *avfilter.Context
 	bufferSrcCtxs    map[astiencoder.Node]*avfilter.Context
+	c                *astiencoder.Closer
+	cc               *astiencoder.Closer // Child closer used to close only things related to the filterer
 	d                *frameDispatcher
-	e                astiencoder.EventEmitter
+	eh               *astiencoder.EventHandler
 	g                *avfilter.Graph
 	q                *astisync.CtxQueue
+	s                FiltererSwitcher
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
 }
 
 // FiltererOptions represents filterer options
 type FiltererOptions struct {
-	Content string
-	Inputs  map[string]FiltererInput
-	Node    astiencoder.NodeOptions
+	Content  string
+	Inputs   map[string]FiltererInput
+	Node     astiencoder.NodeOptions
+	Switcher FiltererSwitcher
 }
 
 // FiltererInput represents a filterer input
@@ -44,7 +50,7 @@ type FiltererInput struct {
 }
 
 // NewFilterer creates a new filterer
-func NewFilterer(o FiltererOptions, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (f *Filterer, err error) {
+func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astiencoder.Closer) (f *Filterer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countFilterer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("filterer_%d", count), fmt.Sprintf("Filterer #%d", count), "Filters")
@@ -52,18 +58,24 @@ func NewFilterer(o FiltererOptions, e astiencoder.EventEmitter, c astiencoder.Cl
 	// Create filterer
 	f = &Filterer{
 		bufferSrcCtxs:    make(map[astiencoder.Node]*avfilter.Context),
-		e:                e,
+		c:                c,
+		cc:               c.NewChild(),
+		eh:               eh,
 		g:                avfilter.AvfilterGraphAlloc(),
 		q:                astisync.NewCtxQueue(),
+		s:                o.Switcher,
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
 	}
-	f.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(f), e)
-	f.d = newFrameDispatcher(f, e, c)
+	f.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(f), eh)
+	f.d = newFrameDispatcher(f, eh, f.cc)
+	if f.s == nil {
+		f.s = newFiltererSwitcher()
+	}
 	f.addStats()
 
 	// Create graph
-	c.Add(func() error {
+	f.cc.Add(func() error {
 		f.g.AvfilterGraphFree()
 		return nil
 	})
@@ -224,6 +236,11 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Make sure to stop the queue properly
 		defer f.q.Stop()
 
+		// Reset switcher
+		if f.s != nil {
+			f.s.Reset()
+		}
+
 		// Start queue
 		f.q.Start(func(dp interface{}) {
 			// Handle pause
@@ -241,14 +258,26 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 				return
 			}
 
+			// Check switcher
+			if f.s != nil {
+				if ko := f.s.ShouldIn(p.Node); ko {
+					return
+				}
+			}
+
 			// Push frame in graph
 			f.statWorkRatio.Add(true)
 			if ret := f.g.AvBuffersrcAddFrameFlags(bufferSrcCtx, p.Frame, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
 				f.statWorkRatio.Done(true)
-				emitAvError(f, f.e, ret, "f.g.AvBuffersrcAddFrameFlags failed")
+				emitAvError(f, f.eh, ret, "f.g.AvBuffersrcAddFrameFlags failed")
 				return
 			}
 			f.statWorkRatio.Done(true)
+
+			// Increment switcher
+			if f.s != nil {
+				f.s.IncIn(p.Node)
+			}
 
 			// Loop
 			for {
@@ -266,17 +295,29 @@ func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 	fm := f.d.p.get()
 	defer f.d.p.put(fm)
 
+	// Check switcher
+	if f.s != nil {
+		if stop = f.s.ShouldOut(); stop {
+			return
+		}
+	}
+
 	// Pull filtered frame from graph
 	f.statWorkRatio.Add(true)
 	if ret := f.g.AvBuffersinkGetFrame(f.bufferSinkCtx, fm); ret < 0 {
 		f.statWorkRatio.Done(true)
 		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
-			emitAvError(f, f.e, ret, "f.g.AvBuffersinkGetFrame failed")
+			emitAvError(f, f.eh, ret, "f.g.AvBuffersinkGetFrame failed")
 		}
 		stop = true
 		return
 	}
 	f.statWorkRatio.Done(true)
+
+	// Increment switcher
+	if f.s != nil {
+		f.s.IncOut()
+	}
 
 	// Dispatch frame
 	f.d.dispatch(fm, newFiltererDescriptor(f.bufferSinkCtx, descriptor))
@@ -295,6 +336,106 @@ func (f *Filterer) SendCommand(target, cmd, arg string, flags int) (err error) {
 		err = errors.Wrapf(NewAvError(ret), "astilibav: f.g.AvfilterGraphSendCommand for target %s, cmd %s, arg %s and flag %d failed with res %s", target, cmd, arg, flags, res)
 		return
 	}
+	return
+}
+
+// FiltererSwitchOptions represents filterer switch options
+type FiltererSwitchOptions struct {
+	Callbacks FiltererSwitcherCallbacks
+	Filter    FiltererOptions
+	Workflow  *astiencoder.Workflow
+}
+
+// Switch disconnects/stops/closes the current filterer and starts/connects the new filterer properly
+func (f *Filterer) Switch(opt FiltererSwitchOptions) (nf *Filterer, err error) {
+	// Create next filterer
+	if nf, err = NewFilterer(opt.Filter, f.eh, f.c); err != nil {
+		err = errors.Wrap(err, "astilibav: creating new filterer failed")
+		return
+	}
+
+	// Connect next filterer to previous filterer's children
+	for _, c := range f.Children() {
+		nf.Connect(c.(FrameHandler))
+	}
+
+	// Start next filterer
+	opt.Workflow.StartNodes(nf)
+
+	// Index previous filterer nodes
+	pns := make(map[astiencoder.Node]bool)
+	for _, n := range f.Parents() {
+		pns[n] = true
+	}
+
+	// Index next filterer nodes
+	nns := make(map[astiencoder.Node]bool)
+	for _, i := range opt.Filter.Inputs {
+		nns[i.Node] = true
+	}
+
+	// Create callbacks
+	cs := FiltererSwitcherCallbacks{
+		In: make(map[astiencoder.Node]func()),
+		Out: func() {
+			// Disconnect previous filterer's children
+			for _, c := range f.Children() {
+				f.Disconnect(c.(FrameHandler))
+			}
+
+			// Make sure to close the previous filter once stopped
+			f.eh.Add(f, astiencoder.EventNameNodeStopped, func(e astiencoder.Event) bool {
+				if err := f.cc.Close(); err != nil {
+					f.eh.Emit(astiencoder.EventError(f, errors.Wrap(err, "astilibav: closing filterer failed")))
+				}
+				return true
+			})
+
+			// Stop previous filterer
+			f.Stop()
+
+			// Custom
+			if opt.Callbacks.Out != nil {
+				opt.Callbacks.Out()
+			}
+		},
+	}
+
+	// Loop through previous filterer's parents
+	o := &sync.Once{}
+	for _, p := range f.Parents() {
+		cs.In[p] = func(n astiencoder.Node) func() {
+			return func() {
+				// Assert node
+				c := n.(FrameHandlerConnector)
+
+				// Disconnect node
+				c.Disconnect(f)
+
+				// Connect node if part of next filterer's inputs
+				if _, ok := nns[n]; ok {
+					c.Connect(nf)
+				}
+
+				// Connect other nodes only once
+				o.Do(func() {
+					for n := range nns {
+						if _, ok := pns[n]; !ok {
+							n.(FrameHandlerConnector).Connect(nf)
+						}
+					}
+				})
+
+				// Custom
+				if fn, ok := opt.Callbacks.In[n]; ok {
+					fn()
+				}
+			}
+		}(p)
+	}
+
+	// Switch
+	f.s.Switch(cs)
 	return
 }
 

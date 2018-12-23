@@ -26,7 +26,7 @@ type Demuxer struct {
 	*astiencoder.BaseNode
 	ctxFormat     *avformat.Context
 	d             *pktDispatcher
-	e             astiencoder.EventEmitter
+	eh            *astiencoder.EventHandler
 	emulateRate   bool
 	interruptRet  *int
 	loop          bool
@@ -67,7 +67,7 @@ type DemuxerOptions struct {
 }
 
 // NewDemuxer creates a new demuxer
-func NewDemuxer(o DemuxerOptions, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) (d *Demuxer, err error) {
+func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astiencoder.Closer) (d *Demuxer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countDemuxer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("demuxer_%d", count), fmt.Sprintf("Demuxer #%d", count), fmt.Sprintf("Demuxes %s", o.URL))
@@ -75,13 +75,13 @@ func NewDemuxer(o DemuxerOptions, e astiencoder.EventEmitter, c astiencoder.Clos
 	// Create demuxer
 	d = &Demuxer{
 		d:             newPktDispatcher(c),
-		e:             e,
+		eh:            eh,
 		emulateRate:   o.EmulateRate,
 		loop:          o.Loop,
 		ss:            make(map[int]*demuxerStream),
 		statWorkRatio: astistat.NewDurationRatioStat(),
 	}
-	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), e)
+	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)
 	d.addStats()
 
 	// If loop is enabled, we need to add a restamper
@@ -233,13 +233,13 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 		d.statWorkRatio.Done(true)
 		if ret != avutil.AVERROR_EOF || !d.loop {
 			if ret != avutil.AVERROR_EOF {
-				emitAvError(d, d.e, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
+				emitAvError(d, d.eh, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
 			}
 			stop = true
 		} else if d.loopFirstPkt != nil {
 			// Seek to first pkt
 			if ret = d.ctxFormat.AvSeekFrame(d.loopFirstPkt.s.Index(), d.loopFirstPkt.dts, avformat.AVSEEK_FLAG_BACKWARD); ret < 0 {
-				emitAvError(d, d.e, ret, "ctxFormat.AvSeekFrame on %s with stream idx %v and ts %v failed", d.ctxFormat.Filename(), d.loopFirstPkt.s.Index(), d.loopFirstPkt.dts)
+				emitAvError(d, d.eh, ret, "ctxFormat.AvSeekFrame on %s with stream idx %v and ts %v failed", d.ctxFormat.Filename(), d.loopFirstPkt.s.Index(), d.loopFirstPkt.dts)
 				stop = true
 			}
 		}

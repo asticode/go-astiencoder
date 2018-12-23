@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/asticode/go-astilog"
+	"sort"
 )
 
 // Default event names
@@ -27,6 +28,12 @@ var (
 	EventTypeStopped           = "stopped"
 )
 
+// Event defaults
+const (
+	eventDefaultEventName = ""
+	eventDefaultTarget    = "default"
+)
+
 // Event is an event coming out of the encoder
 type Event struct {
 	Name    string
@@ -43,69 +50,28 @@ func EventError(target interface{}, err error) Event {
 	}
 }
 
-// EventHandler represents an object that can handle events
-type EventHandler interface {
-	HandleEvent(e Event)
-}
-
-// LoggerEventHandler represents a logger event handler
-type LoggerEventHandler struct{}
-
-// NewLoggerEventHandler creates a new event handler
-func NewLoggerEventHandler() *LoggerEventHandler {
-	return &LoggerEventHandler{}
-}
-
-// Handle implements the EventHandler interface
-func (h *LoggerEventHandler) HandleEvent(e Event) {
-	switch e.Name {
-	case EventNameError:
-		var t string
-		if v, ok := e.Target.(Node); ok{
-			t = v.Metadata().Name
-		} else if v, ok := e.Target.(*Workflow); ok {
-			t = v.Name()
-		} else if e.Target != nil {
-			t = fmt.Sprintf("%p", e.Target)
-		}
-		if len(t) > 0 {
-			t = "(" + t + ")"
-		}
-		astilog.Errorf("%s%s", e.Payload.(error), t)
-	case EventNameNodeStarted:
-		astilog.Debugf("astiencoder: node %s is started", e.Target.(Node).Metadata().Name)
-	case EventNameNodeStopped:
-		astilog.Debugf("astiencoder: node %s is stopped", e.Target.(Node).Metadata().Name)
-	case EventNameWorkflowStarted:
-		astilog.Debugf("astiencoder: workflow %s is started", e.Target.(*Workflow).Name())
-	case EventNameWorkflowStopped:
-		astilog.Debugf("astiencoder: workflow %s is stopped", e.Target.(*Workflow).Name())
-	}
-}
-
-// EventCallback represents an event callback
-type EventCallback func(e Event) (deleteListener bool)
-
-// CallbackEventHandler represents a callback event handler
-type CallbackEventHandler struct {
+// EventHandler represents an event handler
+type EventHandler struct {
 	// Indexed by target then by event name then by listener idx
 	// We use a map[int]Listener so that deletion is as smooth as possible
-	// It means it doesn't store listeners in order
 	cs  map[interface{}]map[string]map[int]EventCallback
 	idx int
 	m   *sync.Mutex
 }
 
-// NewCallbackEventHandler creates a new callback event handler
-func NewCallbackEventHandler() *CallbackEventHandler {
-	return &CallbackEventHandler{
+// EventCallback represents an event callback
+type EventCallback func(e Event) (deleteListener bool)
+
+// NewEventHandler creates a new event handler
+func NewEventHandler() *EventHandler {
+	return &EventHandler{
 		cs: make(map[interface{}]map[string]map[int]EventCallback),
 		m:  &sync.Mutex{},
 	}
 }
 
-// Add adds a new callback
-func (h *CallbackEventHandler) Add(target interface{}, eventName string, c EventCallback) {
+// Add adds a new callback for a specific target and event name
+func (h *EventHandler) Add(target interface{}, eventName string, c EventCallback) {
 	h.m.Lock()
 	defer h.m.Unlock()
 	if _, ok := h.cs[target]; !ok {
@@ -118,7 +84,22 @@ func (h *CallbackEventHandler) Add(target interface{}, eventName string, c Event
 	h.cs[target][eventName][h.idx] = c
 }
 
-func (h *CallbackEventHandler) del(target interface{}, eventName string, idx int) {
+// AddForEventName adds a new callback for a specific event name
+func (h *EventHandler) AddForEventName(eventName string, c EventCallback) {
+	h.Add(eventDefaultTarget, eventName, c)
+}
+
+// AddForTarget adds a new callback for a specific target
+func (h *EventHandler) AddForTarget(target interface{}, c EventCallback) {
+	h.Add(target, eventDefaultEventName, c)
+}
+
+// AddForAll adds a new callback for all events
+func (h *EventHandler) AddForAll(c EventCallback) {
+	h.Add(eventDefaultTarget, eventDefaultEventName, c)
+}
+
+func (h *EventHandler) del(target interface{}, eventName string, idx int) {
 	h.m.Lock()
 	defer h.m.Unlock()
 	if _, ok := h.cs[target]; !ok {
@@ -130,61 +111,96 @@ func (h *CallbackEventHandler) del(target interface{}, eventName string, idx int
 	delete(h.cs[target][eventName], idx)
 }
 
-func (h *CallbackEventHandler) callbacks(target interface{}, eventName string) (cs map[int]EventCallback) {
+type eventHandlerCallback struct {
+	c         EventCallback
+	eventName string
+	idx       int
+	target    interface{}
+}
+
+func (h *EventHandler) callbacks(target interface{}, eventName string) (cs []eventHandlerCallback) {
+	// Lock
 	h.m.Lock()
 	defer h.m.Unlock()
-	cs = map[int]EventCallback{}
-	if _, ok := h.cs[target]; !ok {
-		return
+
+	// Index callbacks
+	ics := make(map[int]eventHandlerCallback)
+	var idxs []int
+	for _, target := range []interface{}{eventDefaultTarget, target} {
+		if _, ok := h.cs[target]; ok {
+			for _, eventName := range []string{eventDefaultEventName, eventName} {
+				if _, ok := h.cs[target][eventName]; ok {
+					for idx, c := range h.cs[target][eventName] {
+						ics[idx] = eventHandlerCallback{
+							c:         c,
+							eventName: eventName,
+							idx:       idx,
+							target:    target,
+						}
+						idxs = append(idxs, idx)
+					}
+				}
+			}
+		}
 	}
-	if _, ok := h.cs[target][eventName]; !ok {
-		return
-	}
-	for k, v := range h.cs[target][eventName] {
-		cs[k] = v
+
+	// Sort
+	sort.Ints(idxs)
+
+	// Append
+	for _, idx := range idxs {
+		cs = append(cs, ics[idx])
 	}
 	return
 }
 
-// HandleEvent implements the EventHandler interface
-func (h *CallbackEventHandler) HandleEvent(e Event) {
-	for idx, c := range h.callbacks(e.Target, e.Name) {
-		if c(e) {
-			h.del(e.Target, e.Name, idx)
+// Emit emits an event
+func (h *EventHandler) Emit(e Event) {
+	for _, c := range h.callbacks(e.Target, e.Name) {
+		if c.c(e) {
+			h.del(c.target, c.eventName, c.idx)
 		}
 	}
 }
 
-// EventEmitter represents an object capable of emitting events
-type EventEmitter interface {
-	Emit(e Event)
-}
+// LoggerEventHandlerAdapter adapts the event handler so that it logs the events properly
+func LoggerEventHandlerAdapter(h *EventHandler) {
+	// Error
+	h.AddForEventName(EventNameError, func(e Event) bool {
+		var t string
+		if v, ok := e.Target.(Node); ok {
+			t = v.Metadata().Name
+		} else if v, ok := e.Target.(*Workflow); ok {
+			t = v.Name()
+		} else if e.Target != nil {
+			t = fmt.Sprintf("%p", e.Target)
+		}
+		if len(t) > 0 {
+			t = "(" + t + ")"
+		}
+		astilog.Errorf("%s%s", e.Payload.(error), t)
+		return false
+	})
 
-// DefaultEventEmitter represents the default event emitter
-type DefaultEventEmitter struct {
-	hs []EventHandler
-	m  *sync.Mutex
-}
+	// Node
+	h.AddForEventName(EventNameNodeStarted, func(e Event) bool {
+		astilog.Debugf("astiencoder: node %s is started", e.Target.(Node).Metadata().Name)
+		return false
+	})
+	h.AddForEventName(EventNameNodeStopped, func(e Event) bool {
+		astilog.Debugf("astiencoder: node %s is stopped", e.Target.(Node).Metadata().Name)
+		return false
+	})
 
-// NewDefaultEventEmitter creates a new default event emitter
-func NewDefaultEventEmitter() *DefaultEventEmitter {
-	return &DefaultEventEmitter{m: &sync.Mutex{}}
-}
-
-// AddHandler adds a new handler
-func (e *DefaultEventEmitter) AddHandler(h EventHandler) {
-	e.m.Lock()
-	defer e.m.Unlock()
-	e.hs = append(e.hs, h)
-}
-
-// Emit emits an event
-func (e *DefaultEventEmitter) Emit(evt Event) {
-	e.m.Lock()
-	defer e.m.Unlock()
-	for _, h := range e.hs {
-		h.HandleEvent(evt)
-	}
+	// Workflow
+	h.AddForEventName(EventNameWorkflowStarted, func(e Event) bool {
+		astilog.Debugf("astiencoder: workflow %s is started", e.Target.(*Workflow).Name())
+		return false
+	})
+	h.AddForEventName(EventNameWorkflowStopped, func(e Event) bool {
+		astilog.Debugf("astiencoder: workflow %s is stopped", e.Target.(*Workflow).Name())
+		return false
+	})
 }
 
 // EventGenerator represents an object capable of generating an event based on its type

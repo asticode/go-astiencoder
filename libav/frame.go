@@ -28,8 +28,8 @@ type FrameHandlerPayload struct {
 }
 
 type frameDispatcher struct {
-	c            astiencoder.CloseFuncAdder
-	e            astiencoder.EventEmitter
+	c            *astiencoder.Closer
+	eh           *astiencoder.EventHandler
 	hs           map[string]FrameHandler
 	m            *sync.Mutex
 	n            astiencoder.Node
@@ -38,10 +38,10 @@ type frameDispatcher struct {
 	wg           *sync.WaitGroup
 }
 
-func newFrameDispatcher(n astiencoder.Node, e astiencoder.EventEmitter, c astiencoder.CloseFuncAdder) *frameDispatcher {
+func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, c *astiencoder.Closer) *frameDispatcher {
 	return &frameDispatcher{
 		c:            c,
-		e:            e,
+		eh:           eh,
 		hs:           make(map[string]FrameHandler),
 		m:            &sync.Mutex{},
 		n:            n,
@@ -92,7 +92,7 @@ func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
 		// Copy frame
 		hF := d.p.get()
 		if ret := avutil.AvFrameRef(hF, f); ret < 0 {
-			emitAvError(d, d.e, ret, "avutil.AvFrameRef failed")
+			emitAvError(d, d.eh, ret, "avutil.AvFrameRef failed")
 			d.wg.Done()
 			continue
 		}
@@ -124,12 +124,12 @@ func (d *frameDispatcher) addStats(s *astistat.Stater) {
 }
 
 type framePool struct {
-	c astiencoder.CloseFuncAdder
+	c *astiencoder.Closer
 	m *sync.Mutex
 	p []*avutil.Frame
 }
 
-func newFramePool(c astiencoder.CloseFuncAdder) *framePool {
+func newFramePool(c *astiencoder.Closer) *framePool {
 	return &framePool{
 		c: c,
 		m: &sync.Mutex{},

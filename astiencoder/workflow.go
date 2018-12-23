@@ -17,11 +17,11 @@ func addWorkflow(name string, j Job, e *encoder) (w *astiencoder.Workflow, err e
 	c := astiencoder.NewCloser()
 
 	// Create workflow
-	w = astiencoder.NewWorkflow(e.w.Context(), name, e.ee, e.w.NewTask, c)
+	w = astiencoder.NewWorkflow(e.w.Context(), name, e.eh, e.w.NewTask, c)
 
 	// Build workflow
 	b := newBuilder()
-	if err = b.buildWorkflow(j, w, e.ee, c); err != nil {
+	if err = b.buildWorkflow(j, w, e.eh, c); err != nil {
 		err = errors.Wrap(err, "main: building workflow failed")
 		return
 	}
@@ -50,24 +50,24 @@ type openedOutput struct {
 type buildData struct {
 	c        *astiencoder.Closer
 	decoders map[*astilibav.Demuxer]map[*avformat.Stream]*astilibav.Decoder
-	ee       astiencoder.EventEmitter
+	eh *astiencoder.EventHandler
 	inputs   map[string]openedInput
 	outputs  map[string]openedOutput
 	w        *astiencoder.Workflow
 }
 
-func newBuildData(w *astiencoder.Workflow, ee astiencoder.EventEmitter, c *astiencoder.Closer) *buildData {
+func newBuildData(w *astiencoder.Workflow, eh *astiencoder.EventHandler, c *astiencoder.Closer) *buildData {
 	return &buildData{
 		c:        c,
-		ee:       ee,
+		eh:       eh,
 		decoders: make(map[*astilibav.Demuxer]map[*avformat.Stream]*astilibav.Decoder),
 		w:        w,
 	}
 }
 
-func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow, ee astiencoder.EventEmitter, c *astiencoder.Closer) (err error) {
+func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow, eh *astiencoder.EventHandler, c *astiencoder.Closer) (err error) {
 	// Create build data
-	bd := newBuildData(w, ee, c)
+	bd := newBuildData(w, eh, c)
 
 	// No inputs
 	if len(j.Inputs) == 0 {
@@ -120,7 +120,7 @@ func (b *builder) openInputs(j Job, bd *buildData) (is map[string]openedInput, e
 			Dict:        cfg.Dict,
 			EmulateRate: cfg.EmulateRate,
 			URL:         cfg.URL,
-		}, bd.ee, bd.c); err != nil {
+		}, bd.eh, bd.c); err != nil {
 			err = errors.Wrap(err, "main: creating demuxer failed")
 			return
 		}
@@ -150,7 +150,7 @@ func (b *builder) openOutputs(j Job, bd *buildData) (os map[string]openedOutput,
 			// The writer is created afterwards
 		default:
 			// Create muxer
-			if oo.m, err = astilibav.NewMuxer(astilibav.MuxerOptions{URL: cfg.URL}, bd.ee, bd.c); err != nil {
+			if oo.m, err = astilibav.NewMuxer(astilibav.MuxerOptions{URL: cfg.URL}, bd.eh, bd.c); err != nil {
 				err = errors.Wrap(err, "main: creating muxer failed")
 				return
 			}
@@ -240,7 +240,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 
 			// Create encoder
 			var e *astilibav.Encoder
-			if e, err = astilibav.NewEncoder(astilibav.EncoderOptions{Ctx: outCtx}, bd.ee, bd.c); err != nil {
+			if e, err = astilibav.NewEncoder(astilibav.EncoderOptions{Ctx: outCtx}, bd.eh, bd.c); err != nil {
 				err = errors.Wrapf(err, "main: creating encoder for stream 0x%x(%d) of input %s failed", is.Id(), is.Id(), i.c.Name)
 				return
 			}
@@ -264,7 +264,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 						Data:    map[string]interface{}{"input": i.c.Name},
 						Handler: astilibav.PktDumpFile,
 						Pattern: o.o.c.URL,
-					}, bd.ee); err != nil {
+					}, bd.eh); err != nil {
 						err = errors.Wrapf(err, "main: creating pkt dumper for output %s with conf %+v failed", o.c.Name, o.c)
 						return
 					}
@@ -408,7 +408,7 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 	// Decoder doesn't exist
 	if !okD || !okS {
 		// Create decoder
-		if d, err = astilibav.NewDecoder(astilibav.DecoderOptions{CodecParams: is.CodecParameters()}, bd.ee, bd.c); err != nil {
+		if d, err = astilibav.NewDecoder(astilibav.DecoderOptions{CodecParams: is.CodecParameters()}, bd.eh, bd.c); err != nil {
 			err = errors.Wrapf(err, "main: creating decoder for stream 0x%x(%d) of %s failed", is.Id(), is.Id(), i.c.Name)
 			return
 		}
@@ -455,7 +455,7 @@ func (b *builder) createFilterer(bd *buildData, inCtx, outCtx astilibav.Context,
 		}
 
 		// Create filterer
-		if f, err = astilibav.NewFilterer(fo, bd.ee, bd.c); err != nil {
+		if f, err = astilibav.NewFilterer(fo, bd.eh, bd.c); err != nil {
 			err = errors.Wrapf(err, "main: creating filterer with filters %+v failed", filters)
 			return
 		}

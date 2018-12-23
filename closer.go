@@ -6,20 +6,15 @@ import (
 	"github.com/asticode/go-astitools/error"
 )
 
-// CloseFuncAdder represents an object that can add a close func
-type CloseFuncAdder interface {
-	Add(f CloseFunc)
-}
-
-// CloseFunc is a method that closes something
-type CloseFunc func() error
-
 // Closer is an object that can close things
 type Closer struct {
 	fs []CloseFunc
 	m  *sync.Mutex
 	o  *sync.Once
 }
+
+// CloseFunc is a method that closes something
+type CloseFunc func() error
 
 // NewCloser creates a new closer
 func NewCloser() *Closer {

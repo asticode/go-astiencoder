@@ -40,23 +40,23 @@ func main() {
 	// Create logger
 	astilog.SetLogger(astilog.New(c.Logger))
 
-	// Create event emitter
-	ee := astiencoder.NewDefaultEventEmitter()
+	// Create event handler
+	eh := astiencoder.NewEventHandler()
 
-	// Add logger event handler
-	ee.AddHandler(astiencoder.NewLoggerEventHandler())
+	// Adapt event handler
+	astiencoder.LoggerEventHandlerAdapter(eh)
 
 	// Create workflow pool
 	wp := astiencoder.NewWorkflowPool()
 
 	// Create encoder
-	e := newEncoder(c.Encoder, ee, wp)
+	e := newEncoder(c.Encoder, eh, wp)
 
 	// Handle signals
 	e.w.HandleSignals()
 
 	// Serve workflow pool
-	if err = wp.Serve(ee, c.Encoder.Server.PathWeb, func(h http.Handler) { e.w.Serve(c.Encoder.Server.Addr, h) }); err != nil {
+	if err = wp.Serve(eh, c.Encoder.Server.PathWeb, func(h http.Handler) { e.w.Serve(c.Encoder.Server.Addr, h) }); err != nil {
 		astilog.Fatal(errors.Wrap(err, "main: serving workflow pool failed"))
 	}
 

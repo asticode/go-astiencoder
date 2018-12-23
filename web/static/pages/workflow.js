@@ -64,7 +64,7 @@ const page = {
             }
 
             // Add node graph description
-            desc += "    " + data.nodes[idx].name + "(\"" + data.nodes[idx].label + stats + "\")\n"
+            desc += "    " + data.nodes[idx].name + "(\"" + data.nodes[idx].label + "<br>(" + data.nodes[idx].name + ")" + stats + "\")\n"
             desc += "    class " + data.nodes[idx].name + " " + data.nodes[idx].status + ";"
             desc += "    click " + data.nodes[idx].name + " handleNodeClick;"
 
