@@ -390,8 +390,8 @@ func (s *workflowPoolServer) handleWebsocketDisconnected(c *astiws.Client, event
 }
 
 func (s *workflowPoolServer) handleWebsocketPing(c *astiws.Client, eventName string, payload json.RawMessage) error {
-	if err := c.HandlePing(); err != nil {
-		astilog.Error(errors.Wrap(err, "astiencoder: handling ping failed"))
+	if err := c.ExtendConnection(); err != nil {
+		astilog.Error(errors.Wrap(err, "astiencoder: extending ws connection failed"))
 	}
 	return nil
 }
