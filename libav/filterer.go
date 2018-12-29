@@ -69,10 +69,12 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astiencoder
 	}
 	f.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(f), eh)
 	f.d = newFrameDispatcher(f, eh, f.cc)
-	if f.s == nil {
-		f.s = newFiltererSwitcher()
-	}
 	f.addStats()
+
+	// We need a filterer switcher
+	if f.s == nil {
+		f.s = newFiltererSwitcher(f, eh)
+	}
 
 	// Create graph
 	f.cc.Add(func() error {
@@ -341,9 +343,8 @@ func (f *Filterer) SendCommand(target, cmd, arg string, flags int) (err error) {
 
 // FiltererSwitchOptions represents filterer switch options
 type FiltererSwitchOptions struct {
-	Callbacks FiltererSwitcherCallbacks
-	Filter    FiltererOptions
-	Workflow  *astiencoder.Workflow
+	Filter   FiltererOptions
+	Workflow *astiencoder.Workflow
 }
 
 // Switch disconnects/stops/closes the current filterer and starts/connects the new filterer properly
@@ -374,68 +375,54 @@ func (f *Filterer) Switch(opt FiltererSwitchOptions) (nf *Filterer, err error) {
 		nns[i.Node] = true
 	}
 
-	// Create callbacks
-	cs := FiltererSwitcherCallbacks{
-		In: make(map[astiencoder.Node]func()),
-		Out: func() {
-			// Disconnect previous filterer's children
-			for _, c := range f.Children() {
-				f.Disconnect(c.(FrameHandler))
+	// Handle out
+	f.eh.Add(f, EventNameFiltererSwitchOutDone, func(e astiencoder.Event) bool {
+		// Disconnect previous filterer's children
+		for _, c := range f.Children() {
+			f.Disconnect(c.(FrameHandler))
+		}
+
+		// Make sure to close the previous filter once stopped
+		f.eh.Add(f, astiencoder.EventNameNodeStopped, func(e astiencoder.Event) bool {
+			if err := f.cc.Close(); err != nil {
+				f.eh.Emit(astiencoder.EventError(f, errors.Wrap(err, "astilibav: closing filterer failed")))
 			}
+			return true
+		})
 
-			// Make sure to close the previous filter once stopped
-			f.eh.Add(f, astiencoder.EventNameNodeStopped, func(e astiencoder.Event) bool {
-				if err := f.cc.Close(); err != nil {
-					f.eh.Emit(astiencoder.EventError(f, errors.Wrap(err, "astilibav: closing filterer failed")))
-				}
-				return true
-			})
+		// Stop previous filterer
+		f.Stop()
+		return true
+	})
 
-			// Stop previous filterer
-			f.Stop()
-
-			// Custom
-			if opt.Callbacks.Out != nil {
-				opt.Callbacks.Out()
-			}
-		},
-	}
-
-	// Loop through previous filterer's parents
+	// Handle in
 	o := &sync.Once{}
-	for _, p := range f.Parents() {
-		cs.In[p] = func(n astiencoder.Node) func() {
-			return func() {
-				// Assert node
-				c := n.(FrameHandlerConnector)
+	f.eh.Add(f, EventNameFiltererSwitchInDone, func(e astiencoder.Event) bool {
+		// Assert node
+		n := e.Payload.(astiencoder.Node)
+		c := e.Payload.(FrameHandlerConnector)
 
-				// Disconnect node
-				c.Disconnect(f)
+		// Disconnect node
+		c.Disconnect(f)
 
-				// Connect node if part of next filterer's inputs
-				if _, ok := nns[n]; ok {
-					c.Connect(nf)
-				}
+		// Connect node if part of next filterer's inputs
+		if _, ok := nns[n]; ok {
+			c.Connect(nf)
+		}
 
-				// Connect other nodes only once
-				o.Do(func() {
-					for n := range nns {
-						if _, ok := pns[n]; !ok {
-							n.(FrameHandlerConnector).Connect(nf)
-						}
-					}
-				})
-
-				// Custom
-				if fn, ok := opt.Callbacks.In[n]; ok {
-					fn()
+		// Connect other nodes only once
+		o.Do(func() {
+			for n := range nns {
+				if _, ok := pns[n]; !ok {
+					n.(FrameHandlerConnector).Connect(nf)
 				}
 			}
-		}(p)
-	}
+		})
+		return len(f.Parents()) == 0
+	})
 
 	// Switch
-	f.s.Switch(cs)
+	f.s.Switch()
 	return
 }
 

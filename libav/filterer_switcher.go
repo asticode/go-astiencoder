@@ -6,6 +6,12 @@ import (
 	"github.com/asticode/go-astiencoder"
 )
 
+// Event names
+const (
+	EventNameFiltererSwitchInDone  = "filterer.switch.in.done"
+	EventNameFiltererSwitchOutDone = "filterer.switch.out.done"
+)
+
 // FiltererSwitcher represents an object that can take care of synchronizing things when switching a filterer
 type FiltererSwitcher interface {
 	IncIn(n astiencoder.Node)
@@ -13,17 +19,12 @@ type FiltererSwitcher interface {
 	Reset()
 	ShouldIn(n astiencoder.Node) (ko bool)
 	ShouldOut() (ko bool)
-	Switch(cs FiltererSwitcherCallbacks)
-}
-
-// FiltererSwitcherCallbacks represents filterer switcher callbacks
-type FiltererSwitcherCallbacks struct {
-	In  map[astiencoder.Node]func()
-	Out func()
+	Switch()
 }
 
 type filtererSwitcher struct {
-	cs FiltererSwitcherCallbacks
+	eh *astiencoder.EventHandler
+	f  *Filterer
 	is map[astiencoder.Node]int
 	l  int
 	m  *sync.Mutex
@@ -31,8 +32,10 @@ type filtererSwitcher struct {
 	os *sync.Once
 }
 
-func newFiltererSwitcher() *filtererSwitcher {
+func newFiltererSwitcher(f *Filterer, eh *astiencoder.EventHandler) *filtererSwitcher {
 	return &filtererSwitcher{
+		eh: eh,
+		f:  f,
 		is: make(map[astiencoder.Node]int),
 		m:  &sync.Mutex{},
 		os: &sync.Once{},
@@ -52,11 +55,9 @@ func (s *filtererSwitcher) IncIn(n astiencoder.Node) {
 	// Increment
 	s.is[n]++
 
-	// Execute callback
+	// Send event
 	if s.l > 0 && s.is[n] == s.l {
-		if fn, ok := s.cs.In[n]; ok && fn != nil {
-			fn()
-		}
+		s.emitEventIn(n)
 	}
 	return
 }
@@ -69,9 +70,9 @@ func (s *filtererSwitcher) IncOut() {
 	// Increment
 	s.o++
 
-	// Execute callback
-	if s.l > 0 && s.o == s.l && s.cs.Out != nil {
-		s.cs.Out()
+	// Send event
+	if s.l > 0 && s.o == s.l {
+		s.emitEventOut()
 	}
 }
 
@@ -115,14 +116,11 @@ func (s *filtererSwitcher) ShouldOut() (ko bool) {
 	return
 }
 
-func (s *filtererSwitcher) Switch(cs FiltererSwitcherCallbacks) {
+func (s *filtererSwitcher) Switch() {
 	s.os.Do(func() {
 		// Lock
 		s.m.Lock()
 		defer s.m.Unlock()
-
-		// Set callbacks
-		s.cs = cs
 
 		// Set limit
 		for _, v := range s.is {
@@ -131,16 +129,31 @@ func (s *filtererSwitcher) Switch(cs FiltererSwitcherCallbacks) {
 			}
 		}
 
-		// Execute callbacks for inputs that have already reached the limit
-		for n, fn := range cs.In {
-			if v, ok := s.is[n]; ok && v == s.l && fn != nil {
-				fn()
+		// Send events for inputs that have already reached the limit
+		for n, v := range s.is {
+			if v == s.l {
+				s.emitEventIn(n)
 			}
 		}
 
-		// Execute out callback if limit has already been reached
-		if s.o == s.l && cs.Out != nil {
-			cs.Out()
+		// Send out event if limit has already been reached
+		if s.o == s.l {
+			s.emitEventOut()
 		}
+	})
+}
+
+func (s *filtererSwitcher) emitEventIn(n astiencoder.Node) {
+	s.eh.Emit(astiencoder.Event{
+		Name:    EventNameFiltererSwitchInDone,
+		Payload: n,
+		Target:  s.f,
+	})
+}
+
+func (s *filtererSwitcher) emitEventOut() {
+	s.eh.Emit(astiencoder.Event{
+		Name:   EventNameFiltererSwitchOutDone,
+		Target: s.f,
 	})
 }
