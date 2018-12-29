@@ -32,6 +32,7 @@ type Demuxer struct {
 	loop          bool
 	loopFirstPkt  *demuxerPkt
 	restamper     PktRestamper
+	seekToLive    bool
 	ss            map[int]*demuxerStream
 	statWorkRatio *astistat.DurationRatioStat
 }
@@ -40,30 +41,43 @@ type demuxerStream struct {
 	ctx               Context
 	emulateRateNextAt time.Time
 	s                 *avformat.Stream
+	seekToLiveLastPkt *demuxerPkt
 }
 
 type demuxerPkt struct {
-	dts      int64
-	duration int64
-	s        *avformat.Stream
+	dts        int64
+	duration   int64
+	receivedAt time.Time
+	s          *avformat.Stream
 }
 
 func newDemuxerPkt(pkt *avcodec.Packet, s *avformat.Stream) *demuxerPkt {
 	return &demuxerPkt{
-		dts:      pkt.Dts(),
-		duration: pkt.Duration(),
-		s:        s,
+		dts:        pkt.Dts(),
+		duration:   pkt.Duration(),
+		receivedAt: time.Now(),
+		s:          s,
 	}
 }
 
 // DemuxerOptions represents demuxer options
 type DemuxerOptions struct {
-	Dict        string
+	// String content of the demuxer as you would use in ffmpeg
+	Dict string
+	// If true, the demuxer will sleep between packets for the exact duration of the packet
 	EmulateRate bool
-	Format      *avformat.InputFormat
-	Loop        bool
-	Node        astiencoder.NodeOptions
-	URL         string
+	// Exact input format
+	Format *avformat.InputFormat
+	// If true, at the end of the input the demuxer will seek to its beginning and start over
+	// In this case the packets are restamped
+	Loop bool
+	// Basic node options
+	Node astiencoder.NodeOptions
+	// If true, the demuxer will not dispatch packets until, for at least one stream, 2 consecutive packets are received
+	// at an interval >= to the first packet's duration
+	SeekToLive bool
+	// URL of the input
+	URL string
 }
 
 // NewDemuxer creates a new demuxer
@@ -78,6 +92,7 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astiencoder.C
 		eh:            eh,
 		emulateRate:   o.EmulateRate,
 		loop:          o.Loop,
+		seekToLive:    o.SeekToLive,
 		ss:            make(map[int]*demuxerStream),
 		statWorkRatio: astistat.NewDurationRatioStat(),
 	}
@@ -251,6 +266,15 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	s, ok := d.ss[pkt.StreamIndex()]
 	if !ok {
 		return
+	}
+
+	// Seek to live
+	if d.seekToLive {
+		if s.seekToLiveLastPkt == nil || time.Now().Sub(s.seekToLiveLastPkt.receivedAt) < time.Duration(avutil.AvRescaleQ(pkt.Duration(), s.s.TimeBase(), nanosecondRational)) {
+			s.seekToLiveLastPkt = newDemuxerPkt(pkt, s.s)
+			return
+		}
+		d.seekToLive = false
 	}
 
 	// Restamp
