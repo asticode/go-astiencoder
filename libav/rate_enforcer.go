@@ -16,11 +16,6 @@ import (
 	"github.com/asticode/goav/avutil"
 )
 
-// Event names
-const (
-	EventNameRateEnforcerSwitched = "rate.enforcer.switched"
-)
-
 var countRateEnforcer uint64
 
 // RateEnforcer represents an object capable of enforcing rate based on PTS

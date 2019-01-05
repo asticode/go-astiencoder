@@ -6,12 +6,6 @@ import (
 	"github.com/asticode/go-astiencoder"
 )
 
-// Event names
-const (
-	EventNameFiltererSwitchInDone  = "filterer.switch.in.done"
-	EventNameFiltererSwitchOutDone = "filterer.switch.out.done"
-)
-
 // FiltererSwitcher represents an object that can take care of synchronizing things when switching a filterer
 type FiltererSwitcher interface {
 	IncIn(n astiencoder.Node)

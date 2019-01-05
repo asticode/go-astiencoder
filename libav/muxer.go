@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/asticode/goav/avutil"
+
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astitools/stat"
 	"github.com/asticode/go-astitools/sync"
@@ -164,6 +166,12 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Write frame
 			m.statWorkRatio.Add(true)
 			if ret := m.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(p.Pkt))); ret < 0 {
+				if ret == avutil.AVERROR_EOF {
+					m.eh.Emit(astiencoder.Event{
+						Name:   EventNameEOF,
+						Target: m,
+					})
+				}
 				m.statWorkRatio.Done(true)
 				emitAvError(m, m.eh, ret, "m.ctxFormat.AvInterleavedWriteFrame failed")
 				return
