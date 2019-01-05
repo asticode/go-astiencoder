@@ -270,7 +270,8 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 
 	// Seek to live
 	if d.seekToLive {
-		if s.seekToLiveLastPkt == nil || time.Now().Sub(s.seekToLiveLastPkt.receivedAt) < time.Duration(avutil.AvRescaleQ(pkt.Duration(), s.s.TimeBase(), nanosecondRational)) {
+		// Pkt duration is not always filled therefore we need to rely on <current pkt dts> - <previous pkt dts>
+		if s.seekToLiveLastPkt == nil || time.Now().Sub(s.seekToLiveLastPkt.receivedAt) < time.Duration(avutil.AvRescaleQ(pkt.Dts()-s.seekToLiveLastPkt.dts, s.s.TimeBase(), nanosecondRational)) {
 			s.seekToLiveLastPkt = newDemuxerPkt(pkt, s.s)
 			return
 		}
