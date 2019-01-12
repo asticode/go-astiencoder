@@ -66,6 +66,8 @@ type DemuxerOptions struct {
 	Dict string
 	// If true, the demuxer will sleep between packets for the exact duration of the packet
 	EmulateRate bool
+	// Context used to cancel finding stream info
+	FindStreamInfoCtx context.Context
 	// Exact input format
 	Format *avformat.InputFormat
 	// If true, at the end of the input the demuxer will seek to its beginning and start over
@@ -137,9 +139,33 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astiencoder.C
 		return nil
 	})
 
+	// Handle find stream info cancellation
+	if o.FindStreamInfoCtx != nil {
+		// Create context
+		findStreamInfoCtx, findStreamInfoCancel := context.WithCancel(o.FindStreamInfoCtx)
+
+		// Handle interrupt
+		*d.interruptRet = 0
+		go func() {
+			<-findStreamInfoCtx.Done()
+			if o.FindStreamInfoCtx.Err() != nil {
+				*d.interruptRet = 1
+			}
+		}()
+
+		// Make sure to cancel context so that go routine is closed
+		defer findStreamInfoCancel()
+	}
+
 	// Retrieve stream information
 	if ret := d.ctxFormat.AvformatFindStreamInfo(nil); ret < 0 {
 		err = errors.Wrapf(NewAvError(ret), "astilibav: ctxFormat.AvformatFindStreamInfo on %+v failed", o)
+		return
+	}
+
+	// Check whether find stream info has been cancelled
+	if o.FindStreamInfoCtx != nil && o.FindStreamInfoCtx.Err() != nil {
+		err = errors.Wrap(o.FindStreamInfoCtx.Err(), "astilibav: finding stream info has been cancelled")
 		return
 	}
 
