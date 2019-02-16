@@ -5,16 +5,15 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/asticode/goav/avformat"
-
-	"github.com/pkg/errors"
-
-	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astitools/stat"
-	"github.com/asticode/go-astitools/sync"
-	"github.com/asticode/go-astitools/worker"
+	astiencoder "github.com/asticode/go-astiencoder"
+	astidefer "github.com/asticode/go-astitools/defer"
+	astistat "github.com/asticode/go-astitools/stat"
+	astisync "github.com/asticode/go-astitools/sync"
+	astiworker "github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avcodec"
+	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
+	"github.com/pkg/errors"
 )
 
 var countEncoder uint64
@@ -38,7 +37,7 @@ type EncoderOptions struct {
 }
 
 // NewEncoder creates a new encoder
-func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astiencoder.Closer) (e *Encoder, err error) {
+func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astidefer.Closer) (e *Encoder, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countEncoder, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("encoder_%d", count), fmt.Sprintf("Encoder #%d", count), "Encodes")

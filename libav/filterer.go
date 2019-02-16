@@ -3,14 +3,14 @@ package astilibav
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
-	"sync"
-
-	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astitools/stat"
-	"github.com/asticode/go-astitools/sync"
-	"github.com/asticode/go-astitools/worker"
+	astiencoder "github.com/asticode/go-astiencoder"
+	astidefer "github.com/asticode/go-astitools/defer"
+	astistat "github.com/asticode/go-astitools/stat"
+	astisync "github.com/asticode/go-astitools/sync"
+	astiworker "github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avfilter"
 	"github.com/asticode/goav/avutil"
@@ -24,8 +24,8 @@ type Filterer struct {
 	*astiencoder.BaseNode
 	bufferSinkCtx    *avfilter.Context
 	bufferSrcCtxs    map[astiencoder.Node]*avfilter.Context
-	c                *astiencoder.Closer
-	cc               *astiencoder.Closer // Child closer used to close only things related to the filterer
+	c                *astidefer.Closer
+	cc               *astidefer.Closer // Child closer used to close only things related to the filterer
 	d                *frameDispatcher
 	eh               *astiencoder.EventHandler
 	g                *avfilter.Graph
@@ -50,7 +50,7 @@ type FiltererInput struct {
 }
 
 // NewFilterer creates a new filterer
-func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astiencoder.Closer) (f *Filterer, err error) {
+func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astidefer.Closer) (f *Filterer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countFilterer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("filterer_%d", count), fmt.Sprintf("Filterer #%d", count), "Filters")

@@ -6,10 +6,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astitools/stat"
-	"github.com/asticode/go-astitools/time"
-	"github.com/asticode/go-astitools/worker"
+	astiencoder "github.com/asticode/go-astiencoder"
+	astidefer "github.com/asticode/go-astitools/defer"
+	astistat "github.com/asticode/go-astitools/stat"
+	astitime "github.com/asticode/go-astitools/time"
+	astiworker "github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
@@ -83,7 +84,7 @@ type DemuxerOptions struct {
 }
 
 // NewDemuxer creates a new demuxer
-func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astiencoder.Closer) (d *Demuxer, err error) {
+func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astidefer.Closer) (d *Demuxer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countDemuxer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("demuxer_%d", count), fmt.Sprintf("Demuxer #%d", count), fmt.Sprintf("Demuxes %s", o.URL))

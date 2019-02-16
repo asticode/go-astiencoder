@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astiencoder/libav"
+	astiencoder "github.com/asticode/go-astiencoder"
+	astilibav "github.com/asticode/go-astiencoder/libav"
+	astidefer "github.com/asticode/go-astitools/defer"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
@@ -14,7 +15,7 @@ import (
 
 func addWorkflow(name string, j Job, e *encoder) (w *astiencoder.Workflow, err error) {
 	// Create closer
-	c := astiencoder.NewCloser()
+	c := astidefer.NewCloser()
 
 	// Create workflow
 	w = astiencoder.NewWorkflow(e.w.Context(), name, e.eh, e.w.NewTask, c)
@@ -48,15 +49,15 @@ type openedOutput struct {
 }
 
 type buildData struct {
-	c        *astiencoder.Closer
+	c        *astidefer.Closer
 	decoders map[*astilibav.Demuxer]map[*avformat.Stream]*astilibav.Decoder
-	eh *astiencoder.EventHandler
+	eh       *astiencoder.EventHandler
 	inputs   map[string]openedInput
 	outputs  map[string]openedOutput
 	w        *astiencoder.Workflow
 }
 
-func newBuildData(w *astiencoder.Workflow, eh *astiencoder.EventHandler, c *astiencoder.Closer) *buildData {
+func newBuildData(w *astiencoder.Workflow, eh *astiencoder.EventHandler, c *astidefer.Closer) *buildData {
 	return &buildData{
 		c:        c,
 		eh:       eh,
@@ -65,7 +66,7 @@ func newBuildData(w *astiencoder.Workflow, eh *astiencoder.EventHandler, c *asti
 	}
 }
 
-func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow, eh *astiencoder.EventHandler, c *astiencoder.Closer) (err error) {
+func (b *builder) buildWorkflow(j Job, w *astiencoder.Workflow, eh *astiencoder.EventHandler, c *astidefer.Closer) (err error) {
 	// Create build data
 	bd := newBuildData(w, eh, c)
 

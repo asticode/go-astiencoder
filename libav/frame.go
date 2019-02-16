@@ -3,8 +3,9 @@ package astilibav
 import (
 	"sync"
 
-	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astitools/stat"
+	astiencoder "github.com/asticode/go-astiencoder"
+	astidefer "github.com/asticode/go-astitools/defer"
+	astistat "github.com/asticode/go-astitools/stat"
 	"github.com/asticode/goav/avutil"
 )
 
@@ -28,7 +29,7 @@ type FrameHandlerPayload struct {
 }
 
 type frameDispatcher struct {
-	c            *astiencoder.Closer
+	c            *astidefer.Closer
 	eh           *astiencoder.EventHandler
 	hs           map[string]FrameHandler
 	m            *sync.Mutex
@@ -38,7 +39,7 @@ type frameDispatcher struct {
 	wg           *sync.WaitGroup
 }
 
-func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, c *astiencoder.Closer) *frameDispatcher {
+func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, c *astidefer.Closer) *frameDispatcher {
 	return &frameDispatcher{
 		c:            c,
 		eh:           eh,
@@ -124,12 +125,12 @@ func (d *frameDispatcher) addStats(s *astistat.Stater) {
 }
 
 type framePool struct {
-	c *astiencoder.Closer
+	c *astidefer.Closer
 	m *sync.Mutex
 	p []*avutil.Frame
 }
 
-func newFramePool(c *astiencoder.Closer) *framePool {
+func newFramePool(c *astidefer.Closer) *framePool {
 	return &framePool{
 		c: c,
 		m: &sync.Mutex{},

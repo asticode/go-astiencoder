@@ -7,13 +7,13 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/asticode/goav/avutil"
-
-	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astitools/stat"
-	"github.com/asticode/go-astitools/sync"
-	"github.com/asticode/go-astitools/worker"
+	astiencoder "github.com/asticode/go-astiencoder"
+	astidefer "github.com/asticode/go-astitools/defer"
+	astistat "github.com/asticode/go-astitools/stat"
+	astisync "github.com/asticode/go-astitools/sync"
+	astiworker "github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avformat"
+	"github.com/asticode/goav/avutil"
 	"github.com/pkg/errors"
 )
 
@@ -22,7 +22,7 @@ var countMuxer uint64
 // Muxer represents an object capable of muxing packets into an output
 type Muxer struct {
 	*astiencoder.BaseNode
-	c                *astiencoder.Closer
+	c                *astidefer.Closer
 	ctxFormat        *avformat.Context
 	eh               *astiencoder.EventHandler
 	o                *sync.Once
@@ -42,7 +42,7 @@ type MuxerOptions struct {
 }
 
 // NewMuxer creates a new muxer
-func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astiencoder.Closer) (m *Muxer, err error) {
+func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astidefer.Closer) (m *Muxer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countMuxer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("muxer_%d", count), fmt.Sprintf("Muxer #%d", count), fmt.Sprintf("Muxes to %s", o.URL))

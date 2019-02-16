@@ -3,14 +3,15 @@ package astiencoder
 import (
 	"context"
 
-	"github.com/asticode/go-astitools/worker"
+	astidefer "github.com/asticode/go-astitools/defer"
+	astiworker "github.com/asticode/go-astitools/worker"
 	"github.com/pkg/errors"
 )
 
 // Workflow represents a workflow
 type Workflow struct {
 	bn   *BaseNode
-	c    *Closer
+	c    *astidefer.Closer
 	ctx  context.Context
 	e    *EventHandler
 	name string
@@ -19,7 +20,7 @@ type Workflow struct {
 }
 
 // NewWorkflow creates a new workflow
-func NewWorkflow(ctx context.Context, name string, e *EventHandler, tf CreateTaskFunc, c *Closer) (w *Workflow) {
+func NewWorkflow(ctx context.Context, name string, e *EventHandler, tf CreateTaskFunc, c *astidefer.Closer) (w *Workflow) {
 	w = &Workflow{
 		c:    c,
 		ctx:  ctx,

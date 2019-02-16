@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astitools/stat"
-	"github.com/asticode/go-astitools/sync"
-	"github.com/asticode/go-astitools/worker"
+	astiencoder "github.com/asticode/go-astiencoder"
+	astidefer "github.com/asticode/go-astitools/defer"
+	astistat "github.com/asticode/go-astitools/stat"
+	astisync "github.com/asticode/go-astitools/sync"
+	astiworker "github.com/asticode/go-astitools/worker"
 )
 
 var countForwarder uint64
@@ -30,7 +31,7 @@ type ForwarderOptions struct {
 }
 
 // NewForwarder creates a new forwarder
-func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astiencoder.Closer) (f *Forwarder) {
+func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astidefer.Closer) (f *Forwarder) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countForwarder, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("forwarder_%d", count), fmt.Sprintf("Forwarder #%d", count), "Forwards")

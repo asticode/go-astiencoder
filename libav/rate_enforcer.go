@@ -8,11 +8,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astitools/stat"
-	"github.com/asticode/go-astitools/sync"
-	"github.com/asticode/go-astitools/time"
-	"github.com/asticode/go-astitools/worker"
+	astiencoder "github.com/asticode/go-astiencoder"
+	astidefer "github.com/asticode/go-astitools/defer"
+	astistat "github.com/asticode/go-astitools/stat"
+	astisync "github.com/asticode/go-astitools/sync"
+	astitime "github.com/asticode/go-astitools/time"
+	astiworker "github.com/asticode/go-astitools/worker"
 	"github.com/asticode/goav/avutil"
 )
 
@@ -60,7 +61,7 @@ type RateEnforcerOptions struct {
 }
 
 // NewRateEnforcer creates a new rate enforcer
-func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *astiencoder.Closer) (r *RateEnforcer) {
+func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *astidefer.Closer) (r *RateEnforcer) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countRateEnforcer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("rate_enforcer_%d", count), fmt.Sprintf("Rate Enforcer #%d", count), "Enforces rate")

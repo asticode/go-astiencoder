@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astitools/stat"
+	astiencoder "github.com/asticode/go-astiencoder"
+	astidefer "github.com/asticode/go-astitools/defer"
+	astistat "github.com/asticode/go-astitools/stat"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 )
@@ -36,7 +37,7 @@ type pktDispatcher struct {
 	wg           *sync.WaitGroup
 }
 
-func newPktDispatcher(c *astiencoder.Closer) *pktDispatcher {
+func newPktDispatcher(c *astidefer.Closer) *pktDispatcher {
 	return &pktDispatcher{
 		hs:           make(map[string]PktHandler),
 		m:            &sync.Mutex{},
@@ -148,12 +149,12 @@ func (c *pktCond) UsePkt(pkt *avcodec.Packet) bool {
 type pktHandlerPayloadRetriever func() *PktHandlerPayload
 
 type pktPool struct {
-	c *astiencoder.Closer
+	c *astidefer.Closer
 	m *sync.Mutex
 	p []*avcodec.Packet
 }
 
-func newPktPool(c *astiencoder.Closer) *pktPool {
+func newPktPool(c *astidefer.Closer) *pktPool {
 	return &pktPool{
 		c: c,
 		m: &sync.Mutex{},
