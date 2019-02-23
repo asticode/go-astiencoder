@@ -16,7 +16,7 @@ const base = {
                         method: "GET",
                         url: "/api/ok"
                     },
-                    url: "ws://" + window.location.host + "/websocket",
+                    url: (location.protocol === 'https:' ? "wss:" : "ws:") + "//" + window.location.host + "/websocket",
                     pingPeriod: data.responseJSON.ws_ping_period,
                     offline: function() { asticode.notifier.error("Server is offline") },
                     message: function (eventName, payload) {
