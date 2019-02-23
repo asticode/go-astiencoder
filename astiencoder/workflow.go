@@ -345,12 +345,12 @@ func (b *builder) operationOutputCtx(o JobOperation, inCtx astilibav.Context, oo
 
 	// Set frame rate
 	if o.FrameRate != nil {
-		outCtx.FrameRate = avutil.NewRational(o.FrameRate.Num, o.FrameRate.Den)
+		outCtx.FrameRate = avutil.NewRational(o.FrameRate.Num(), o.FrameRate.Den())
 	}
 
 	// Set time base
 	if o.TimeBase != nil {
-		outCtx.TimeBase = avutil.NewRational(o.TimeBase.Num, o.TimeBase.Den)
+		outCtx.TimeBase = avutil.NewRational(o.TimeBase.Num(), o.TimeBase.Den())
 	} else {
 		outCtx.TimeBase = avutil.NewRational(outCtx.FrameRate.Den(), outCtx.FrameRate.Num())
 	}
