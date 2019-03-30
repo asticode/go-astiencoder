@@ -184,11 +184,11 @@ func LoggerEventHandlerAdapter(h *EventHandler) {
 
 	// Node
 	h.AddForEventName(EventNameNodeStarted, func(e Event) bool {
-		astilog.Debugf("astiencoder: node %s is started", e.Target.(Node).Metadata().Name)
+		astilog.Debugf("astiencoder: node %s (%s) is started", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false
 	})
 	h.AddForEventName(EventNameNodeStopped, func(e Event) bool {
-		astilog.Debugf("astiencoder: node %s is stopped", e.Target.(Node).Metadata().Name)
+		astilog.Debugf("astiencoder: node %s (%s) is stopped", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false
 	})
 
