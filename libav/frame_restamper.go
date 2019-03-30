@@ -1,41 +1,32 @@
 package astilibav
 
 import (
-	"sync"
-
 	"github.com/asticode/go-astitools/ptr"
 	"github.com/asticode/goav/avutil"
 )
 
 // FrameRestamper represents an object capable of restamping frames
 type FrameRestamper interface {
-	Restamp(f *avutil.Frame, id interface{})
+	Restamp(f *avutil.Frame)
 }
 
 type frameRestamperWithValue struct {
-	m      *sync.Mutex
-	values map[interface{}]*int64
+	lastValue *int64
 }
 
 func newFrameRestamperWithValue() *frameRestamperWithValue {
-	return &frameRestamperWithValue{
-		m:      &sync.Mutex{},
-		values: make(map[interface{}]*int64),
-	}
+	return &frameRestamperWithValue{}
 }
 
-func (r *frameRestamperWithValue) restamp(f *avutil.Frame, id interface{}, fn func(v *int64) *int64) {
-	// Get last value
-	r.m.Lock()
-	value := r.values[id]
-	r.m.Unlock()
-
+func (r *frameRestamperWithValue) restamp(f *avutil.Frame, fn func(v *int64) *int64) {
 	// Compute new value
-	value = fn(value)
-	r.values[id] = value
+	v := fn(r.lastValue)
 
 	// Restamp
-	f.SetPts(*value)
+	f.SetPts(*v)
+
+	// Store new value
+	r.lastValue = v
 }
 
 type frameRestamperWithFrameDuration struct {
@@ -54,11 +45,40 @@ func NewFrameRestamperWithFrameDuration(frameDuration int64) FrameRestamper {
 }
 
 // Restamp implements the FrameRestamper interface
-func (r *frameRestamperWithFrameDuration) Restamp(f *avutil.Frame, id interface{}) {
-	r.restamp(f, id, func(v *int64) *int64 {
+func (r *frameRestamperWithFrameDuration) Restamp(f *avutil.Frame) {
+	r.restamp(f, func(v *int64) *int64 {
 		if v != nil {
 			return astiptr.Int64(*v + r.frameDuration)
 		}
 		return astiptr.Int64(0)
+	})
+}
+
+type frameRestamperWithModulo struct {
+	*frameRestamperWithValue
+	frameDuration int64
+	lastRealValue int64
+}
+
+// NewFrameRestamperWithModulo creates a new frame restamper that makes sure that PTS % frame duration = 0
+// frameDuration must be a duration in frame time base
+func NewFrameRestamperWithModulo(frameDuration int64) FrameRestamper {
+	return &frameRestamperWithModulo{
+		frameRestamperWithValue: newFrameRestamperWithValue(),
+		frameDuration:           frameDuration,
+	}
+}
+
+// Restamp implements the FrameRestamper interface
+func (r *frameRestamperWithModulo) Restamp(f *avutil.Frame) {
+	r.restamp(f, func(v *int64) *int64 {
+		defer func() { r.lastRealValue = f.Pts() }()
+		if v != nil {
+			if f.Pts() - r.lastRealValue < r.frameDuration {
+				return astiptr.Int64(*v + r.frameDuration)
+			}
+			return astiptr.Int64(f.Pts() - (f.Pts() % r.frameDuration))
+		}
+		return astiptr.Int64(f.Pts() - (f.Pts() % r.frameDuration))
 	})
 }

@@ -30,6 +30,7 @@ type Filterer struct {
 	eh               *astiencoder.EventHandler
 	g                *avfilter.Graph
 	q                *astisync.CtxQueue
+	restamper        FrameRestamper
 	s                FiltererSwitcher
 	statIncomingRate *astistat.IncrementStat
 	statWorkRatio    *astistat.DurationRatioStat
@@ -37,10 +38,11 @@ type Filterer struct {
 
 // FiltererOptions represents filterer options
 type FiltererOptions struct {
-	Content  string
-	Inputs   map[string]FiltererInput
-	Node     astiencoder.NodeOptions
-	Switcher FiltererSwitcher
+	Content   string
+	Inputs    map[string]FiltererInput
+	Node      astiencoder.NodeOptions
+	Restamper FrameRestamper
+	Switcher  FiltererSwitcher
 }
 
 // FiltererInput represents a filterer input
@@ -63,6 +65,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astidefer.C
 		eh:               eh,
 		g:                avfilter.AvfilterGraphAlloc(),
 		q:                astisync.NewCtxQueue(),
+		restamper:        o.Restamper,
 		s:                o.Switcher,
 		statIncomingRate: astistat.NewIncrementStat(),
 		statWorkRatio:    astistat.NewDurationRatioStat(),
@@ -315,6 +318,13 @@ func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 		return
 	}
 	f.statWorkRatio.Done(true)
+
+	// Restamp
+	if f.restamper != nil {
+		f.statWorkRatio.Add(true)
+		f.restamper.Restamp(fm)
+		f.statWorkRatio.Done(true)
+	}
 
 	// Increment switcher
 	if f.s != nil {

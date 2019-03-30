@@ -115,7 +115,7 @@ func (f *Forwarder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			// Restamp
 			if f.restamper != nil {
 				f.statWorkRatio.Add(true)
-				f.restamper.Restamp(p.Frame, true)
+				f.restamper.Restamp(p.Frame)
 				f.statWorkRatio.Done(true)
 			}
 

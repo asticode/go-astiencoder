@@ -259,7 +259,7 @@ func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time) (stop bo
 	if i != nil {
 		// Restamp frame
 		if r.restamper != nil {
-			r.restamper.Restamp(i.f, true)
+			r.restamper.Restamp(i.f)
 		}
 
 		// Dispatch frame
@@ -281,6 +281,7 @@ func (s *rateEnforcerSlot) next() *rateEnforcerSlot {
 		ptsMax: s.ptsMax - s.ptsMin + s.ptsMax,
 	}
 }
+
 func (r *RateEnforcer) distribute() {
 	// Get useful nodes
 	ns := make(map[astiencoder.Node]bool)
@@ -324,6 +325,22 @@ func (r *RateEnforcer) distribute() {
 			}
 		}
 	}
+}
+
+func (r *RateEnforcer) debug() (o string) {
+	o = "\nSlots:\n"
+	for _, s := range r.slots {
+		if s != nil {
+			o += fmt.Sprintf("min: %d - max: %d - full: %v\n", s.ptsMin, s.ptsMax, s.i != nil)
+		}
+	}
+	o += "\nBuffer:\n"
+	for idx, i := range r.buf {
+		if i != nil && i.f != nil {
+			o += fmt.Sprintf("%d: %d\n", idx, i.f.Pts())
+		}
+	}
+	return
 }
 
 func (r *RateEnforcer) current() (i *rateEnforcerItem, previous bool) {
