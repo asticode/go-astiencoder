@@ -39,6 +39,11 @@ func TestFrameRestamperWithModulo(t *testing.T) {
 		{input: 108, output: 110},
 		{input: 116, output: 120},
 		{input: 132, output: 130},
+		{input: 133, output: 140},
+		{input: 134, output: 150},
+		{input: 145, output: 160},
+		{input: 156, output: 170},
+		{input: 205, output: 200},
 	} {
 		f.SetPts(ft.input)
 		r.Restamp(&f)

@@ -74,10 +74,11 @@ func (r *frameRestamperWithModulo) Restamp(f *avutil.Frame) {
 	r.restamp(f, func(v *int64) *int64 {
 		defer func() { r.lastRealValue = f.Pts() }()
 		if v != nil {
-			if f.Pts() - r.lastRealValue < r.frameDuration {
-				return astiptr.Int64(*v + r.frameDuration)
+			nv := astiptr.Int64(f.Pts() - (f.Pts() % r.frameDuration))
+			if *nv <= *v {
+				nv = astiptr.Int64(*v + r.frameDuration)
 			}
-			return astiptr.Int64(f.Pts() - (f.Pts() % r.frameDuration))
+			return nv
 		}
 		return astiptr.Int64(f.Pts() - (f.Pts() % r.frameDuration))
 	})
