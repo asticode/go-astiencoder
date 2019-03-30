@@ -3,7 +3,6 @@ package astilibav
 import (
 	"sync"
 
-	"github.com/asticode/go-astitools/ptr"
 	"github.com/asticode/goav/avcodec"
 )
 
@@ -57,50 +56,47 @@ func (r *pktRestamperStartFromZero) Restamp(pkt *avcodec.Packet) {
 	})
 }
 
-type pktRestamperWithValue struct {
-	m      *sync.Mutex
-	values map[int]*int64
-}
-
-func newPktRestamperWithValue() *pktRestamperWithValue {
-	return &pktRestamperWithValue{
-		m:      &sync.Mutex{},
-		values: make(map[int]*int64),
-	}
-}
-
-func (r *pktRestamperWithValue) restamp(pkt *avcodec.Packet, fn func(v *int64) *int64) {
-	// Get last value
-	r.m.Lock()
-	value := r.values[pkt.StreamIndex()]
-	r.m.Unlock()
-
-	// Compute new value
-	value = fn(value)
-	r.values[pkt.StreamIndex()] = value
-
-	// Restamp
-	delta := pkt.Pts() - pkt.Dts()
-	pkt.SetDts(*value)
-	pkt.SetPts(*value + delta)
-}
-
 type pktRestamperWithPktDuration struct {
-	*pktRestamperWithValue
+	lastItem map[int]*pktRestamperWithPktDurationItem
+	m        *sync.Mutex
+}
+
+type pktRestamperWithPktDurationItem struct {
+	dts      int64
+	duration int64
 }
 
 // NewPktRestamperWithPktDuration creates a new pkt restamper that starts timestamps from 0 and increments them
-// of pkt.Duration()
+// of the previous pkt.Duration()
 func NewPktRestamperWithPktDuration() PktRestamper {
-	return &pktRestamperWithPktDuration{pktRestamperWithValue: newPktRestamperWithValue()}
+	return &pktRestamperWithPktDuration{
+		lastItem: make(map[int]*pktRestamperWithPktDurationItem),
+		m:        &sync.Mutex{},
+	}
 }
 
 // Restamp implements the FrameRestamper interface
 func (r *pktRestamperWithPktDuration) Restamp(pkt *avcodec.Packet) {
-	r.restamp(pkt, func(v *int64) *int64 {
-		if v != nil {
-			return astiptr.Int64(*v + pkt.Duration())
-		}
-		return astiptr.Int64(0)
-	})
+	// Get last item
+	r.m.Lock()
+	lastItem := r.lastItem[pkt.StreamIndex()]
+	r.m.Unlock()
+
+	// Compute new item
+	item := &pktRestamperWithPktDurationItem{
+		duration: pkt.Duration(),
+	}
+	if lastItem != nil {
+		item.dts = lastItem.dts + lastItem.duration
+	}
+
+	// Set new item
+	r.m.Lock()
+	r.lastItem[pkt.StreamIndex()] = item
+	r.m.Unlock()
+
+	// Restamp
+	delta := pkt.Pts() - pkt.Dts()
+	pkt.SetDts(item.dts)
+	pkt.SetPts(item.dts + delta)
 }
