@@ -375,13 +375,14 @@ const (
 	websocketEventNamePing = "ping"
 )
 
-func (s *workflowPoolServer) adaptWebsocketClient(c *astiws.Client) {
+func (s *workflowPoolServer) adaptWebsocketClient(c *astiws.Client) (err error) {
 	// Register client
 	s.m.AutoRegisterClient(c)
 
 	// Add listeners
 	c.AddListener(astiws.EventNameDisconnect, s.handleWebsocketDisconnected)
 	c.AddListener(websocketEventNamePing, s.handleWebsocketPing)
+	return
 }
 
 func (s *workflowPoolServer) handleWebsocketDisconnected(c *astiws.Client, eventName string, payload json.RawMessage) error {
