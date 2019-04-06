@@ -264,7 +264,10 @@ func (e *Encoder) receivePkt(p *FrameHandlerPayload) (stop bool) {
 
 	// Get descriptor
 	d := p.Descriptor
-	if d == nil {
+	if d == nil && e.previousDescriptor == nil {
+		e.eh.Emit(astiencoder.EventError(e, errors.New("astilibav: no valid descriptor")))
+		return
+	} else if d == nil {
 		d = e.previousDescriptor
 	} else {
 		e.previousDescriptor = d
