@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/asticode/go-astilog"
-	"github.com/asticode/go-astitools/http"
-	"github.com/asticode/go-astitools/template"
+	astihttp "github.com/asticode/go-astitools/http"
+	astitemplate "github.com/asticode/go-astitools/template"
 	"github.com/asticode/go-astiws"
 	"github.com/gorilla/websocket"
 	"github.com/julienschmidt/httprouter"
@@ -142,12 +142,19 @@ func newWorkflowPoolServer(wp *WorkflowPool, pathWeb string) (s *workflowPoolSer
 	s = &workflowPoolServer{
 		m:       astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 8192}),
 		pathWeb: pathWeb,
+		t:       astitemplate.NewTemplater(),
 		wp:      wp,
 	}
 
-	// Create templater
-	if s.t, err = astitemplate.NewTemplater(filepath.Join(pathWeb, "templates"), filepath.Join(pathWeb, "layouts"), ".html"); err != nil {
-		err = errors.Wrap(err, "astiencoder: creating templater failed")
+	// Add layouts
+	if err = s.t.AddLayoutsFromDir(filepath.Join(pathWeb, "layouts"), ".html"); err != nil {
+		err = errors.Wrap(err, "astiencoder: adding layouts failed")
+		return
+	}
+
+	// Add templates
+	if err = s.t.AddTemplatesFromDir(filepath.Join(pathWeb, "templates"), ".html"); err != nil {
+		err = errors.Wrap(err, "astiencoder: adding templates failed")
 		return
 	}
 	return
