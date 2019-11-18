@@ -21,6 +21,7 @@ var (
 
 func main() {
 	// Parse flags
+	astilog.SetHandyFlags()
 	s := astiflag.Subcommand()
 	flag.Parse()
 
