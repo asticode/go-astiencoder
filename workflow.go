@@ -3,24 +3,23 @@ package astiencoder
 import (
 	"context"
 
-	astidefer "github.com/asticode/go-astitools/defer"
-	astiworker "github.com/asticode/go-astitools/worker"
+	"github.com/asticode/go-astikit"
 	"github.com/pkg/errors"
 )
 
 // Workflow represents a workflow
 type Workflow struct {
 	bn   *BaseNode
-	c    *astidefer.Closer
+	c    *astikit.Closer
 	ctx  context.Context
 	e    *EventHandler
 	name string
-	t    *astiworker.Task
+	t    *astikit.Task
 	tf   CreateTaskFunc
 }
 
 // NewWorkflow creates a new workflow
-func NewWorkflow(ctx context.Context, name string, e *EventHandler, tf CreateTaskFunc, c *astidefer.Closer) (w *Workflow) {
+func NewWorkflow(ctx context.Context, name string, e *EventHandler, tf CreateTaskFunc, c *astikit.Closer) (w *Workflow) {
 	w = &Workflow{
 		c:    c,
 		ctx:  ctx,
@@ -69,7 +68,7 @@ func (w *Workflow) StartNodes(ns ...Node) {
 }
 
 // StartNodesInSubTask starts nodes in a new sub task
-func (w *Workflow) StartNodesInSubTask(ns ...Node) (t *astiworker.Task) {
+func (w *Workflow) StartNodesInSubTask(ns ...Node) (t *astikit.Task) {
 	t = w.t.NewSubTask()
 	for _, n := range ns {
 		n.Start(w.bn.Context(), t.NewSubTask)
@@ -84,7 +83,7 @@ type WorkflowStartOptions struct {
 
 // WorkflowStartGroup represents a workflow start group
 type WorkflowStartGroup struct {
-	Callback func(t *astiworker.Task)
+	Callback func(t *astikit.Task)
 	Nodes    []Node
 }
 
@@ -99,13 +98,13 @@ func (w *Workflow) StartWithOptions(o WorkflowStartOptions) {
 }
 
 type workflowStartGroup struct {
-	fn func(t *astiworker.Task)
+	fn func(t *astikit.Task)
 	ns []Node
-	t  *astiworker.Task
+	t  *astikit.Task
 }
 
 func (w *Workflow) start(ns []Node, o WorkflowStartOptions) {
-	w.bn.Start(w.ctx, w.tf, func(t *astiworker.Task) {
+	w.bn.Start(w.ctx, w.tf, func(t *astikit.Task) {
 		// Store task
 		w.t = t
 

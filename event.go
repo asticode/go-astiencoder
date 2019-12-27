@@ -2,10 +2,10 @@ package astiencoder
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/asticode/go-astilog"
-	"sort"
 )
 
 // Default event names

@@ -8,9 +8,9 @@ import (
 	"os"
 
 	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astiencoder/libav"
+	astilibav "github.com/asticode/go-astiencoder/libav"
+	"github.com/asticode/go-astikit"
 	"github.com/asticode/go-astilog"
-	"github.com/asticode/go-astitools/flag"
 	"github.com/pkg/errors"
 )
 
@@ -22,11 +22,11 @@ var (
 func main() {
 	// Parse flags
 	astilog.SetHandyFlags()
-	s := astiflag.Subcommand()
+	cmd := astikit.FlagCmd()
 	flag.Parse()
 
 	// Version
-	if s == "version" {
+	if cmd == "version" {
 		fmt.Print(astilibav.Version)
 		return
 	}
@@ -57,7 +57,12 @@ func main() {
 	e.w.HandleSignals()
 
 	// Serve workflow pool
-	if err = wp.Serve(eh, c.Encoder.Server.PathWeb, func(h http.Handler) { e.w.Serve(c.Encoder.Server.Addr, h) }); err != nil {
+	if err = wp.Serve(eh, c.Encoder.Server.PathWeb, func(h http.Handler) {
+		astikit.ServeHTTP(e.w, astikit.ServeHTTPOptions{
+			Addr:    c.Encoder.Server.Addr,
+			Handler: h,
+		})
+	}); err != nil {
 		astilog.Fatal(errors.Wrap(err, "main: serving workflow pool failed"))
 	}
 

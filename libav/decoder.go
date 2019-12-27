@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	astiencoder "github.com/asticode/go-astiencoder"
-	astidefer "github.com/asticode/go-astitools/defer"
-	astistat "github.com/asticode/go-astitools/stat"
-	astisync "github.com/asticode/go-astitools/sync"
-	astiworker "github.com/asticode/go-astitools/worker"
+	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astikit"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avutil"
 	"github.com/pkg/errors"
@@ -20,12 +17,12 @@ var countDecoder uint64
 // Decoder represents an object capable of decoding packets
 type Decoder struct {
 	*astiencoder.BaseNode
+	c                *astikit.Chan
 	ctxCodec         *avcodec.Context
 	d                *frameDispatcher
 	eh               *astiencoder.EventHandler
-	q                *astisync.CtxQueue
-	statIncomingRate *astistat.IncrementStat
-	statWorkRatio    *astistat.DurationRatioStat
+	statIncomingRate *astikit.CounterAvgStat
+	statWorkRatio    *astikit.DurationPercentageStat
 }
 
 // DecoderOptions represents decoder options
@@ -35,17 +32,20 @@ type DecoderOptions struct {
 }
 
 // NewDecoder creates a new decoder
-func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astidefer.Closer) (d *Decoder, err error) {
+func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (d *Decoder, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countDecoder, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("decoder_%d", count), fmt.Sprintf("Decoder #%d", count), "Decodes")
 
 	// Create decoder
 	d = &Decoder{
+		c: astikit.NewChan(astikit.ChanOptions{
+			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
+			ProcessAll:  true,
+		}),
 		eh:               eh,
-		q:                astisync.NewCtxQueue(),
-		statIncomingRate: astistat.NewIncrementStat(),
-		statWorkRatio:    astistat.NewDurationRatioStat(),
+		statIncomingRate: astikit.NewCounterAvgStat(),
+		statWorkRatio:    astikit.NewDurationPercentageStat(),
 	}
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)
 	d.d = newFrameDispatcher(d, eh, c)
@@ -88,14 +88,14 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astidefer.Clo
 
 func (d *Decoder) addStats() {
 	// Add incoming rate
-	d.Stater().AddStat(astistat.StatMetadata{
+	d.Stater().AddStat(astikit.StatMetadata{
 		Description: "Number of packets coming in per second",
 		Label:       "Incoming rate",
 		Unit:        "pps",
 	}, d.statIncomingRate)
 
 	// Add work ratio
-	d.Stater().AddStat(astistat.StatMetadata{
+	d.Stater().AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent doing some actual work",
 		Label:       "Work ratio",
 		Unit:        "%",
@@ -104,8 +104,8 @@ func (d *Decoder) addStats() {
 	// Add dispatcher stats
 	d.d.addStats(d.Stater())
 
-	// Add queue stats
-	d.q.AddStats(d.Stater())
+	// Add chan stats
+	d.c.AddStats(d.Stater())
 }
 
 // Connect implements the FrameHandlerConnector interface
@@ -128,44 +128,43 @@ func (d *Decoder) Disconnect(h FrameHandler) {
 
 // Start starts the decoder
 func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
-	d.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
-		// Handle context
-		go d.q.HandleCtx(d.Context())
-
+	d.BaseNode.Start(ctx, t, func(t *astikit.Task) {
 		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
 		defer d.d.wait()
 
-		// Make sure to stop the queue properly
-		defer d.q.Stop()
+		// Make sure to stop the chan properly
+		defer d.c.Stop()
 
-		// Start queue
-		d.q.Start(func(dp interface{}) {
-			// Handle pause
-			defer d.HandlePause()
+		// Start chan
+		d.c.Start(d.Context())
+	})
+}
 
-			// Assert payload
-			p := dp.(*PktHandlerPayload)
+// HandlePkt implements the PktHandler interface
+func (d *Decoder) HandlePkt(p *PktHandlerPayload) {
+	d.c.Add(func() {
+		// Handle pause
+		defer d.HandlePause()
 
-			// Increment incoming rate
-			d.statIncomingRate.Add(1)
+		// Increment incoming rate
+		d.statIncomingRate.Add(1)
 
-			// Send pkt to decoder
-			d.statWorkRatio.Add(true)
-			if ret := avcodec.AvcodecSendPacket(d.ctxCodec, p.Pkt); ret < 0 {
-				d.statWorkRatio.Done(true)
-				emitAvError(d, d.eh, ret, "avcodec.AvcodecSendPacket failed")
+		// Send pkt to decoder
+		d.statWorkRatio.Begin()
+		if ret := avcodec.AvcodecSendPacket(d.ctxCodec, p.Pkt); ret < 0 {
+			d.statWorkRatio.End()
+			emitAvError(d, d.eh, ret, "avcodec.AvcodecSendPacket failed")
+			return
+		}
+		d.statWorkRatio.End()
+
+		// Loop
+		for {
+			// Receive frame
+			if stop := d.receiveFrame(p.Descriptor); stop {
 				return
 			}
-			d.statWorkRatio.Done(true)
-
-			// Loop
-			for {
-				// Receive frame
-				if stop := d.receiveFrame(p.Descriptor); stop {
-					return
-				}
-			}
-		})
+		}
 	})
 }
 
@@ -175,23 +174,18 @@ func (d *Decoder) receiveFrame(descriptor Descriptor) (stop bool) {
 	defer d.d.p.put(f)
 
 	// Receive frame
-	d.statWorkRatio.Add(true)
+	d.statWorkRatio.Begin()
 	if ret := avcodec.AvcodecReceiveFrame(d.ctxCodec, f); ret < 0 {
-		d.statWorkRatio.Done(true)
+		d.statWorkRatio.End()
 		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
 			emitAvError(d, d.eh, ret, "avcodec.AvcodecReceiveFrame failed")
 		}
 		stop = true
 		return
 	}
-	d.statWorkRatio.Done(true)
+	d.statWorkRatio.End()
 
 	// Dispatch frame
 	d.d.dispatch(f, descriptor)
 	return
-}
-
-// HandlePkt implements the PktHandler interface
-func (d *Decoder) HandlePkt(p *PktHandlerPayload) {
-	d.q.Send(p)
 }

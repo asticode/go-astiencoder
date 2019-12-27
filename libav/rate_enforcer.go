@@ -8,12 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	astiencoder "github.com/asticode/go-astiencoder"
-	astidefer "github.com/asticode/go-astitools/defer"
-	astistat "github.com/asticode/go-astitools/stat"
-	astisync "github.com/asticode/go-astitools/sync"
-	astitime "github.com/asticode/go-astitools/time"
-	astiworker "github.com/asticode/go-astitools/worker"
+	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astikit"
 	"github.com/asticode/goav/avutil"
 )
 
@@ -23,6 +19,7 @@ var countRateEnforcer uint64
 type RateEnforcer struct {
 	*astiencoder.BaseNode
 	buf              []*rateEnforcerItem
+	c                *astikit.Chan
 	d                *frameDispatcher
 	eh               *astiencoder.EventHandler
 	m                *sync.Mutex
@@ -30,12 +27,11 @@ type RateEnforcer struct {
 	p                *framePool
 	period           time.Duration
 	previousItem     *rateEnforcerItem
-	q                *astisync.CtxQueue
 	restamper        FrameRestamper
 	slotsCount       int
 	slots            []*rateEnforcerSlot
-	statIncomingRate *astistat.IncrementStat
-	statWorkRatio    *astistat.DurationRatioStat
+	statIncomingRate *astikit.CounterAvgStat
+	statWorkRatio    *astikit.DurationPercentageStat
 	timeBase         avutil.Rational
 }
 
@@ -61,22 +57,25 @@ type RateEnforcerOptions struct {
 }
 
 // NewRateEnforcer creates a new rate enforcer
-func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *astidefer.Closer) (r *RateEnforcer) {
+func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (r *RateEnforcer) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countRateEnforcer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("rate_enforcer_%d", count), fmt.Sprintf("Rate Enforcer #%d", count), "Enforces rate")
 
 	// Create rate enforcer
 	r = &RateEnforcer{
+		c: astikit.NewChan(astikit.ChanOptions{
+			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
+			ProcessAll:  true,
+		}),
 		eh:               eh,
 		m:                &sync.Mutex{},
 		p:                newFramePool(c),
 		period:           time.Duration(float64(1e9) / o.FrameRate.ToDouble()),
-		q:                astisync.NewCtxQueue(),
 		restamper:        o.Restamper,
 		slots:            []*rateEnforcerSlot{nil},
-		statIncomingRate: astistat.NewIncrementStat(),
-		statWorkRatio:    astistat.NewDurationRatioStat(),
+		statIncomingRate: astikit.NewCounterAvgStat(),
+		statWorkRatio:    astikit.NewDurationPercentageStat(),
 		timeBase:         avutil.NewRational(o.FrameRate.Den(), o.FrameRate.Num()),
 	}
 	r.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(r), eh)
@@ -88,14 +87,14 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 
 func (r *RateEnforcer) addStats() {
 	// Add incoming rate
-	r.Stater().AddStat(astistat.StatMetadata{
+	r.Stater().AddStat(astikit.StatMetadata{
 		Description: "Number of frames coming in per second",
 		Label:       "Incoming rate",
 		Unit:        "fps",
 	}, r.statIncomingRate)
 
 	// Add work ratio
-	r.Stater().AddStat(astistat.StatMetadata{
+	r.Stater().AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent doing some actual work",
 		Label:       "Work ratio",
 		Unit:        "%",
@@ -104,8 +103,8 @@ func (r *RateEnforcer) addStats() {
 	// Add dispatcher stats
 	r.d.addStats(r.Stater())
 
-	// Add queue stats
-	r.q.AddStats(r.Stater())
+	// Add chan stats
+	r.c.AddStats(r.Stater())
 }
 
 // Switch switches the source
@@ -135,60 +134,59 @@ func (r *RateEnforcer) Disconnect(h FrameHandler) {
 
 // Start starts the rate enforcer
 func (r *RateEnforcer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
-	r.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
-		// Handle context
-		go r.q.HandleCtx(r.Context())
-
+	r.BaseNode.Start(ctx, t, func(t *astikit.Task) {
 		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
 		defer r.d.wait()
 
-		// Make sure to stop the queue properly
-		defer r.q.Stop()
+		// Make sure to stop the chan properly
+		defer r.c.Stop()
 
 		// Start tick
 		r.startTick(r.Context())
 
-		// Start queue
-		r.q.Start(func(dp interface{}) {
-			// Handle pause
-			defer r.HandlePause()
+		// Start chan
+		r.c.Start(r.Context())
+	})
+}
 
-			// Assert payload
-			p := dp.(*FrameHandlerPayload)
+// HandleFrame implements the FrameHandler interface
+func (r *RateEnforcer) HandleFrame(p *FrameHandlerPayload) {
+	r.c.Add(func() {
+		// Handle pause
+		defer r.HandlePause()
 
-			// Increment incoming rate
-			r.statIncomingRate.Add(1)
+		// Increment incoming rate
+		r.statIncomingRate.Add(1)
 
-			// Lock
-			r.m.Lock()
-			defer r.m.Unlock()
+		// Lock
+		r.m.Lock()
+		defer r.m.Unlock()
 
-			// We update the last slot if:
-			//   - there are no slots
-			//   - the node of the last slot is different from the desired node AND the payload's node is the desired
-			//   node. That way, if the desired node doesn't dispatch frames for some time, we fallback to the previous
-			//   node instead of the previous item
-			if r.slots[len(r.slots)-1] == nil || (r.n != r.slots[len(r.slots)-1].n && r.n == p.Node) {
-				r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(p)
-				r.eh.Emit(astiencoder.Event{
-					Name:    EventNameRateEnforcerSwitched,
-					Payload: p.Node,
-					Target:  r,
-				})
-			}
+		// We update the last slot if:
+		//   - there are no slots
+		//   - the node of the last slot is different from the desired node AND the payload's node is the desired
+		//   node. That way, if the desired node doesn't dispatch frames for some time, we fallback to the previous
+		//   node instead of the previous item
+		if r.slots[len(r.slots)-1] == nil || (r.n != r.slots[len(r.slots)-1].n && r.n == p.Node) {
+			r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(p)
+			r.eh.Emit(astiencoder.Event{
+				Name:    EventNameRateEnforcerSwitched,
+				Payload: p.Node,
+				Target:  r,
+			})
+		}
 
-			// Create item
-			i := r.newRateEnforcerItem(p)
+		// Create item
+		i := r.newRateEnforcerItem(p)
 
-			// Copy frame
-			if ret := avutil.AvFrameRef(i.f, p.Frame); ret < 0 {
-				emitAvError(r, r.eh, ret, "avutil.AvFrameRef failed")
-				return
-			}
+		// Copy frame
+		if ret := avutil.AvFrameRef(i.f, p.Frame); ret < 0 {
+			emitAvError(r, r.eh, ret, "avutil.AvFrameRef failed")
+			return
+		}
 
-			// Append item
-			r.buf = append(r.buf, i)
-		})
+		// Append item
+		r.buf = append(r.buf, i)
 	})
 }
 
@@ -224,8 +222,8 @@ func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time) (stop bo
 	*nextAt = nextAt.Add(r.period)
 
 	// Sleep until next at
-	if delta := nextAt.Sub(time.Now()); delta > 0 {
-		astitime.Sleep(ctx, delta)
+	if delta := time.Until(*nextAt); delta > 0 {
+		astikit.Sleep(ctx, delta)
 	}
 
 	// Check context
@@ -370,9 +368,4 @@ func (r *RateEnforcer) current() (i *rateEnforcerItem, previous bool) {
 		previous = true
 	}
 	return
-}
-
-// HandleFrame implements the FrameHandler interface
-func (r *RateEnforcer) HandleFrame(p *FrameHandlerPayload) {
-	r.q.Send(p)
 }

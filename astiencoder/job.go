@@ -1,6 +1,6 @@
 package main
 
-import "github.com/asticode/go-astitools/float"
+import "github.com/asticode/go-astikit"
 
 // Job represents a job
 type Job struct {
@@ -43,7 +43,7 @@ type JobOperation struct {
 	Codec string `json:"codec,omitempty"`
 	Dict  string `json:"dict,omitempty"`
 	// Frame rate is a per-operation value since we may have different frame rate operations for a similar output
-	FrameRate   *astifloat.Rational  `json:"frame_rate,omitempty"`
+	FrameRate   *astikit.Rational    `json:"frame_rate,omitempty"`
 	GopSize     *int                 `json:"gop_size,omitempty"`
 	Height      *int                 `json:"height,omitempty"`
 	Inputs      []JobOperationInput  `json:"inputs"`
@@ -51,8 +51,8 @@ type JobOperation struct {
 	PixelFormat string               `json:"pixel_format,omitempty"`
 	ThreadCount *int                 `json:"thread_count,omitempty"`
 	// Since frame rate is a per-operation value, time base is as well
-	TimeBase *astifloat.Rational `json:"time_base,omitempty"`
-	Width    *int                `json:"width,omitempty"`
+	TimeBase *astikit.Rational `json:"time_base,omitempty"`
+	Width    *int              `json:"width,omitempty"`
 }
 
 // JobOperationInput represents a job operation input

@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	astiencoder "github.com/asticode/go-astiencoder"
-	astidefer "github.com/asticode/go-astitools/defer"
-	astistat "github.com/asticode/go-astitools/stat"
-	astisync "github.com/asticode/go-astitools/sync"
-	astiworker "github.com/asticode/go-astitools/worker"
+	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astikit"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
@@ -21,13 +18,13 @@ var countEncoder uint64
 // Encoder represents an object capable of encoding frames
 type Encoder struct {
 	*astiencoder.BaseNode
+	c                  *astikit.Chan
 	ctxCodec           *avcodec.Context
 	d                  *pktDispatcher
 	eh                 *astiencoder.EventHandler
 	previousDescriptor Descriptor
-	q                  *astisync.CtxQueue
-	statIncomingRate   *astistat.IncrementStat
-	statWorkRatio      *astistat.DurationRatioStat
+	statIncomingRate   *astikit.CounterAvgStat
+	statWorkRatio      *astikit.DurationPercentageStat
 }
 
 // EncoderOptions represents encoder options
@@ -37,18 +34,21 @@ type EncoderOptions struct {
 }
 
 // NewEncoder creates a new encoder
-func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astidefer.Closer) (e *Encoder, err error) {
+func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (e *Encoder, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countEncoder, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("encoder_%d", count), fmt.Sprintf("Encoder #%d", count), "Encodes")
 
 	// Create encoder
 	e = &Encoder{
+		c: astikit.NewChan(astikit.ChanOptions{
+			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
+			ProcessAll:  true,
+		}),
 		d:                newPktDispatcher(c),
 		eh:               eh,
-		q:                astisync.NewCtxQueue(),
-		statIncomingRate: astistat.NewIncrementStat(),
-		statWorkRatio:    astistat.NewDurationRatioStat(),
+		statIncomingRate: astikit.NewCounterAvgStat(),
+		statWorkRatio:    astikit.NewDurationPercentageStat(),
 	}
 	e.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(e), eh)
 	e.addStats()
@@ -143,14 +143,14 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astidefer.Clo
 
 func (e *Encoder) addStats() {
 	// Add incoming rate
-	e.Stater().AddStat(astistat.StatMetadata{
+	e.Stater().AddStat(astikit.StatMetadata{
 		Description: "Number of frames coming in per second",
 		Label:       "Incoming rate",
 		Unit:        "fps",
 	}, e.statIncomingRate)
 
 	// Add work ratio
-	e.Stater().AddStat(astistat.StatMetadata{
+	e.Stater().AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent doing some actual work",
 		Label:       "Work ratio",
 		Unit:        "%",
@@ -159,8 +159,8 @@ func (e *Encoder) addStats() {
 	// Add dispatcher stats
 	e.d.addStats(e.Stater())
 
-	// Add queue stats
-	e.q.AddStats(e.Stater())
+	// Add chan stats
+	e.c.AddStats(e.Stater())
 }
 
 // Connect implements the PktHandlerConnector interface
@@ -183,38 +183,37 @@ func (e *Encoder) Disconnect(h PktHandler) {
 
 // Start starts the encoder
 func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
-	e.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
-		// Handle context
-		go e.q.HandleCtx(e.Context())
-
+	e.BaseNode.Start(ctx, t, func(t *astikit.Task) {
 		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
 		defer e.d.wait()
 
 		// Make sure to flush the encoder
 		defer e.flush()
 
-		// Make sure to stop the queue properly
-		defer e.q.Stop()
+		// Make sure to stop the chan properly
+		defer e.c.Stop()
 
-		// Start queue
-		e.q.Start(func(dp interface{}) {
-			// Handle pause
-			defer e.HandlePause()
-
-			// Assert payload
-			p := dp.(*FrameHandlerPayload)
-
-			// Increment incoming rate
-			e.statIncomingRate.Add(1)
-
-			// Encode
-			e.encode(p)
-		})
+		// Start chan
+		e.c.Start(e.Context())
 	})
 }
 
 func (e *Encoder) flush() {
 	e.encode(&FrameHandlerPayload{})
+}
+
+// HandleFrame implements the FrameHandler interface
+func (e *Encoder) HandleFrame(p *FrameHandlerPayload) {
+	e.c.Add(func() {
+		// Handle pause
+		defer e.HandlePause()
+
+		// Increment incoming rate
+		e.statIncomingRate.Add(1)
+
+		// Encode
+		e.encode(p)
+	})
 }
 
 func (e *Encoder) encode(p *FrameHandlerPayload) {
@@ -228,13 +227,13 @@ func (e *Encoder) encode(p *FrameHandlerPayload) {
 	}
 
 	// Send frame to encoder
-	e.statWorkRatio.Add(true)
+	e.statWorkRatio.Begin()
 	if ret := avcodec.AvcodecSendFrame(e.ctxCodec, p.Frame); ret < 0 {
-		e.statWorkRatio.Done(true)
+		e.statWorkRatio.End()
 		emitAvError(e, e.eh, ret, "avcodec.AvcodecSendFrame failed")
 		return
 	}
-	e.statWorkRatio.Done(true)
+	e.statWorkRatio.End()
 
 	// Loop
 	for {
@@ -251,16 +250,16 @@ func (e *Encoder) receivePkt(p *FrameHandlerPayload) (stop bool) {
 	defer e.d.p.put(pkt)
 
 	// Receive pkt
-	e.statWorkRatio.Add(true)
+	e.statWorkRatio.Begin()
 	if ret := avcodec.AvcodecReceivePacket(e.ctxCodec, pkt); ret < 0 {
-		e.statWorkRatio.Done(true)
+		e.statWorkRatio.End()
 		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
 			emitAvError(e, e.eh, ret, "avcodec.AvcodecReceivePacket failed")
 		}
 		stop = true
 		return
 	}
-	e.statWorkRatio.Done(true)
+	e.statWorkRatio.End()
 
 	// Get descriptor
 	d := p.Descriptor
@@ -284,11 +283,6 @@ func (e *Encoder) receivePkt(p *FrameHandlerPayload) (stop bool) {
 	// Dispatch pkt
 	e.d.dispatch(pkt, newEncoderDescriptor(e.ctxCodec))
 	return
-}
-
-// HandleFrame implements the FrameHandler interface
-func (e *Encoder) HandleFrame(p *FrameHandlerPayload) {
-	e.q.Send(p)
 }
 
 // AddStream adds a stream based on the codec ctx

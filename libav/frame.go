@@ -3,9 +3,8 @@ package astilibav
 import (
 	"sync"
 
-	astiencoder "github.com/asticode/go-astiencoder"
-	astidefer "github.com/asticode/go-astitools/defer"
-	astistat "github.com/asticode/go-astitools/stat"
+	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astikit"
 	"github.com/asticode/goav/avutil"
 )
 
@@ -29,17 +28,17 @@ type FrameHandlerPayload struct {
 }
 
 type frameDispatcher struct {
-	c            *astidefer.Closer
+	c            *astikit.Closer
 	eh           *astiencoder.EventHandler
 	hs           map[string]FrameHandler
 	m            *sync.Mutex
 	n            astiencoder.Node
 	p            *framePool
-	statDispatch *astistat.DurationRatioStat
+	statDispatch *astikit.DurationPercentageStat
 	wg           *sync.WaitGroup
 }
 
-func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, c *astidefer.Closer) *frameDispatcher {
+func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, c *astikit.Closer) *frameDispatcher {
 	return &frameDispatcher{
 		c:            c,
 		eh:           eh,
@@ -47,7 +46,7 @@ func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, c *ast
 		m:            &sync.Mutex{},
 		n:            n,
 		p:            newFramePool(c),
-		statDispatch: astistat.NewDurationRatioStat(),
+		statDispatch: astikit.NewDurationPercentageStat(),
 		wg:           &sync.WaitGroup{},
 	}
 }
@@ -81,9 +80,9 @@ func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
 	// Wait for all previous subprocesses to be done
 	// In case a brave soul tries to update this logic so that several packet can be sent to handlers in parallel, bare
 	// in mind that packets must be sent in order whereas sending packets in goroutines doesn't keep this order
-	d.statDispatch.Add(true)
+	d.statDispatch.Begin()
 	d.wait()
-	d.statDispatch.Done(true)
+	d.statDispatch.End()
 
 	// Add subprocesses
 	d.wg.Add(len(hs))
@@ -115,9 +114,9 @@ func (d *frameDispatcher) wait() {
 	d.wg.Wait()
 }
 
-func (d *frameDispatcher) addStats(s *astistat.Stater) {
+func (d *frameDispatcher) addStats(s *astikit.Stater) {
 	// Add wait time
-	s.AddStat(astistat.StatMetadata{
+	s.AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent waiting for first child to finish processing dispatched frame",
 		Label:       "Dispatch ratio",
 		Unit:        "%",
@@ -125,12 +124,12 @@ func (d *frameDispatcher) addStats(s *astistat.Stater) {
 }
 
 type framePool struct {
-	c *astidefer.Closer
+	c *astikit.Closer
 	m *sync.Mutex
 	p []*avutil.Frame
 }
 
-func newFramePool(c *astidefer.Closer) *framePool {
+func newFramePool(c *astikit.Closer) *framePool {
 	return &framePool{
 		c: c,
 		m: &sync.Mutex{},

@@ -6,8 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/asticode/go-astitools/stat"
-	"github.com/asticode/go-astitools/worker"
+	"github.com/asticode/go-astikit"
 )
 
 // Node represents a node
@@ -91,7 +90,7 @@ type Starter interface {
 
 // Stater represents an object that can return its stater
 type Stater interface {
-	Stater() *astistat.Stater
+	Stater() *astikit.Stater
 }
 
 // ConnectNodes connects 2 nodes
@@ -128,7 +127,7 @@ type BaseNode struct {
 	oStop           *sync.Once
 	parents         map[string]Node
 	parentsStarted  map[string]bool
-	s               *astistat.Stater
+	s               *astikit.Stater
 	status          string
 }
 
@@ -147,7 +146,10 @@ func NewBaseNode(o NodeOptions, eg EventGenerator, eh *EventHandler) (n *BaseNod
 		parentsStarted:  make(map[string]bool),
 		status:          StatusStopped,
 	}
-	n.s = astistat.NewStater(2*time.Second, n.statsHandleFunc)
+	n.s = astikit.NewStater(astikit.StaterOptions{
+		HandleFunc: n.statsHandleFunc,
+		Period:     2 * time.Second,
+	})
 	return
 }
 
@@ -157,13 +159,13 @@ func (n *BaseNode) Context() context.Context {
 }
 
 // CreateTaskFunc is a method that can create a task
-type CreateTaskFunc func() *astiworker.Task
+type CreateTaskFunc func() *astikit.Task
 
 // BaseNodeStartFunc represents a node start func
 type BaseNodeStartFunc func()
 
 // BaseNodeExecFunc represents a node exec func
-type BaseNodeExecFunc func(t *astiworker.Task)
+type BaseNodeExecFunc func(t *astikit.Task)
 
 // Status implements the Starter interface
 func (n *BaseNode) Status() string {
@@ -245,7 +247,7 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 				defer n.s.Stop()
 
 				// Start stater
-				n.s.Start(n.ctx)
+				go n.s.Start(n.ctx)
 			}
 
 			// Exec func
@@ -448,7 +450,7 @@ func (n *BaseNode) Metadata() NodeMetadata {
 }
 
 // Stater returns the node stater
-func (n *BaseNode) Stater() *astistat.Stater {
+func (n *BaseNode) Stater() *astikit.Stater {
 	return n.s
 }
 
@@ -460,7 +462,7 @@ type EventStat struct {
 	Value       interface{}
 }
 
-func (n *BaseNode) statsHandleFunc(stats []astistat.Stat) {
+func (n *BaseNode) statsHandleFunc(stats []astikit.Stat) {
 	// No stats
 	if len(stats) == 0 {
 		return

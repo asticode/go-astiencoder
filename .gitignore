@@ -1,4 +1,4 @@
 .DS_Store
 Thumbs.db
 .idea/
-vendor*
+tmp

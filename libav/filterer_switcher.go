@@ -53,7 +53,6 @@ func (s *filtererSwitcher) IncIn(n astiencoder.Node) {
 	if s.l > 0 && s.is[n] == s.l {
 		s.emitEventIn(n)
 	}
-	return
 }
 
 func (s *filtererSwitcher) IncOut() {

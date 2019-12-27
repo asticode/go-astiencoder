@@ -6,11 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	astiencoder "github.com/asticode/go-astiencoder"
-	astidefer "github.com/asticode/go-astitools/defer"
-	astistat "github.com/asticode/go-astitools/stat"
-	astitime "github.com/asticode/go-astitools/time"
-	astiworker "github.com/asticode/go-astitools/worker"
+	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astikit"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
@@ -35,7 +32,7 @@ type Demuxer struct {
 	restamper     PktRestamper
 	seekToLive    bool
 	ss            map[int]*demuxerStream
-	statWorkRatio *astistat.DurationRatioStat
+	statWorkRatio *astikit.DurationPercentageStat
 }
 
 type demuxerStream struct {
@@ -84,7 +81,7 @@ type DemuxerOptions struct {
 }
 
 // NewDemuxer creates a new demuxer
-func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astidefer.Closer) (d *Demuxer, err error) {
+func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (d *Demuxer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countDemuxer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("demuxer_%d", count), fmt.Sprintf("Demuxer #%d", count), fmt.Sprintf("Demuxes %s", o.URL))
@@ -97,7 +94,7 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astidefer.Clo
 		loop:          o.Loop,
 		seekToLive:    o.SeekToLive,
 		ss:            make(map[int]*demuxerStream),
-		statWorkRatio: astistat.NewDurationRatioStat(),
+		statWorkRatio: astikit.NewDurationPercentageStat(),
 	}
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)
 	d.addStats()
@@ -182,7 +179,7 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astidefer.Clo
 
 func (d *Demuxer) addStats() {
 	// Add work ratio
-	d.Stater().AddStat(astistat.StatMetadata{
+	d.Stater().AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent doing some actual work",
 		Label:       "Work ratio",
 		Unit:        "%",
@@ -235,7 +232,7 @@ func (d *Demuxer) DisconnectForStream(h PktHandler, i *avformat.Stream) {
 
 // Start starts the demuxer
 func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
-	d.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
+	d.BaseNode.Start(ctx, t, func(t *astikit.Task) {
 		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
 		defer d.d.wait()
 
@@ -270,9 +267,9 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	defer d.d.p.put(pkt)
 
 	// Read frame
-	d.statWorkRatio.Add(true)
+	d.statWorkRatio.Begin()
 	if ret := d.ctxFormat.AvReadFrame(pkt); ret < 0 {
-		d.statWorkRatio.Done(true)
+		d.statWorkRatio.End()
 		if ret != avutil.AVERROR_EOF || !d.loop {
 			if ret != avutil.AVERROR_EOF {
 				emitAvError(d, d.eh, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
@@ -287,7 +284,7 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 		}
 		return
 	}
-	d.statWorkRatio.Done(true)
+	d.statWorkRatio.End()
 
 	// Get stream
 	s, ok := d.ss[pkt.StreamIndex()]
@@ -298,7 +295,7 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	// Seek to live
 	if d.seekToLive {
 		// Pkt duration is not always filled therefore we need to rely on <current pkt dts> - <previous pkt dts>
-		if s.seekToLiveLastPkt == nil || time.Now().Sub(s.seekToLiveLastPkt.receivedAt) < time.Duration(avutil.AvRescaleQ(pkt.Dts()-s.seekToLiveLastPkt.dts, s.s.TimeBase(), nanosecondRational)) {
+		if s.seekToLiveLastPkt == nil || time.Since(s.seekToLiveLastPkt.receivedAt) < time.Duration(avutil.AvRescaleQ(pkt.Dts()-s.seekToLiveLastPkt.dts, s.s.TimeBase(), nanosecondRational)) {
 			s.seekToLiveLastPkt = newDemuxerPkt(pkt, s.s)
 			return
 		}
@@ -319,8 +316,8 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	if d.emulateRate {
 		// Sleep until next at
 		if !s.emulateRateNextAt.IsZero() {
-			if delta := s.emulateRateNextAt.Sub(time.Now()); delta > 0 {
-				astitime.Sleep(ctx, delta)
+			if delta := time.Until(s.emulateRateNextAt); delta > 0 {
+				astikit.Sleep(ctx, delta)
 			}
 		} else {
 			s.emulateRateNextAt = time.Now()

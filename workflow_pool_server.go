@@ -8,9 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/asticode/go-astikit"
 	"github.com/asticode/go-astilog"
-	astihttp "github.com/asticode/go-astitools/http"
-	astitemplate "github.com/asticode/go-astitools/template"
 	"github.com/asticode/go-astiws"
 	"github.com/gorilla/websocket"
 	"github.com/julienschmidt/httprouter"
@@ -133,7 +132,7 @@ func newExposedWorkflowNode(n Node) (w ExposedWorkflowNode) {
 type workflowPoolServer struct {
 	m       *astiws.Manager
 	pathWeb string
-	t       *astitemplate.Templater
+	t       *astikit.Templater
 	wp      *WorkflowPool
 }
 
@@ -142,7 +141,7 @@ func newWorkflowPoolServer(wp *WorkflowPool, pathWeb string) (s *workflowPoolSer
 	s = &workflowPoolServer{
 		m:       astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 8192}),
 		pathWeb: pathWeb,
-		t:       astitemplate.NewTemplater(),
+		t:       astikit.NewTemplater(),
 		wp:      wp,
 	}
 
@@ -185,8 +184,8 @@ func (s *workflowPoolServer) handler() http.Handler {
 	r.GET("/api/workflows/:workflow/start", s.handleWorkflowStart())
 
 	// Chain middlewares
-	var h = astihttp.ChainMiddlewaresWithPrefix(r, []string{"/web/"}, astihttp.MiddlewareContentType("text/html; charset=UTF-8"))
-	h = astihttp.ChainMiddlewaresWithPrefix(h, []string{"/api/"}, astihttp.MiddlewareContentType("application/json"))
+	var h = astikit.ChainHTTPMiddlewaresWithPrefix(r, []string{"/web/"}, astikit.HTTPMiddlewareContentType("text/html; charset=UTF-8"))
+	h = astikit.ChainHTTPMiddlewaresWithPrefix(h, []string{"/api/"}, astikit.HTTPMiddlewareContentType("application/json"))
 	return h
 }
 
@@ -436,12 +435,7 @@ func (s *workflowPoolServer) adaptEventHandler(eh *EventHandler) {
 				np.Name = e.Target.(*Workflow).Name()
 			}
 			for _, s := range e.Payload.([]EventStat) {
-				np.Stats = append(np.Stats, ExposedStat{
-					Description: s.Description,
-					Label:       s.Label,
-					Unit:        s.Unit,
-					Value:       s.Value,
-				})
+				np.Stats = append(np.Stats, ExposedStat(s))
 			}
 			n = "stats"
 			p = np

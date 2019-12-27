@@ -11,9 +11,7 @@ import (
 	"unsafe"
 
 	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astitools/stat"
-	"github.com/asticode/go-astitools/sync"
-	"github.com/asticode/go-astitools/worker"
+	"github.com/asticode/go-astikit"
 	"github.com/asticode/goav/avcodec"
 	"github.com/pkg/errors"
 )
@@ -23,12 +21,12 @@ var countPktDumper uint64
 // PktDumper represents an object capable of dumping packets
 type PktDumper struct {
 	*astiencoder.BaseNode
+	c                *astikit.Chan
 	count            uint32
 	eh               *astiencoder.EventHandler
 	o                PktDumperOptions
-	q                *astisync.CtxQueue
-	statIncomingRate *astistat.IncrementStat
-	statWorkRatio    *astistat.DurationRatioStat
+	statIncomingRate *astikit.CounterAvgStat
+	statWorkRatio    *astikit.DurationPercentageStat
 	t                *template.Template
 }
 
@@ -53,11 +51,14 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler) (d *PktDumpe
 
 	// Create pkt dumper
 	d = &PktDumper{
+		c: astikit.NewChan(astikit.ChanOptions{
+			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
+			ProcessAll:  true,
+		}),
 		eh:               eh,
 		o:                o,
-		q:                astisync.NewCtxQueue(),
-		statIncomingRate: astistat.NewIncrementStat(),
-		statWorkRatio:    astistat.NewDurationRatioStat(),
+		statIncomingRate: astikit.NewCounterAvgStat(),
+		statWorkRatio:    astikit.NewDurationPercentageStat(),
 	}
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)
 	d.addStats()
@@ -74,83 +75,77 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler) (d *PktDumpe
 
 func (d *PktDumper) addStats() {
 	// Add incoming rate
-	d.Stater().AddStat(astistat.StatMetadata{
+	d.Stater().AddStat(astikit.StatMetadata{
 		Description: "Number of packets coming in per second",
 		Label:       "Incoming rate",
 		Unit:        "pps",
 	}, d.statIncomingRate)
 
 	// Add work ratio
-	d.Stater().AddStat(astistat.StatMetadata{
+	d.Stater().AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent doing some actual work",
 		Label:       "Work ratio",
 		Unit:        "%",
 	}, d.statWorkRatio)
 
-	// Add queue stats
-	d.q.AddStats(d.Stater())
+	// Add chan stats
+	d.c.AddStats(d.Stater())
 }
 
 // Start starts the pkt dumper
 func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
-	d.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
-		// Handle context
-		go d.q.HandleCtx(d.Context())
+	d.BaseNode.Start(ctx, t, func(t *astikit.Task) {
+		// Make sure to stop the chan properly
+		defer d.c.Stop()
 
-		// Make sure to stop the queue properly
-		defer d.q.Stop()
-
-		// Start queue
-		d.q.Start(func(dp interface{}) {
-			// Handle pause
-			defer d.HandlePause()
-
-			// Assert payload
-			p := dp.(*PktHandlerPayload)
-
-			// Increment incoming rate
-			d.statIncomingRate.Add(1)
-
-			// Get pattern
-			var args PktDumperHandlerArgs
-			if d.t != nil {
-				// Increment count
-				c := atomic.AddUint32(&d.count, 1)
-
-				// Create data
-				d.o.Data["count"] = c
-				d.o.Data["pts"] = p.Pkt.Pts()
-				d.o.Data["stream_idx"] = p.Pkt.StreamIndex()
-
-				// Execute template
-				d.statWorkRatio.Add(true)
-				buf := &bytes.Buffer{}
-				if err := d.t.Execute(buf, d.o.Data); err != nil {
-					d.statWorkRatio.Done(true)
-					d.eh.Emit(astiencoder.EventError(d, errors.Wrapf(err, "astilibav: executing template %s with data %+v failed", d.o.Pattern, d.o.Data)))
-					return
-				}
-				d.statWorkRatio.Done(true)
-
-				// Add to args
-				args.Pattern = buf.String()
-			}
-
-			// Dump
-			d.statWorkRatio.Add(true)
-			if err := d.o.Handler(p.Pkt, args); err != nil {
-				d.statWorkRatio.Done(true)
-				d.eh.Emit(astiencoder.EventError(d, errors.Wrapf(err, "astilibav: pkt dump func with args %+v failed", args)))
-				return
-			}
-			d.statWorkRatio.Done(true)
-		})
+		// Start chan
+		d.c.Start(d.Context())
 	})
 }
 
 // HandlePkt implements the PktHandler interface
 func (d *PktDumper) HandlePkt(p *PktHandlerPayload) {
-	d.q.Send(p)
+	d.c.Add(func() {
+		// Handle pause
+		defer d.HandlePause()
+
+		// Increment incoming rate
+		d.statIncomingRate.Add(1)
+
+		// Get pattern
+		var args PktDumperHandlerArgs
+		if d.t != nil {
+			// Increment count
+			c := atomic.AddUint32(&d.count, 1)
+
+			// Create data
+			d.o.Data["count"] = c
+			d.o.Data["pts"] = p.Pkt.Pts()
+			d.o.Data["stream_idx"] = p.Pkt.StreamIndex()
+
+			// Execute template
+			d.statWorkRatio.Begin()
+			buf := &bytes.Buffer{}
+			if err := d.t.Execute(buf, d.o.Data); err != nil {
+				d.statWorkRatio.End()
+				d.eh.Emit(astiencoder.EventError(d, errors.Wrapf(err, "astilibav: executing template %s with data %+v failed", d.o.Pattern, d.o.Data)))
+				return
+			}
+			d.statWorkRatio.End()
+
+			// Add to args
+			args.Pattern = buf.String()
+		}
+
+		// Dump
+		d.statWorkRatio.Begin()
+		if err := d.o.Handler(p.Pkt, args); err != nil {
+			d.statWorkRatio.End()
+			d.eh.Emit(astiencoder.EventError(d, errors.Wrapf(err, "astilibav: pkt dump func with args %+v failed", args)))
+			return
+		}
+		d.statWorkRatio.End()
+	})
 }
 
 // PktDumpFunc is a PktDumpFunc that dumps the packet to a file

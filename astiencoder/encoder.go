@@ -3,15 +3,17 @@ package main
 import (
 	"sync"
 
+	"github.com/asticode/go-astilog"
+
 	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astitools/worker"
+	"github.com/asticode/go-astikit"
 )
 
 type encoder struct {
 	c         *ConfigurationEncoder
 	eh        *astiencoder.EventHandler
 	m         *sync.Mutex
-	w         *astiworker.Worker
+	w         *astikit.Worker
 	wp        *astiencoder.WorkflowPool
 	wsStarted map[string]bool
 }
@@ -21,7 +23,7 @@ func newEncoder(c *ConfigurationEncoder, eh *astiencoder.EventHandler, wp *astie
 		c:         c,
 		eh:        eh,
 		m:         &sync.Mutex{},
-		w:         astiworker.NewWorker(),
+		w:         astikit.NewWorker(astikit.WorkerOptions{Logger: astilog.GetLogger()}),
 		wp:        wp,
 		wsStarted: make(map[string]bool),
 	}

@@ -7,11 +7,8 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	astiencoder "github.com/asticode/go-astiencoder"
-	astidefer "github.com/asticode/go-astitools/defer"
-	astistat "github.com/asticode/go-astitools/stat"
-	astisync "github.com/asticode/go-astitools/sync"
-	astiworker "github.com/asticode/go-astitools/worker"
+	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astikit"
 	"github.com/asticode/goav/avformat"
 	"github.com/pkg/errors"
 )
@@ -21,14 +18,14 @@ var countMuxer uint64
 // Muxer represents an object capable of muxing packets into an output
 type Muxer struct {
 	*astiencoder.BaseNode
-	c                *astidefer.Closer
+	c                *astikit.Chan
+	cl               *astikit.Closer
 	ctxFormat        *avformat.Context
 	eh               *astiencoder.EventHandler
 	o                *sync.Once
-	q                *astisync.CtxQueue
 	restamper        PktRestamper
-	statIncomingRate *astistat.IncrementStat
-	statWorkRatio    *astistat.DurationRatioStat
+	statIncomingRate *astikit.CounterAvgStat
+	statWorkRatio    *astikit.DurationPercentageStat
 }
 
 // MuxerOptions represents muxer options
@@ -41,20 +38,23 @@ type MuxerOptions struct {
 }
 
 // NewMuxer creates a new muxer
-func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astidefer.Closer) (m *Muxer, err error) {
+func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (m *Muxer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countMuxer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("muxer_%d", count), fmt.Sprintf("Muxer #%d", count), fmt.Sprintf("Muxes to %s", o.URL))
 
 	// Create muxer
 	m = &Muxer{
-		c:                c,
+		c: astikit.NewChan(astikit.ChanOptions{
+			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
+			ProcessAll:  true,
+		}),
+		cl:               c,
 		eh:               eh,
 		o:                &sync.Once{},
-		q:                astisync.NewCtxQueue(),
 		restamper:        o.Restamper,
-		statIncomingRate: astistat.NewIncrementStat(),
-		statWorkRatio:    astistat.NewDurationRatioStat(),
+		statIncomingRate: astikit.NewCounterAvgStat(),
+		statWorkRatio:    astikit.NewDurationPercentageStat(),
 	}
 	m.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(m), eh)
 	m.addStats()
@@ -99,21 +99,21 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astidefer.Closer)
 
 func (m *Muxer) addStats() {
 	// Add incoming rate
-	m.Stater().AddStat(astistat.StatMetadata{
+	m.Stater().AddStat(astikit.StatMetadata{
 		Description: "Number of packets coming in per second",
 		Label:       "Incoming rate",
 		Unit:        "pps",
 	}, m.statIncomingRate)
 
 	// Add work ratio
-	m.Stater().AddStat(astistat.StatMetadata{
+	m.Stater().AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent doing some actual work",
 		Label:       "Work ratio",
 		Unit:        "%",
 	}, m.statWorkRatio)
 
-	// Add queue stats
-	m.q.AddStats(m.Stater())
+	// Add chan stats
+	m.c.AddStats(m.Stater())
 }
 
 // CtxFormat returns the format ctx
@@ -123,10 +123,7 @@ func (m *Muxer) CtxFormat() *avformat.Context {
 
 // Start starts the muxer
 func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
-	m.BaseNode.Start(ctx, t, func(t *astiworker.Task) {
-		// Handle context
-		go m.q.HandleCtx(m.Context())
-
+	m.BaseNode.Start(ctx, t, func(t *astikit.Task) {
 		// Make sure to write header once
 		var ret int
 		m.o.Do(func() { ret = m.ctxFormat.AvformatWriteHeader(nil) })
@@ -136,41 +133,18 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		}
 
 		// Write trailer once everything is done
-		m.c.Add(func() error {
+		m.cl.Add(func() error {
 			if ret := m.ctxFormat.AvWriteTrailer(); ret < 0 {
 				return errors.Wrapf(NewAvError(ret), "m.ctxFormat.AvWriteTrailer on %s failed", m.ctxFormat.Filename())
 			}
 			return nil
 		})
 
-		// Make sure to stop the queue properly
-		defer m.q.Stop()
+		// Make sure to stop the chan properly
+		defer m.c.Stop()
 
-		// Start queue
-		m.q.Start(func(dp interface{}) {
-			// Handle pause
-			defer m.HandlePause()
-
-			// Assert payload
-			p := dp.(pktHandlerPayloadRetriever)()
-
-			// Increment incoming rate
-			m.statIncomingRate.Add(1)
-
-			// Restamp
-			if m.restamper != nil {
-				m.restamper.Restamp(p.Pkt)
-			}
-
-			// Write frame
-			m.statWorkRatio.Add(true)
-			if ret := m.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(p.Pkt))); ret < 0 {
-				m.statWorkRatio.Done(true)
-				emitAvError(m, m.eh, ret, "m.ctxFormat.AvInterleavedWriteFrame failed")
-				return
-			}
-			m.statWorkRatio.Done(true)
-		})
+		// Start chan
+		m.c.Start(m.Context())
 	})
 }
 
@@ -190,17 +164,31 @@ func (m *Muxer) NewPktHandler(o *avformat.Stream) *MuxerPktHandler {
 
 // HandlePkt implements the PktHandler interface
 func (h *MuxerPktHandler) HandlePkt(p *PktHandlerPayload) {
-	// Send pkt
-	h.q.Send(h.pktHandlerPayloadRetriever(p))
-}
+	h.c.Add(func() {
+		// Handle pause
+		defer h.HandlePause()
 
-func (h *MuxerPktHandler) pktHandlerPayloadRetriever(p *PktHandlerPayload) pktHandlerPayloadRetriever {
-	return func() *PktHandlerPayload {
+		// Increment incoming rate
+		h.statIncomingRate.Add(1)
+
 		// Rescale timestamps
 		p.Pkt.AvPacketRescaleTs(p.Descriptor.TimeBase(), h.o.TimeBase())
 
 		// Set stream index
 		p.Pkt.SetStreamIndex(h.o.Index())
-		return p
-	}
+
+		// Restamp
+		if h.restamper != nil {
+			h.restamper.Restamp(p.Pkt)
+		}
+
+		// Write frame
+		h.statWorkRatio.Begin()
+		if ret := h.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(p.Pkt))); ret < 0 {
+			h.statWorkRatio.End()
+			emitAvError(h, h.eh, ret, "h.ctxFormat.AvInterleavedWriteFrame failed")
+			return
+		}
+		h.statWorkRatio.End()
+	})
 }

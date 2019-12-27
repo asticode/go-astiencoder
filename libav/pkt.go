@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	astiencoder "github.com/asticode/go-astiencoder"
-	astidefer "github.com/asticode/go-astitools/defer"
-	astistat "github.com/asticode/go-astitools/stat"
+	"github.com/asticode/go-astiencoder"
+	"github.com/asticode/go-astikit"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 )
@@ -33,16 +32,16 @@ type pktDispatcher struct {
 	hs           map[string]PktHandler
 	m            *sync.Mutex
 	p            *pktPool
-	statDispatch *astistat.DurationRatioStat
+	statDispatch *astikit.DurationPercentageStat
 	wg           *sync.WaitGroup
 }
 
-func newPktDispatcher(c *astidefer.Closer) *pktDispatcher {
+func newPktDispatcher(c *astikit.Closer) *pktDispatcher {
 	return &pktDispatcher{
 		hs:           make(map[string]PktHandler),
 		m:            &sync.Mutex{},
 		p:            newPktPool(c),
-		statDispatch: astistat.NewDurationRatioStat(),
+		statDispatch: astikit.NewDurationPercentageStat(),
 		wg:           &sync.WaitGroup{},
 	}
 }
@@ -79,9 +78,9 @@ func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, descriptor Descriptor) {
 	// Wait for all previous subprocesses to be done
 	// In case a brave soul tries to update this logic so that several packet can be sent to handlers in parallel, bare
 	// in mind that packets must be sent in order whereas sending packets in goroutines doesn't keep this order
-	d.statDispatch.Add(true)
+	d.statDispatch.Begin()
 	d.wait()
-	d.statDispatch.Done(true)
+	d.statDispatch.End()
 
 	// Add subprocesses
 	d.wg.Add(len(hs))
@@ -108,9 +107,9 @@ func (d *pktDispatcher) wait() {
 	d.wg.Wait()
 }
 
-func (d *pktDispatcher) addStats(s *astistat.Stater) {
+func (d *pktDispatcher) addStats(s *astikit.Stater) {
 	// Add wait time
-	s.AddStat(astistat.StatMetadata{
+	s.AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent waiting for all previous subprocesses to be done",
 		Label:       "Dispatch ratio",
 		Unit:        "%",
@@ -146,15 +145,13 @@ func (c *pktCond) UsePkt(pkt *avcodec.Packet) bool {
 	return pkt.StreamIndex() == c.i.Index()
 }
 
-type pktHandlerPayloadRetriever func() *PktHandlerPayload
-
 type pktPool struct {
-	c *astidefer.Closer
+	c *astikit.Closer
 	m *sync.Mutex
 	p []*avcodec.Packet
 }
 
-func newPktPool(c *astidefer.Closer) *pktPool {
+func newPktPool(c *astikit.Closer) *pktPool {
 	return &pktPool{
 		c: c,
 		m: &sync.Mutex{},
