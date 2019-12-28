@@ -48,7 +48,7 @@ func newConfiguration() (c Configuration, err error) {
 
 	// Local
 	if *configPath != "" {
-		if _, err = toml.DecodeFile(*configPath, c); err != nil {
+		if _, err = toml.DecodeFile(*configPath, &c); err != nil {
 			err = errors.Wrapf(err, "main: toml decoding %s failed", *configPath)
 			return
 		}
