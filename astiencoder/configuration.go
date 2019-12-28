@@ -55,9 +55,9 @@ func newConfiguration() (c Configuration, err error) {
 	}
 
 	// Flag
-	if err = mergo.Merge(&Configuration{
+	if err = mergo.Merge(&c, &Configuration{
 		Logger: astilog.FlagConfig(),
-	}, c); err != nil {
+	}); err != nil {
 		err = errors.Wrap(err, "main: merging flag config failed")
 		return
 	}
