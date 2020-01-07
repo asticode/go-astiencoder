@@ -2,11 +2,9 @@ package main
 
 import (
 	"flag"
+	"fmt"
 
 	"github.com/BurntSushi/toml"
-	"github.com/asticode/go-astilog"
-	"github.com/imdario/mergo"
-	"github.com/pkg/errors"
 )
 
 var (
@@ -14,7 +12,6 @@ var (
 )
 
 type Configuration struct {
-	Logger  astilog.Configuration `toml:"logger"`
 	Encoder *ConfigurationEncoder `toml:"encoder"`
 }
 
@@ -41,25 +38,14 @@ func newConfiguration() (c Configuration, err error) {
 				PathWeb: "web",
 			},
 		},
-		Logger: astilog.Configuration{
-			AppName: "astiencoder",
-		},
 	}
 
 	// Local
 	if *configPath != "" {
 		if _, err = toml.DecodeFile(*configPath, &c); err != nil {
-			err = errors.Wrapf(err, "main: toml decoding %s failed", *configPath)
+			err = fmt.Errorf("main: toml decoding %s failed: %w", *configPath, err)
 			return
 		}
-	}
-
-	// Flag
-	if err = mergo.Merge(&c, Configuration{
-		Logger: astilog.FlagConfig(),
-	}); err != nil {
-		err = errors.Wrap(err, "main: merging flag config failed")
-		return
 	}
 	return
 }

@@ -10,7 +10,6 @@ import (
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
 	"github.com/asticode/goav/avformat"
-	"github.com/pkg/errors"
 )
 
 var countMuxer uint64
@@ -63,7 +62,7 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (
 	// We need to create an intermediate variable to avoid "cgo argument has Go pointer to Go pointer" errors
 	var ctxFormat *avformat.Context
 	if ret := avformat.AvformatAllocOutputContext2(&ctxFormat, o.Format, o.FormatName, o.URL); ret < 0 {
-		err = errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvformatAllocOutputContext2 on %+v failed", o)
+		err = fmt.Errorf("astilibav: avformat.AvformatAllocOutputContext2 on %+v failed: %w", o, NewAvError(ret))
 		return
 	}
 	m.ctxFormat = ctxFormat
@@ -79,7 +78,7 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (
 		// Open
 		var ctxAvIO *avformat.AvIOContext
 		if ret := avformat.AvIOOpen(&ctxAvIO, o.URL, avformat.AVIO_FLAG_WRITE); ret < 0 {
-			err = errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvIOOpen on %+v failed", o)
+			err = fmt.Errorf("astilibav: avformat.AvIOOpen on %+v failed: %w", o, NewAvError(ret))
 			return
 		}
 
@@ -89,7 +88,7 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (
 		// Make sure the avio ctx is properly closed
 		c.Add(func() error {
 			if ret := avformat.AvIOClosep(&ctxAvIO); ret < 0 {
-				return errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvIOClosep on %+v failed", o)
+				return fmt.Errorf("astilibav: avformat.AvIOClosep on %+v failed: %w", o, NewAvError(ret))
 			}
 			return nil
 		})
@@ -135,7 +134,7 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Write trailer once everything is done
 		m.cl.Add(func() error {
 			if ret := m.ctxFormat.AvWriteTrailer(); ret < 0 {
-				return errors.Wrapf(NewAvError(ret), "m.ctxFormat.AvWriteTrailer on %s failed", m.ctxFormat.Filename())
+				return fmt.Errorf("m.ctxFormat.AvWriteTrailer on %s failed: %w", m.ctxFormat.Filename(), NewAvError(ret))
 			}
 			return nil
 		})

@@ -2,9 +2,9 @@ package astiencoder
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/asticode/go-astikit"
-	"github.com/pkg/errors"
 )
 
 // Workflow represents a workflow
@@ -145,7 +145,7 @@ func (w *Workflow) start(ns []Node, o WorkflowStartOptions) {
 
 		// Close
 		if err := w.c.Close(); err != nil {
-			w.e.Emit(EventError(w, errors.Wrapf(err, "astiencoder: closing workflow %s failed", w.name)))
+			w.e.Emit(EventError(w, fmt.Errorf("astiencoder: closing workflow %s failed: %w", w.name, err)))
 		}
 	})
 }

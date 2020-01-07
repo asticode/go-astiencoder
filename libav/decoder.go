@@ -9,7 +9,6 @@ import (
 	"github.com/asticode/go-astikit"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avutil"
-	"github.com/pkg/errors"
 )
 
 var countDecoder uint64
@@ -66,13 +65,13 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Copy codec parameters
 	if ret := avcodec.AvcodecParametersToContext(d.ctxCodec, o.CodecParams); ret < 0 {
-		err = errors.Wrap(NewAvError(ret), "astilibav: avcodec.AvcodecParametersToContext failed")
+		err = fmt.Errorf("astilibav: avcodec.AvcodecParametersToContext failed: %w", NewAvError(ret))
 		return
 	}
 
 	// Open codec
 	if ret := d.ctxCodec.AvcodecOpen2(cdc, nil); ret < 0 {
-		err = errors.Wrap(NewAvError(ret), "astilibav: d.ctxCodec.AvcodecOpen2 failed")
+		err = fmt.Errorf("astilibav: d.ctxCodec.AvcodecOpen2 failed: %w", NewAvError(ret))
 		return
 	}
 

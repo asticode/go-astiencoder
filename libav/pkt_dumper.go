@@ -13,7 +13,6 @@ import (
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
 	"github.com/asticode/goav/avcodec"
-	"github.com/pkg/errors"
 )
 
 var countPktDumper uint64
@@ -66,7 +65,7 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler) (d *PktDumpe
 	// Parse pattern
 	if len(o.Pattern) > 0 {
 		if d.t, err = template.New("").Parse(o.Pattern); err != nil {
-			err = errors.Wrapf(err, "astilibav: parsing pattern %s as template failed", o.Pattern)
+			err = fmt.Errorf("astilibav: parsing pattern %s as template failed: %w", o.Pattern, err)
 			return
 		}
 	}
@@ -128,7 +127,7 @@ func (d *PktDumper) HandlePkt(p *PktHandlerPayload) {
 			buf := &bytes.Buffer{}
 			if err := d.t.Execute(buf, d.o.Data); err != nil {
 				d.statWorkRatio.End()
-				d.eh.Emit(astiencoder.EventError(d, errors.Wrapf(err, "astilibav: executing template %s with data %+v failed", d.o.Pattern, d.o.Data)))
+				d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: executing template %s with data %+v failed: %w", d.o.Pattern, d.o.Data, err)))
 				return
 			}
 			d.statWorkRatio.End()
@@ -141,7 +140,7 @@ func (d *PktDumper) HandlePkt(p *PktHandlerPayload) {
 		d.statWorkRatio.Begin()
 		if err := d.o.Handler(p.Pkt, args); err != nil {
 			d.statWorkRatio.End()
-			d.eh.Emit(astiencoder.EventError(d, errors.Wrapf(err, "astilibav: pkt dump func with args %+v failed", args)))
+			d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: pkt dump func with args %+v failed: %w", args, err)))
 			return
 		}
 		d.statWorkRatio.End()
@@ -153,14 +152,14 @@ var PktDumpFile = func(pkt *avcodec.Packet, args PktDumperHandlerArgs) (err erro
 	// Create file
 	var f *os.File
 	if f, err = os.Create(args.Pattern); err != nil {
-		err = errors.Wrapf(err, "astilibav: creating file %s failed", args.Pattern)
+		err = fmt.Errorf("astilibav: creating file %s failed: %w", args.Pattern, err)
 		return
 	}
 	defer f.Close()
 
 	// Write to file
 	if _, err = f.Write(C.GoBytes(unsafe.Pointer(pkt.Data()), (C.int)(pkt.Size()))); err != nil {
-		err = errors.Wrapf(err, "astilibav: writing to file %s failed", args.Pattern)
+		err = fmt.Errorf("astilibav: writing to file %s failed: %w", args.Pattern, err)
 		return
 	}
 	return

@@ -2,6 +2,7 @@ package astilibav
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -11,7 +12,6 @@ import (
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avfilter"
 	"github.com/asticode/goav/avutil"
-	"github.com/pkg/errors"
 )
 
 var countFilterer uint64
@@ -124,7 +124,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	// We need to create an intermediate variable to avoid "cgo argument has Go pointer to Go pointer" errors
 	var bufferSinkCtx *avfilter.Context
 	if ret := avfilter.AvfilterGraphCreateFilter(&bufferSinkCtx, bufferSink, "out", "", nil, f.g); ret < 0 {
-		err = errors.Wrap(NewAvError(ret), "astilibav: avfilter.AvfilterGraphCreateFilter on empty args failed")
+		err = fmt.Errorf("astilibav: avfilter.AvfilterGraphCreateFilter on empty args failed: %w", NewAvError(ret))
 		return
 	}
 	f.bufferSinkCtx = bufferSinkCtx
@@ -157,7 +157,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		// Create ctx
 		var bufferSrcCtx *avfilter.Context
 		if ret := avfilter.AvfilterGraphCreateFilter(&bufferSrcCtx, bufferSrc, "in", args, nil, f.g); ret < 0 {
-			err = errors.Wrapf(NewAvError(ret), "astilibav: avfilter.AvfilterGraphCreateFilter on args %s failed", args)
+			err = fmt.Errorf("astilibav: avfilter.AvfilterGraphCreateFilter on args %s failed: %w", args, NewAvError(ret))
 			return
 		}
 
@@ -177,13 +177,13 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 
 	// Parse content
 	if ret := f.g.AvfilterGraphParsePtr(o.Content, &inputs, &previousOutput, nil); ret < 0 {
-		err = errors.Wrapf(NewAvError(ret), "astilibav: g.AvfilterGraphParsePtr on content %s failed", o.Content)
+		err = fmt.Errorf("astilibav: g.AvfilterGraphParsePtr on content %s failed: %w", o.Content, NewAvError(ret))
 		return
 	}
 
 	// Configure
 	if ret := f.g.AvfilterGraphConfig(nil); ret < 0 {
-		err = errors.Wrap(NewAvError(ret), "astilibav: g.AvfilterGraphConfig failed")
+		err = fmt.Errorf("astilibav: g.AvfilterGraphConfig failed: %w", NewAvError(ret))
 		return
 	}
 	return
@@ -339,7 +339,7 @@ func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 func (f *Filterer) SendCommand(target, cmd, arg string, flags int) (err error) {
 	var res string
 	if ret := f.g.AvfilterGraphSendCommand(target, cmd, arg, res, 255, flags); ret < 0 {
-		err = errors.Wrapf(NewAvError(ret), "astilibav: f.g.AvfilterGraphSendCommand for target %s, cmd %s, arg %s and flag %d failed with res %s", target, cmd, arg, flags, res)
+		err = fmt.Errorf("astilibav: f.g.AvfilterGraphSendCommand for target %s, cmd %s, arg %s and flag %d failed with res %s: %w", target, cmd, arg, flags, res, NewAvError(ret))
 		return
 	}
 	return
@@ -355,7 +355,7 @@ type FiltererSwitchOptions struct {
 func (f *Filterer) Switch(opt FiltererSwitchOptions) (nf *Filterer, err error) {
 	// Create next filterer
 	if nf, err = NewFilterer(opt.Filter, f.eh, f.cl); err != nil {
-		err = errors.Wrap(err, "astilibav: creating new filterer failed")
+		err = fmt.Errorf("astilibav: creating new filterer failed: %w", err)
 		return
 	}
 
@@ -389,7 +389,7 @@ func (f *Filterer) Switch(opt FiltererSwitchOptions) (nf *Filterer, err error) {
 		// Make sure to close the previous filter once stopped
 		f.eh.Add(f, astiencoder.EventNameNodeStopped, func(e astiencoder.Event) bool {
 			if err := f.ccl.Close(); err != nil {
-				f.eh.Emit(astiencoder.EventError(f, errors.Wrap(err, "astilibav: closing filterer failed")))
+				f.eh.Emit(astiencoder.EventError(f, fmt.Errorf("astilibav: closing filterer failed: %w", err)))
 			}
 			return true
 		})

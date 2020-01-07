@@ -1,9 +1,10 @@
 package astilibav
 
 import (
+	"fmt"
+
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/goav/avutil"
-	"github.com/pkg/errors"
 )
 
 // AvError represents a libav error
@@ -30,5 +31,5 @@ func NewAvError(ret int) AvError {
 }
 
 func emitAvError(target interface{}, eh *astiencoder.EventHandler, ret int, format string, args ...interface{}) {
-	eh.Emit(astiencoder.EventError(target, errors.Wrapf(NewAvError(ret), "astilibav: "+format, args...)))
+	eh.Emit(astiencoder.EventError(target, fmt.Errorf("astilibav: "+format+": %w", append(args, NewAvError(ret))...)))
 }

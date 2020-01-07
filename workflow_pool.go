@@ -1,10 +1,12 @@
 package astiencoder
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 
-	"github.com/pkg/errors"
+	"github.com/asticode/go-astikit"
 )
 
 // Errors
@@ -57,11 +59,11 @@ func (wp *WorkflowPool) Workflows() (ws []*Workflow) {
 }
 
 // Serve spawns the workflow pool server
-func (wp *WorkflowPool) Serve(eh *EventHandler, pathWeb string, fn func(http.Handler)) (err error) {
+func (wp *WorkflowPool) Serve(eh *EventHandler, pathWeb string, l astikit.StdLogger, fn func(http.Handler)) (err error) {
 	// Create server
 	var s *workflowPoolServer
-	if s, err = newWorkflowPoolServer(wp, pathWeb); err != nil {
-		err = errors.Wrap(err, "astiencoder: creating workflow pool server failed")
+	if s, err = newWorkflowPoolServer(wp, pathWeb, l); err != nil {
+		err = fmt.Errorf("astiencoder: creating workflow pool server failed: %w", err)
 		return
 	}
 

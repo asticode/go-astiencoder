@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/asticode/go-astilog"
+	"github.com/asticode/go-astikit"
 )
 
 // Default event names
@@ -164,7 +164,10 @@ func (h *EventHandler) Emit(e Event) {
 }
 
 // LoggerEventHandlerAdapter adapts the event handler so that it logs the events properly
-func LoggerEventHandlerAdapter(h *EventHandler) {
+func LoggerEventHandlerAdapter(i astikit.StdLogger, h *EventHandler) {
+	// Create logger
+	l := astikit.AdaptStdLogger(i)
+
 	// Error
 	h.AddForEventName(EventNameError, func(e Event) bool {
 		var t string
@@ -178,27 +181,27 @@ func LoggerEventHandlerAdapter(h *EventHandler) {
 		if len(t) > 0 {
 			t = "(" + t + ")"
 		}
-		astilog.Errorf("%s%s", e.Payload.(error), t)
+		l.Errorf("%s%s", e.Payload.(error), t)
 		return false
 	})
 
 	// Node
 	h.AddForEventName(EventNameNodeStarted, func(e Event) bool {
-		astilog.Debugf("astiencoder: node %s (%s) is started", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
+		l.Debugf("astiencoder: node %s (%s) is started", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false
 	})
 	h.AddForEventName(EventNameNodeStopped, func(e Event) bool {
-		astilog.Debugf("astiencoder: node %s (%s) is stopped", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
+		l.Debugf("astiencoder: node %s (%s) is stopped", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false
 	})
 
 	// Workflow
 	h.AddForEventName(EventNameWorkflowStarted, func(e Event) bool {
-		astilog.Debugf("astiencoder: workflow %s is started", e.Target.(*Workflow).Name())
+		l.Debugf("astiencoder: workflow %s is started", e.Target.(*Workflow).Name())
 		return false
 	})
 	h.AddForEventName(EventNameWorkflowStopped, func(e Event) bool {
-		astilog.Debugf("astiencoder: workflow %s is stopped", e.Target.(*Workflow).Name())
+		l.Debugf("astiencoder: workflow %s is stopped", e.Target.(*Workflow).Name())
 		return false
 	})
 }

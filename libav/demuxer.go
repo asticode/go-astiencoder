@@ -11,7 +11,6 @@ import (
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
-	"github.com/pkg/errors"
 )
 
 var (
@@ -109,7 +108,7 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	if len(o.Dict) > 0 {
 		// Parse dict
 		if ret := avutil.AvDictParseString(&dict, o.Dict, "=", ",", 0); ret < 0 {
-			err = errors.Wrapf(NewAvError(ret), "astilibav: avutil.AvDictParseString on %s failed", o.Dict)
+			err = fmt.Errorf("astilibav: avutil.AvDictParseString on %s failed: %w", o.Dict, NewAvError(ret))
 			return
 		}
 
@@ -126,7 +125,7 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	// Open input
 	// We need to create an intermediate variable to avoid "cgo argument has Go pointer to Go pointer" errors
 	if ret := avformat.AvformatOpenInput(&ctxFormat, o.URL, o.Format, &dict); ret < 0 {
-		err = errors.Wrapf(NewAvError(ret), "astilibav: avformat.AvformatOpenInput on %+v failed", o)
+		err = fmt.Errorf("astilibav: avformat.AvformatOpenInput on %+v failed: %w", o, NewAvError(ret))
 		return
 	}
 	d.ctxFormat = ctxFormat
@@ -157,13 +156,13 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Retrieve stream information
 	if ret := d.ctxFormat.AvformatFindStreamInfo(nil); ret < 0 {
-		err = errors.Wrapf(NewAvError(ret), "astilibav: ctxFormat.AvformatFindStreamInfo on %+v failed", o)
+		err = fmt.Errorf("astilibav: ctxFormat.AvformatFindStreamInfo on %+v failed: %w", o, NewAvError(ret))
 		return
 	}
 
 	// Check whether find stream info has been cancelled
 	if o.FindStreamInfoCtx != nil && o.FindStreamInfoCtx.Err() != nil {
-		err = errors.Wrap(o.FindStreamInfoCtx.Err(), "astilibav: finding stream info has been cancelled")
+		err = fmt.Errorf("astilibav: finding stream info has been cancelled: %w", o.FindStreamInfoCtx.Err())
 		return
 	}
 

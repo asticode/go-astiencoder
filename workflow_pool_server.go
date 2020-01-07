@@ -2,6 +2,7 @@ package astiencoder
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -9,11 +10,9 @@ import (
 	"time"
 
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/go-astilog"
 	"github.com/asticode/go-astiws"
 	"github.com/gorilla/websocket"
 	"github.com/julienschmidt/httprouter"
-	"github.com/pkg/errors"
 )
 
 // ExposedError represents an exposed error.
@@ -130,16 +129,18 @@ func newExposedWorkflowNode(n Node) (w ExposedWorkflowNode) {
 }
 
 type workflowPoolServer struct {
+	l       astikit.SeverityLogger
 	m       *astiws.Manager
 	pathWeb string
 	t       *astikit.Templater
 	wp      *WorkflowPool
 }
 
-func newWorkflowPoolServer(wp *WorkflowPool, pathWeb string) (s *workflowPoolServer, err error) {
+func newWorkflowPoolServer(wp *WorkflowPool, pathWeb string, l astikit.StdLogger) (s *workflowPoolServer, err error) {
 	// Create server
 	s = &workflowPoolServer{
-		m:       astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 8192}),
+		l:       astikit.AdaptStdLogger(l),
+		m:       astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 8192}, l),
 		pathWeb: pathWeb,
 		t:       astikit.NewTemplater(),
 		wp:      wp,
@@ -147,13 +148,13 @@ func newWorkflowPoolServer(wp *WorkflowPool, pathWeb string) (s *workflowPoolSer
 
 	// Add layouts
 	if err = s.t.AddLayoutsFromDir(filepath.Join(pathWeb, "layouts"), ".html"); err != nil {
-		err = errors.Wrap(err, "astiencoder: adding layouts failed")
+		err = fmt.Errorf("astiencoder: adding layouts failed: %w", err)
 		return
 	}
 
 	// Add templates
 	if err = s.t.AddTemplatesFromDir(filepath.Join(pathWeb, "templates"), ".html"); err != nil {
-		err = errors.Wrap(err, "astiencoder: adding templates failed")
+		err = fmt.Errorf("astiencoder: adding templates failed: %w", err)
 		return
 	}
 	return
@@ -228,7 +229,7 @@ func (s *workflowPoolServer) handleWeb() httprouter.Handle {
 		// Execute template
 		tpl, _ := s.t.Template(name)
 		if err := tpl.Execute(rw, d); err != nil {
-			astilog.Error(errors.Wrapf(err, "astiencoder: executing template %s with data %+v failed", name, d))
+			s.l.Error(fmt.Errorf("astiencoder: executing template %s with data %+v failed: %w", name, d, err))
 			return
 		}
 	}
@@ -257,17 +258,17 @@ func (s *workflowPoolServer) templateData(name string, r *http.Request, code *in
 
 func (s *workflowPoolServer) writeJSONData(rw http.ResponseWriter, data interface{}) {
 	if err := json.NewEncoder(rw).Encode(data); err != nil {
-		WriteJSONError(rw, http.StatusInternalServerError, errors.Wrap(err, "astiencoder: json encoding failed"))
+		WriteJSONError(s.l, rw, http.StatusInternalServerError, fmt.Errorf("astiencoder: json encoding failed: %w", err))
 		return
 	}
 }
 
 // WriteJSONError writes a JSON error
-func WriteJSONError(rw http.ResponseWriter, code int, err error) {
+func WriteJSONError(l astikit.SeverityLogger, rw http.ResponseWriter, code int, err error) {
 	rw.WriteHeader(code)
-	astilog.Error(err)
-	if err := json.NewEncoder(rw).Encode(ExposedError{Message: errors.Cause(err).Error()}); err != nil {
-		astilog.Error(errors.Wrap(err, "astiencoder: json encoding failed"))
+	l.Error(err)
+	if err := json.NewEncoder(rw).Encode(ExposedError{Message: astikit.ErrorCause(err).Error()}); err != nil {
+		l.Error(fmt.Errorf("astiencoder: json encoding failed: %w", err))
 	}
 }
 
@@ -301,9 +302,9 @@ func (s *workflowPoolServer) handleWorkflowAction(fn func(w *Workflow, rw http.R
 		w, err := s.wp.Workflow(p.ByName("workflow"))
 		if err != nil {
 			if err == ErrWorkflowNotFound {
-				WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
+				WriteJSONError(s.l, rw, http.StatusNotFound, fmt.Errorf("astiencoder: workflow %s doesn't exist", p.ByName("workflow")))
 			} else {
-				WriteJSONError(rw, http.StatusInternalServerError, errors.Wrapf(err, "astiencoder: fetching workflow %s failed", p.ByName("workflow")))
+				WriteJSONError(s.l, rw, http.StatusInternalServerError, fmt.Errorf("astiencoder: fetching workflow %s failed: %w", p.ByName("workflow"), err))
 			}
 			return
 		}
@@ -316,7 +317,7 @@ func (s *workflowPoolServer) handleWorkflowAction(fn func(w *Workflow, rw http.R
 func (s *workflowPoolServer) handleWorkflow() httprouter.Handle {
 	return s.handleWorkflowAction(func(w *Workflow, rw http.ResponseWriter, p httprouter.Params) {
 		if err := json.NewEncoder(rw).Encode(newExposedWorkflow(w)); err != nil {
-			WriteJSONError(rw, http.StatusInternalServerError, errors.Wrap(err, "astiencoder: writing failed"))
+			WriteJSONError(s.l, rw, http.StatusInternalServerError, fmt.Errorf("astiencoder: writing failed: %w", err))
 			return
 		}
 	})
@@ -339,7 +340,7 @@ func (s *workflowPoolServer) handleNodeAction(fn func(w *Workflow, n Node)) http
 		// Get node
 		n, ok := w.indexedNodes()[p.ByName("node")]
 		if !ok {
-			WriteJSONError(rw, http.StatusNotFound, fmt.Errorf("astiencoder: node %s doesn't exist", p.ByName("node")))
+			WriteJSONError(s.l, rw, http.StatusNotFound, fmt.Errorf("astiencoder: node %s doesn't exist", p.ByName("node")))
 			return
 		}
 
@@ -369,8 +370,10 @@ func (s *workflowPoolServer) handleNodeStart() httprouter.Handle {
 func (s *workflowPoolServer) handleWebsocket() httprouter.Handle {
 	return func(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		if err := s.m.ServeHTTP(rw, r, s.adaptWebsocketClient); err != nil {
-			if v, ok := errors.Cause(err).(*websocket.CloseError); !ok || (v.Code != websocket.CloseNoStatusReceived && v.Code != websocket.CloseNormalClosure) {
-				astilog.Error(errors.Wrap(err, "astiencoder: handling websocket failed"))
+			var e *websocket.CloseError
+			if ok := errors.As(err, &e); !ok ||
+				(e.Code != websocket.CloseNoStatusReceived && e.Code != websocket.CloseNormalClosure) {
+				s.l.Error(fmt.Errorf("astiencoder: handling websocket failed: %w", err))
 			}
 			return
 		}
@@ -398,7 +401,7 @@ func (s *workflowPoolServer) handleWebsocketDisconnected(c *astiws.Client, event
 
 func (s *workflowPoolServer) handleWebsocketPing(c *astiws.Client, eventName string, payload json.RawMessage) error {
 	if err := c.ExtendConnection(); err != nil {
-		astilog.Error(errors.Wrap(err, "astiencoder: extending ws connection failed"))
+		s.l.Error(fmt.Errorf("astiencoder: extending ws connection failed: %w", err))
 	}
 	return nil
 }
@@ -424,7 +427,7 @@ func (s *workflowPoolServer) adaptEventHandler(eh *EventHandler) {
 		var p interface{}
 		switch e.Name {
 		case EventNameError:
-			p = errors.Cause(e.Payload.(error))
+			p = astikit.ErrorCause(e.Payload.(error))
 		case EventNameWorkflowContinued, EventNameWorkflowPaused, EventNameWorkflowStarted, EventNameWorkflowStopped:
 			p = e.Target.(*Workflow).Name()
 		case EventNameNodeStats, EventNameWorkflowStats:
@@ -450,7 +453,7 @@ func (s *workflowPoolServer) adaptEventHandler(eh *EventHandler) {
 func (s *workflowPoolServer) sendEventToWebsocket(eventName string, payload interface{}) {
 	s.m.Loop(func(_ interface{}, c *astiws.Client) {
 		if err := c.Write(eventName, payload); err != nil {
-			astilog.Error(errors.Wrapf(err, "astiencoder: writing event %s with payload %+v to websocket client %p failed", eventName, payload, c))
+			s.l.Error(fmt.Errorf("astiencoder: writing event %s with payload %+v to websocket client %p failed: %w", eventName, payload, c, err))
 			return
 		}
 	})

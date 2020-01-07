@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"testing"
 
-	"github.com/asticode/goav/avutil"
-
 	"github.com/asticode/go-astiencoder"
-	"github.com/pkg/errors"
+	"github.com/asticode/goav/avutil"
 )
 
 func init() {
@@ -28,7 +28,7 @@ func testJob(t *testing.T, jobPath string, assertPaths func(j Job) map[string]st
 	// Create encoder
 	cfg := &ConfigurationEncoder{}
 	cfg.Exec.StopWhenWorkflowsAreStopped = true
-	e := newEncoder(cfg, eh, wp)
+	e := newEncoder(cfg, eh, wp, log.New(log.Writer(), log.Prefix(), log.Flags()))
 
 	// Open job
 	j, err := openJob(jobPath)
@@ -60,14 +60,14 @@ func openJob(path string) (j Job, err error) {
 	// Open
 	var f *os.File
 	if f, err = os.Open(path); err != nil {
-		err = errors.Wrapf(err, "opening %s failed", path)
+		err = fmt.Errorf("opening %s failed: %w", path, err)
 		return
 	}
 	defer f.Close()
 
 	// Unmarshal job
 	if err = json.NewDecoder(f).Decode(&j); err != nil {
-		err = errors.Wrapf(err, "unmarshaling %s failed", path)
+		err = fmt.Errorf("unmarshaling %s failed: %w", path, err)
 		return
 	}
 
@@ -109,14 +109,14 @@ func hashFileContent(path string) (hash []byte, err error) {
 	// Read
 	var b []byte
 	if b, err = ioutil.ReadFile(path); err != nil {
-		err = errors.Wrapf(err, "reading file %s failed", path)
+		err = fmt.Errorf("reading file %s failed: %w", path, err)
 		return
 	}
 
 	// Hash
 	h := sha1.New()
 	if _, err = h.Write(b); err != nil {
-		err = errors.Wrapf(err, "hashing content of file %s failed", path)
+		err = fmt.Errorf("hashing content of file %s failed: %w", path, err)
 		return
 	}
 	hash = h.Sum(nil)

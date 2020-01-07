@@ -2,6 +2,7 @@ package astilibav
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
-	"github.com/pkg/errors"
 )
 
 var countEncoder uint64
@@ -72,7 +72,7 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Check whether the context is valid with the codec
 	if err = o.Ctx.validWithCodec(cdc); err != nil {
-		err = errors.Wrap(err, "astilibav: checking whether the context is valid with the codec failed")
+		err = fmt.Errorf("astilibav: checking whether the context is valid with the codec failed: %w", err)
 		return
 	}
 
@@ -117,7 +117,7 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	if len(o.Ctx.Dict) > 0 {
 		// Parse dict
 		if ret := avutil.AvDictParseString(&dict, o.Ctx.Dict, "=", ",", 0); ret < 0 {
-			err = errors.Wrapf(NewAvError(ret), "astilibav: avutil.AvDictParseString on %s failed", o.Ctx.Dict)
+			err = fmt.Errorf("astilibav: avutil.AvDictParseString on %s failed: %w", o.Ctx.Dict, NewAvError(ret))
 			return
 		}
 
@@ -127,7 +127,7 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Open codec
 	if ret := e.ctxCodec.AvcodecOpen2(cdc, &dict); ret < 0 {
-		err = errors.Wrap(NewAvError(ret), "astilibav: d.e.ctxCodec.AvcodecOpen2 failed")
+		err = fmt.Errorf("astilibav: d.e.ctxCodec.AvcodecOpen2 failed: %w", NewAvError(ret))
 		return
 	}
 
@@ -292,7 +292,7 @@ func (e *Encoder) AddStream(ctxFormat *avformat.Context) (o *avformat.Stream, er
 
 	// Set codec parameters
 	if ret := avcodec.AvcodecParametersFromContext(o.CodecParameters(), e.ctxCodec); ret < 0 {
-		err = errors.Wrapf(NewAvError(ret), "astilibav: avcodec.AvcodecParametersFromContext from %+v to %+v failed", e.ctxCodec, o.CodecParameters())
+		err = fmt.Errorf("astilibav: avcodec.AvcodecParametersFromContext from %+v to %+v failed: %w", e.ctxCodec, o.CodecParameters(), NewAvError(ret))
 		return
 	}
 
