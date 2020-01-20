@@ -23,7 +23,7 @@ func CloneStream(i *avformat.Stream, ctxFormat *avformat.Context) (o *avformat.S
 		return
 	}
 
-	// Reset codec tag as shown in https://github.com/FFmpeg/FFmpeg/blob/n4.0.2/doc/examples/remuxing.c#L122
+	// Reset codec tag as shown in https://github.com/FFmpeg/FFmpeg/blob/n4.1.1/doc/examples/remuxing.c#L122
 	o.CodecParameters().SetCodecTag(0)
 	return
 }

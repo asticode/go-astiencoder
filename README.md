@@ -1,6 +1,6 @@
 `astiencoder` is an open source video encoder written in GO and based on [ffmpeg](https://github.com/FFmpeg/FFmpeg) C bindings.
 
-Right now this project has only been tested on FFMpeg 4.0.2.
+Right now this project has only been tested on FFMpeg 4.1.1.
 
 ![screenshot-1](doc/screenshot-1.png)
 
@@ -179,7 +179,7 @@ Here's why:
 6) [this project](https://github.com/koropets/goav) is a fork of #4 with interesting additional commits
 7) [this project](https://github.com/alon-ne/goav) has a very nice set of examples
 
-Therefore I've forked #4, added useful commits from other forks and removed deprecated functions so that it works properly in FFMpeg 4.0.2.
+Therefore I've forked #4, added useful commits from other forks and removed deprecated functions so that it works properly in FFMpeg 4.1.1.
 
 # I'm not familiar with CGO, which flags am I supposed to provide?
 
