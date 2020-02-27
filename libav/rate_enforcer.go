@@ -311,7 +311,11 @@ func (r *RateEnforcer) distribute() {
 
 			// Add to slot or remove if pts is older
 			if s.ptsMin <= r.buf[idx].f.Pts() && s.ptsMax > r.buf[idx].f.Pts() {
-				s.i = r.buf[idx]
+				if s.i == nil {
+					s.i = r.buf[idx]
+				} else {
+					r.p.put(r.buf[idx].f)
+				}
 				r.buf = append(r.buf[:idx], r.buf[idx+1:]...)
 				idx--
 				continue
