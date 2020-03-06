@@ -114,10 +114,10 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Dict
 	var dict *avutil.Dictionary
-	if len(o.Ctx.Dict) > 0 {
+	if o.Ctx.Dict != nil {
 		// Parse dict
-		if ret := avutil.AvDictParseString(&dict, o.Ctx.Dict, "=", ",", 0); ret < 0 {
-			err = fmt.Errorf("astilibav: avutil.AvDictParseString on %s failed: %w", o.Ctx.Dict, NewAvError(ret))
+		if err = o.Ctx.Dict.Parse(&dict); err != nil {
+			err = fmt.Errorf("astilibav: parsing dict failed: %w", err)
 			return
 		}
 

@@ -118,7 +118,7 @@ func (b *builder) openInputs(j Job, bd *buildData) (is map[string]openedInput, e
 		// Create demuxer
 		var d *astilibav.Demuxer
 		if d, err = astilibav.NewDemuxer(astilibav.DemuxerOptions{
-			Dict:        cfg.Dict,
+			Dict:        astilibav.NewDefaultDict(cfg.Dict),
 			EmulateRate: cfg.EmulateRate,
 			URL:         cfg.URL,
 		}, bd.eh, bd.c); err != nil {
@@ -386,7 +386,7 @@ func (b *builder) operationOutputCtx(o JobOperation, inCtx astilibav.Context, oo
 	outCtx.ThreadCount = o.ThreadCount
 
 	// Set dict
-	outCtx.Dict = o.Dict
+	outCtx.Dict = astilibav.NewDefaultDict(o.Dict)
 
 	// TODO Add audio options
 

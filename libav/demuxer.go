@@ -60,7 +60,7 @@ func newDemuxerPkt(pkt *avcodec.Packet, s *avformat.Stream) *demuxerPkt {
 // DemuxerOptions represents demuxer options
 type DemuxerOptions struct {
 	// String content of the demuxer as you would use in ffmpeg
-	Dict string
+	Dict *Dict
 	// If true, the demuxer will sleep between packets for the exact duration of the packet
 	EmulateRate bool
 	// Context used to cancel finding stream info
@@ -105,10 +105,10 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Dict
 	var dict *avutil.Dictionary
-	if len(o.Dict) > 0 {
+	if o.Dict != nil {
 		// Parse dict
-		if ret := avutil.AvDictParseString(&dict, o.Dict, "=", ",", 0); ret < 0 {
-			err = fmt.Errorf("astilibav: avutil.AvDictParseString on %s failed: %w", o.Dict, NewAvError(ret))
+		if err = o.Dict.Parse(&dict); err != nil {
+			err = fmt.Errorf("astilibav: parsing dict failed: %w", err)
 			return
 		}
 

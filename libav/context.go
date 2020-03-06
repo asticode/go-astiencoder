@@ -16,7 +16,7 @@ type Context struct {
 	CodecID      avcodec.CodecId
 	CodecName    string
 	CodecType    avcodec.MediaType
-	Dict         string
+	Dict         *Dict
 	GlobalHeader bool
 	ThreadCount  *int
 	TimeBase     avutil.Rational
