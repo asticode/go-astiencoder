@@ -16,6 +16,7 @@ type Forwarder struct {
 	*astiencoder.BaseNode
 	c                *astikit.Chan
 	d                *frameDispatcher
+	outputCtx        Context
 	restamper        FrameRestamper
 	statIncomingRate *astikit.CounterAvgStat
 	statWorkRatio    *astikit.DurationPercentageStat
@@ -24,6 +25,7 @@ type Forwarder struct {
 // ForwarderOptions represents forwarder options
 type ForwarderOptions struct {
 	Node      astiencoder.NodeOptions
+	OutputCtx Context
 	Restamper FrameRestamper
 }
 
@@ -39,6 +41,7 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
 			ProcessAll:  true,
 		}),
+		outputCtx:        o.OutputCtx,
 		restamper:        o.Restamper,
 		statIncomingRate: astikit.NewCounterAvgStat(),
 		statWorkRatio:    astikit.NewDurationPercentageStat(),
@@ -69,6 +72,11 @@ func (f *Forwarder) addStats() {
 
 	// Add chan stats
 	f.c.AddStats(f.Stater())
+}
+
+// OutputCtx returns the output ctx
+func (f *Forwarder) OutputCtx() Context {
+	return f.outputCtx
 }
 
 // Connect implements the FrameHandlerConnector interface

@@ -6,37 +6,41 @@ import (
 	"github.com/asticode/go-astiencoder"
 )
 
+type EmitFunc func(name string, payload interface{})
+
 // FiltererSwitcher represents an object that can take care of synchronizing things when switching a filterer
 type FiltererSwitcher interface {
-	IncIn(n astiencoder.Node)
+	IncIn(n astiencoder.Node, delta int)
 	IncOut()
 	Reset()
-	ShouldIn(n astiencoder.Node) (ko bool)
+	SetEmitFunc(fn EmitFunc)
+	ShouldIn(n astiencoder.Node, delta int) (ko bool)
 	ShouldOut() (ko bool)
 	Switch()
 }
 
 type filtererSwitcher struct {
-	eh *astiencoder.EventHandler
-	f  *Filterer
-	is map[astiencoder.Node]int
-	l  int
-	m  *sync.Mutex
-	o  int
-	os *sync.Once
+	emitFunc EmitFunc
+	is       map[astiencoder.Node]int
+	l        int
+	m        *sync.Mutex
+	o        int
+	os       *sync.Once
 }
 
-func newFiltererSwitcher(f *Filterer, eh *astiencoder.EventHandler) *filtererSwitcher {
+func newFiltererSwitcher() *filtererSwitcher {
 	return &filtererSwitcher{
-		eh: eh,
-		f:  f,
 		is: make(map[astiencoder.Node]int),
 		m:  &sync.Mutex{},
 		os: &sync.Once{},
 	}
 }
 
-func (s *filtererSwitcher) IncIn(n astiencoder.Node) {
+func (s *filtererSwitcher) SetEmitFunc(fn EmitFunc) {
+	s.emitFunc = fn
+}
+
+func (s *filtererSwitcher) IncIn(n astiencoder.Node, delta int) {
 	// Lock
 	s.m.Lock()
 	defer s.m.Unlock()
@@ -80,7 +84,7 @@ func (s *filtererSwitcher) Reset() {
 	s.os = &sync.Once{}
 }
 
-func (s *filtererSwitcher) ShouldIn(n astiencoder.Node) (ko bool) {
+func (s *filtererSwitcher) ShouldIn(n astiencoder.Node, delta int) (ko bool) {
 	// Lock
 	s.m.Lock()
 	defer s.m.Unlock()
@@ -91,7 +95,7 @@ func (s *filtererSwitcher) ShouldIn(n astiencoder.Node) (ko bool) {
 	}
 
 	// Check limit
-	if s.l > 0 && s.is[n]+1 > s.l {
+	if s.l > 0 && s.is[n]+delta > s.l {
 		return true
 	}
 	return
@@ -137,16 +141,15 @@ func (s *filtererSwitcher) Switch() {
 }
 
 func (s *filtererSwitcher) emitEventIn(n astiencoder.Node) {
-	s.eh.Emit(astiencoder.Event{
-		Name:    EventNameFiltererSwitchInDone,
-		Payload: n,
-		Target:  s.f,
-	})
+	if s.emitFunc == nil {
+		return
+	}
+	s.emitFunc(EventNameFiltererSwitchInDone, n)
 }
 
 func (s *filtererSwitcher) emitEventOut() {
-	s.eh.Emit(astiencoder.Event{
-		Name:   EventNameFiltererSwitchOutDone,
-		Target: s.f,
-	})
+	if s.emitFunc == nil {
+		return
+	}
+	s.emitFunc(EventNameFiltererSwitchOutDone, nil)
 }

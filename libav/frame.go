@@ -40,7 +40,6 @@ type frameDispatcher struct {
 
 func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, c *astikit.Closer) *frameDispatcher {
 	return &frameDispatcher{
-		c:            c,
 		eh:           eh,
 		hs:           make(map[string]FrameHandler),
 		m:            &sync.Mutex{},

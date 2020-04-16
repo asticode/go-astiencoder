@@ -20,13 +20,14 @@ var countFilterer uint64
 type Filterer struct {
 	*astiencoder.BaseNode
 	bufferSinkCtx    *avfilter.Context
-	bufferSrcCtxs    map[astiencoder.Node]*avfilter.Context
+	bufferSrcCtxs    map[astiencoder.Node][]*avfilter.Context
 	c                *astikit.Chan
 	cl               *astikit.Closer
 	ccl              *astikit.Closer // Child closer used to close only things related to the filterer
 	d                *frameDispatcher
 	eh               *astiencoder.EventHandler
 	g                *avfilter.Graph
+	outputCtx        Context
 	restamper        FrameRestamper
 	s                FiltererSwitcher
 	statIncomingRate *astikit.CounterAvgStat
@@ -36,16 +37,11 @@ type Filterer struct {
 // FiltererOptions represents filterer options
 type FiltererOptions struct {
 	Content   string
-	Inputs    map[string]FiltererInput
+	Inputs    map[string]astiencoder.Node
 	Node      astiencoder.NodeOptions
+	OutputCtx Context
 	Restamper FrameRestamper
 	Switcher  FiltererSwitcher
-}
-
-// FiltererInput represents a filterer input
-type FiltererInput struct {
-	Context Context
-	Node    astiencoder.Node
 }
 
 // NewFilterer creates a new filterer
@@ -56,7 +52,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 
 	// Create filterer
 	f = &Filterer{
-		bufferSrcCtxs: make(map[astiencoder.Node]*avfilter.Context),
+		bufferSrcCtxs: make(map[astiencoder.Node][]*avfilter.Context),
 		c: astikit.NewChan(astikit.ChanOptions{
 			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
 			ProcessAll:  true,
@@ -65,6 +61,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		ccl:              c.NewChild(),
 		eh:               eh,
 		g:                avfilter.AvfilterGraphAlloc(),
+		outputCtx:        o.OutputCtx,
 		restamper:        o.Restamper,
 		s:                o.Switcher,
 		statIncomingRate: astikit.NewCounterAvgStat(),
@@ -76,8 +73,17 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 
 	// We need a filterer switcher
 	if f.s == nil {
-		f.s = newFiltererSwitcher(f, eh)
+		f.s = newFiltererSwitcher()
 	}
+
+	// Set filterer switcher emit func
+	f.s.SetEmitFunc(func(name string, payload interface{}) {
+		f.eh.Emit(astiencoder.Event{
+			Name:    name,
+			Payload: payload,
+			Target:  f,
+		})
+	})
 
 	// Create graph
 	f.ccl.Add(func() error {
@@ -94,16 +100,24 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	// Get codec type
 	codecType := avcodec.MediaType(avcodec.AVMEDIA_TYPE_UNKNOWN)
 	for n, i := range o.Inputs {
-		switch i.Context.CodecType {
+		// Get context
+		v, ok := i.(OutputContexter)
+		if !ok {
+			err = fmt.Errorf("astilibav: input %s is not an OutputContexter", n)
+			return
+		}
+		ctx := v.OutputCtx()
+
+		switch ctx.CodecType {
 		case avcodec.AVMEDIA_TYPE_AUDIO, avcodec.AVMEDIA_TYPE_VIDEO:
 			if codecType == avcodec.AVMEDIA_TYPE_UNKNOWN {
-				codecType = i.Context.CodecType
-			} else if codecType != i.Context.CodecType {
-				err = fmt.Errorf("astilibav: codec type %d of input %s is different from chosen codec type %d", i.Context.CodecType, n, codecType)
+				codecType = ctx.CodecType
+			} else if codecType != ctx.CodecType {
+				err = fmt.Errorf("astilibav: codec type %d of input %s is different from chosen codec type %d", ctx.CodecType, n, codecType)
 				return
 			}
 		default:
-			err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", i.Context.CodecType)
+			err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", ctx.CodecType)
 			return
 		}
 	}
@@ -139,18 +153,26 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	// Loop through options inputs
 	var previousOutput *avfilter.Input
 	for n, i := range o.Inputs {
+		// Get context
+		v, ok := i.(OutputContexter)
+		if !ok {
+			err = fmt.Errorf("astilibav: input %s is not an OutputContexter", n)
+			return
+		}
+		ctx := v.OutputCtx()
+
 		// Create buffer
 		bufferSrc := bufferFunc()
 
 		// Create filter in args
 		var args string
-		switch i.Context.CodecType {
+		switch ctx.CodecType {
 		case avcodec.AVMEDIA_TYPE_AUDIO:
-			args = fmt.Sprintf("channel_layout=%s:sample_fmt=%s:time_base=%d/%d:sample_rate=%d", avutil.AvGetChannelLayoutString(i.Context.ChannelLayout), avutil.AvGetSampleFmtName(int(i.Context.SampleFmt)), i.Context.TimeBase.Num(), i.Context.TimeBase.Den(), i.Context.SampleRate)
+			args = fmt.Sprintf("channel_layout=%s:sample_fmt=%s:time_base=%d/%d:sample_rate=%d", avutil.AvGetChannelLayoutString(ctx.ChannelLayout), avutil.AvGetSampleFmtName(int(ctx.SampleFmt)), ctx.TimeBase.Num(), ctx.TimeBase.Den(), ctx.SampleRate)
 		case avcodec.AVMEDIA_TYPE_VIDEO:
-			args = fmt.Sprintf("video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d", i.Context.Width, i.Context.Height, i.Context.PixelFormat, i.Context.TimeBase.Num(), i.Context.TimeBase.Den(), i.Context.SampleAspectRatio.Num(), i.Context.SampleAspectRatio.Den())
+			args = fmt.Sprintf("video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d", ctx.Width, ctx.Height, ctx.PixelFormat, ctx.TimeBase.Num(), ctx.TimeBase.Den(), ctx.SampleAspectRatio.Num(), ctx.SampleAspectRatio.Den())
 		default:
-			err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", i.Context.CodecType)
+			err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", ctx.CodecType)
 			return
 		}
 
@@ -169,7 +191,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		outputs.SetNext(previousOutput)
 
 		// Store ctx
-		f.bufferSrcCtxs[i.Node] = bufferSrcCtx
+		f.bufferSrcCtxs[i] = append(f.bufferSrcCtxs[i], bufferSrcCtx)
 
 		// Set previous output
 		previousOutput = outputs
@@ -209,6 +231,11 @@ func (f *Filterer) addStats() {
 
 	// Add queue stats
 	f.c.AddStats(f.Stater())
+}
+
+// OutputCtx returns the output ctx
+func (f *Filterer) OutputCtx() Context {
+	return f.outputCtx
 }
 
 // Connect implements the FrameHandlerConnector interface
@@ -257,31 +284,34 @@ func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
 		// Increment incoming rate
 		f.statIncomingRate.Add(1)
 
-		// Retrieve buffer ctx
-		bufferSrcCtx, ok := f.bufferSrcCtxs[p.Node]
+		// Retrieve buffer ctxs
+		bufferSrcCtxs, ok := f.bufferSrcCtxs[p.Node]
 		if !ok {
 			return
 		}
 
 		// Check switcher
 		if f.s != nil {
-			if ko := f.s.ShouldIn(p.Node); ko {
+			if ko := f.s.ShouldIn(p.Node, len(bufferSrcCtxs)); ko {
 				return
 			}
 		}
 
-		// Push frame in graph
-		f.statWorkRatio.Begin()
-		if ret := f.g.AvBuffersrcAddFrameFlags(bufferSrcCtx, p.Frame, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
+		// Loop through buffer ctxs
+		for _, bufferSrcCtx := range bufferSrcCtxs {
+			// Push frame in graph
+			f.statWorkRatio.Begin()
+			if ret := f.g.AvBuffersrcAddFrameFlags(bufferSrcCtx, p.Frame, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
+				f.statWorkRatio.End()
+				emitAvError(f, f.eh, ret, "f.g.AvBuffersrcAddFrameFlags failed")
+				return
+			}
 			f.statWorkRatio.End()
-			emitAvError(f, f.eh, ret, "f.g.AvBuffersrcAddFrameFlags failed")
-			return
 		}
-		f.statWorkRatio.End()
 
 		// Increment switcher
 		if f.s != nil {
-			f.s.IncIn(p.Node)
+			f.s.IncIn(p.Node, len(bufferSrcCtxs))
 		}
 
 		// Loop
@@ -376,7 +406,7 @@ func (f *Filterer) Switch(opt FiltererSwitchOptions) (nf *Filterer, err error) {
 	// Index next filterer nodes
 	nns := make(map[astiencoder.Node]bool)
 	for _, i := range opt.Filter.Inputs {
-		nns[i.Node] = true
+		nns[i] = true
 	}
 
 	// Handle out

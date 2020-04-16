@@ -226,15 +226,12 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 				return
 			}
 
-			// Create input ctx
-			inCtx := astilibav.NewContextFromStream(is)
-
 			// Create output ctx
-			outCtx := b.operationOutputCtx(o, inCtx, oos)
+			outCtx := b.operationOutputCtx(o, d.OutputCtx(), oos)
 
 			// Create filterer
 			var f *astilibav.Filterer
-			if f, err = b.createFilterer(bd, inCtx, outCtx, d); err != nil {
+			if f, err = b.createFilterer(bd, outCtx, d); err != nil {
 				err = fmt.Errorf("main: creating filterer for stream 0x%x(%d) of input %s failed: %w", is.Id(), is.Id(), i.c.Name, err)
 				return
 			}
@@ -409,7 +406,10 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 	// Decoder doesn't exist
 	if !okD || !okS {
 		// Create decoder
-		if d, err = astilibav.NewDecoder(astilibav.DecoderOptions{CodecParams: is.CodecParameters()}, bd.eh, bd.c); err != nil {
+		if d, err = astilibav.NewDecoder(astilibav.DecoderOptions{
+			CodecParams: is.CodecParameters(),
+			OutputCtx:   astilibav.NewContextFromStream(is),
+		}, bd.eh, bd.c); err != nil {
 			err = fmt.Errorf("main: creating decoder for stream 0x%x(%d) of %s failed: %w", is.Id(), is.Id(), i.c.Name, err)
 			return
 		}
@@ -423,9 +423,12 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.St
 	return
 }
 
-func (b *builder) createFilterer(bd *buildData, inCtx, outCtx astilibav.Context, n astiencoder.Node) (f *astilibav.Filterer, err error) {
+func (b *builder) createFilterer(bd *buildData, outCtx astilibav.Context, n astiencoder.Node) (f *astilibav.Filterer, err error) {
 	// Create filters
 	var filters []string
+
+	// Get in ctx
+	inCtx := n.(astilibav.OutputContexter).OutputCtx()
 
 	// Switch on media type
 	switch inCtx.CodecType {
@@ -447,11 +450,8 @@ func (b *builder) createFilterer(bd *buildData, inCtx, outCtx astilibav.Context,
 		// Create filterer options
 		fo := astilibav.FiltererOptions{
 			Content: strings.Join(filters, ","),
-			Inputs: map[string]astilibav.FiltererInput{
-				"in": {
-					Context: inCtx,
-					Node:    n,
-				},
+			Inputs: map[string]astiencoder.Node{
+				"in": n,
 			},
 		}
 

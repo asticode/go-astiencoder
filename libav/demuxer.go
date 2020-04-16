@@ -27,7 +27,6 @@ type Demuxer struct {
 	emulateRate   bool
 	interruptRet  *int
 	loop          bool
-	loopFirstPkt  *demuxerPkt
 	restamper     PktRestamper
 	seekToLive    bool
 	ss            map[int]*demuxerStream
@@ -43,17 +42,13 @@ type demuxerStream struct {
 
 type demuxerPkt struct {
 	dts        int64
-	duration   int64
 	receivedAt time.Time
-	s          *avformat.Stream
 }
 
-func newDemuxerPkt(pkt *avcodec.Packet, s *avformat.Stream) *demuxerPkt {
+func newDemuxerPkt(pkt *avcodec.Packet) *demuxerPkt {
 	return &demuxerPkt{
 		dts:        pkt.Dts(),
-		duration:   pkt.Duration(),
 		receivedAt: time.Now(),
-		s:          s,
 	}
 }
 
@@ -274,10 +269,10 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 				emitAvError(d, d.eh, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
 			}
 			stop = true
-		} else if d.loopFirstPkt != nil {
-			// Seek to first pkt
-			if ret = d.ctxFormat.AvSeekFrame(d.loopFirstPkt.s.Index(), d.loopFirstPkt.dts, avformat.AVSEEK_FLAG_BACKWARD); ret < 0 {
-				emitAvError(d, d.eh, ret, "ctxFormat.AvSeekFrame on %s with stream idx %v and ts %v failed", d.ctxFormat.Filename(), d.loopFirstPkt.s.Index(), d.loopFirstPkt.dts)
+		} else {
+			// Seek to start
+			if ret = d.ctxFormat.AvSeekFrame(-1, d.ctxFormat.StartTime(), avformat.AVSEEK_FLAG_BACKWARD); ret < 0 {
+				emitAvError(d, d.eh, ret, "ctxFormat.AvSeekFrame on %s failed", d.ctxFormat.Filename())
 				stop = true
 			}
 		}
@@ -295,7 +290,7 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	if d.seekToLive {
 		// Pkt duration is not always filled therefore we need to rely on <current pkt dts> - <previous pkt dts>
 		if s.seekToLiveLastPkt == nil || s.seekToLiveLastPkt.dts == avutil.AV_NOPTS_VALUE || time.Since(s.seekToLiveLastPkt.receivedAt) < time.Duration(avutil.AvRescaleQ(pkt.Dts()-s.seekToLiveLastPkt.dts, s.s.TimeBase(), nanosecondRational)) {
-			s.seekToLiveLastPkt = newDemuxerPkt(pkt, s.s)
+			s.seekToLiveLastPkt = newDemuxerPkt(pkt)
 			return
 		}
 		d.seekToLive = false
@@ -304,11 +299,6 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	// Restamp
 	if d.restamper != nil {
 		d.restamper.Restamp(pkt)
-	}
-
-	// Update loop first packet
-	if d.loop && d.loopFirstPkt == nil {
-		d.loopFirstPkt = newDemuxerPkt(pkt, s.s)
 	}
 
 	// Emulate rate

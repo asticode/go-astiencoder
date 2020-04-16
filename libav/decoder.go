@@ -20,6 +20,7 @@ type Decoder struct {
 	ctxCodec         *avcodec.Context
 	d                *frameDispatcher
 	eh               *astiencoder.EventHandler
+	outputCtx        Context
 	statIncomingRate *astikit.CounterAvgStat
 	statWorkRatio    *astikit.DurationPercentageStat
 }
@@ -28,6 +29,7 @@ type Decoder struct {
 type DecoderOptions struct {
 	CodecParams *avcodec.CodecParameters
 	Node        astiencoder.NodeOptions
+	OutputCtx   Context
 }
 
 // NewDecoder creates a new decoder
@@ -43,6 +45,7 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 			ProcessAll:  true,
 		}),
 		eh:               eh,
+		outputCtx:        o.OutputCtx,
 		statIncomingRate: astikit.NewCounterAvgStat(),
 		statWorkRatio:    astikit.NewDurationPercentageStat(),
 	}
@@ -105,6 +108,11 @@ func (d *Decoder) addStats() {
 
 	// Add chan stats
 	d.c.AddStats(d.Stater())
+}
+
+// OutputCtx returns the output ctx
+func (d *Decoder) OutputCtx() Context {
+	return d.outputCtx
 }
 
 // Connect implements the FrameHandlerConnector interface

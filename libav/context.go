@@ -36,6 +36,10 @@ type Context struct {
 	Width             int
 }
 
+type OutputContexter interface {
+	OutputCtx() Context
+}
+
 // NewContextFromStream creates a new context from a stream
 func NewContextFromStream(s *avformat.Stream) Context {
 	ctxCodec := (*avcodec.Context)(unsafe.Pointer(s.Codec()))

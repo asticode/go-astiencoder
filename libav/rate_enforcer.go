@@ -24,6 +24,7 @@ type RateEnforcer struct {
 	eh               *astiencoder.EventHandler
 	m                *sync.Mutex
 	n                astiencoder.Node
+	outputCtx        Context
 	p                *framePool
 	period           time.Duration
 	previousItem     *rateEnforcerItem
@@ -53,6 +54,7 @@ type RateEnforcerOptions struct {
 	Delay     time.Duration
 	FrameRate avutil.Rational
 	Node      astiencoder.NodeOptions
+	OutputCtx Context
 	Restamper FrameRestamper
 }
 
@@ -70,6 +72,7 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 		}),
 		eh:               eh,
 		m:                &sync.Mutex{},
+		outputCtx:        o.OutputCtx,
 		p:                newFramePool(c),
 		period:           time.Duration(float64(1e9) / o.FrameRate.ToDouble()),
 		restamper:        o.Restamper,
@@ -105,6 +108,11 @@ func (r *RateEnforcer) addStats() {
 
 	// Add chan stats
 	r.c.AddStats(r.Stater())
+}
+
+// OutputCtx returns the output ctx
+func (r *RateEnforcer) OutputCtx() Context {
+	return r.outputCtx
 }
 
 // Switch switches the source
