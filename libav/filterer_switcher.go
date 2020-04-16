@@ -10,11 +10,11 @@ type EmitFunc func(name string, payload interface{})
 
 // FiltererSwitcher represents an object that can take care of synchronizing things when switching a filterer
 type FiltererSwitcher interface {
-	IncIn(n astiencoder.Node, delta int)
+	IncIn(n astiencoder.Node)
 	IncOut()
 	Reset()
 	SetEmitFunc(fn EmitFunc)
-	ShouldIn(n astiencoder.Node, delta int) (ko bool)
+	ShouldIn(n astiencoder.Node) (ko bool)
 	ShouldOut() (ko bool)
 	Switch()
 }
@@ -40,7 +40,7 @@ func (s *filtererSwitcher) SetEmitFunc(fn EmitFunc) {
 	s.emitFunc = fn
 }
 
-func (s *filtererSwitcher) IncIn(n astiencoder.Node, delta int) {
+func (s *filtererSwitcher) IncIn(n astiencoder.Node) {
 	// Lock
 	s.m.Lock()
 	defer s.m.Unlock()
@@ -84,7 +84,7 @@ func (s *filtererSwitcher) Reset() {
 	s.os = &sync.Once{}
 }
 
-func (s *filtererSwitcher) ShouldIn(n astiencoder.Node, delta int) (ko bool) {
+func (s *filtererSwitcher) ShouldIn(n astiencoder.Node) (ko bool) {
 	// Lock
 	s.m.Lock()
 	defer s.m.Unlock()
@@ -95,7 +95,7 @@ func (s *filtererSwitcher) ShouldIn(n astiencoder.Node, delta int) (ko bool) {
 	}
 
 	// Check limit
-	if s.l > 0 && s.is[n]+delta > s.l {
+	if s.l > 0 && s.is[n]+1 > s.l {
 		return true
 	}
 	return

@@ -292,7 +292,7 @@ func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
 
 		// Check switcher
 		if f.s != nil {
-			if ko := f.s.ShouldIn(p.Node, len(bufferSrcCtxs)); ko {
+			if ko := f.s.ShouldIn(p.Node); ko {
 				return
 			}
 		}
@@ -311,7 +311,7 @@ func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
 
 		// Increment switcher
 		if f.s != nil {
-			f.s.IncIn(p.Node, len(bufferSrcCtxs))
+			f.s.IncIn(p.Node)
 		}
 
 		// Loop
