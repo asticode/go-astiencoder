@@ -381,8 +381,11 @@ type FiltererSwitchOptions struct {
 	Workflow *astiencoder.Workflow
 }
 
-// Switch disconnects/stops/closes the current filterer and starts/connects the new filterer properly
-func (f *Filterer) Switch(opt FiltererSwitchOptions) (nf *Filterer, err error) {
+// SwitchFunc creates the new filterer and the switch func that will disconnect/stop/close
+// the current filterer and connect the new filterer properly
+// This is important to let the user call the switch func him/herself since he/she may want
+// to interact with the new filterer first
+func (f *Filterer) SwitchFunc(opt FiltererSwitchOptions) (nf *Filterer, fn func(), err error) {
 	// Create next filterer
 	if nf, err = NewFilterer(opt.Filter, f.eh, f.cl); err != nil {
 		err = fmt.Errorf("astilibav: creating new filterer failed: %w", err)
@@ -455,8 +458,8 @@ func (f *Filterer) Switch(opt FiltererSwitchOptions) (nf *Filterer, err error) {
 		return len(f.Parents()) == 0
 	})
 
-	// Switch
-	f.s.Switch()
+	// Create switch func
+	fn = f.s.Switch
 	return
 }
 
