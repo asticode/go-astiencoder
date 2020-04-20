@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"sync/atomic"
 
 	"github.com/asticode/go-astiencoder"
@@ -23,13 +22,11 @@ type Filterer struct {
 	bufferSrcCtxs    map[astiencoder.Node][]*avfilter.Context
 	c                *astikit.Chan
 	cl               *astikit.Closer
-	ccl              *astikit.Closer // Child closer used to close only things related to the filterer
 	d                *frameDispatcher
 	eh               *astiencoder.EventHandler
 	g                *avfilter.Graph
 	outputCtx        Context
 	restamper        FrameRestamper
-	s                FiltererSwitcher
 	statIncomingRate *astikit.CounterAvgStat
 	statWorkRatio    *astikit.DurationPercentageStat
 }
@@ -41,7 +38,6 @@ type FiltererOptions struct {
 	Node      astiencoder.NodeOptions
 	OutputCtx Context
 	Restamper FrameRestamper
-	Switcher  FiltererSwitcher
 }
 
 // NewFilterer creates a new filterer
@@ -57,36 +53,20 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
 			ProcessAll:  true,
 		}),
-		cl:               c,
-		ccl:              c.NewChild(),
+		cl:               c.NewChild(),
 		eh:               eh,
 		g:                avfilter.AvfilterGraphAlloc(),
 		outputCtx:        o.OutputCtx,
 		restamper:        o.Restamper,
-		s:                o.Switcher,
 		statIncomingRate: astikit.NewCounterAvgStat(),
 		statWorkRatio:    astikit.NewDurationPercentageStat(),
 	}
 	f.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(f), eh)
-	f.d = newFrameDispatcher(f, eh, f.ccl)
+	f.d = newFrameDispatcher(f, eh, f.cl)
 	f.addStats()
 
-	// We need a filterer switcher
-	if f.s == nil {
-		f.s = newFiltererSwitcher()
-	}
-
-	// Set filterer switcher emit func
-	f.s.SetEmitFunc(func(name string, payload interface{}) {
-		f.eh.Emit(astiencoder.Event{
-			Name:    name,
-			Payload: payload,
-			Target:  f,
-		})
-	})
-
 	// Create graph
-	f.ccl.Add(func() error {
+	f.cl.Add(func() error {
 		f.g.AvfilterGraphFree()
 		return nil
 	})
@@ -211,6 +191,10 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	return
 }
 
+func (f *Filterer) Close() error {
+	return f.cl.Close()
+}
+
 func (f *Filterer) addStats() {
 	// Add incoming rate
 	f.Stater().AddStat(astikit.StatMetadata{
@@ -265,11 +249,6 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Make sure to stop the queue properly
 		defer f.c.Stop()
 
-		// Reset switcher
-		if f.s != nil {
-			f.s.Reset()
-		}
-
 		// Start queue
 		f.c.Start(f.Context())
 	})
@@ -290,13 +269,6 @@ func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
 			return
 		}
 
-		// Check switcher
-		if f.s != nil {
-			if ko := f.s.ShouldIn(p.Node); ko {
-				return
-			}
-		}
-
 		// Loop through buffer ctxs
 		for _, bufferSrcCtx := range bufferSrcCtxs {
 			// Push frame in graph
@@ -307,11 +279,6 @@ func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
 				return
 			}
 			f.statWorkRatio.End()
-		}
-
-		// Increment switcher
-		if f.s != nil {
-			f.s.IncIn(p.Node)
 		}
 
 		// Loop
@@ -328,13 +295,6 @@ func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 	// Get frame
 	fm := f.d.p.get()
 	defer f.d.p.put(fm)
-
-	// Check switcher
-	if f.s != nil {
-		if stop = f.s.ShouldOut(); stop {
-			return
-		}
-	}
 
 	// Pull filtered frame from graph
 	f.statWorkRatio.Begin()
@@ -355,11 +315,6 @@ func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 		f.statWorkRatio.End()
 	}
 
-	// Increment switcher
-	if f.s != nil {
-		f.s.IncOut()
-	}
-
 	// Dispatch frame
 	f.d.dispatch(fm, newFiltererDescriptor(f.bufferSinkCtx, descriptor))
 	return
@@ -372,94 +327,6 @@ func (f *Filterer) SendCommand(target, cmd, arg string, flags int) (err error) {
 		err = fmt.Errorf("astilibav: f.g.AvfilterGraphSendCommand for target %s, cmd %s, arg %s and flag %d failed with res %s: %w", target, cmd, arg, flags, res, NewAvError(ret))
 		return
 	}
-	return
-}
-
-// FiltererSwitchOptions represents filterer switch options
-type FiltererSwitchOptions struct {
-	Filter   FiltererOptions
-	Workflow *astiencoder.Workflow
-}
-
-// SwitchFunc creates the new filterer and the switch func that will disconnect/stop/close
-// the current filterer and connect the new filterer properly
-// This is important to let the user call the switch func him/herself since he/she may want
-// to interact with the new filterer first
-func (f *Filterer) SwitchFunc(opt FiltererSwitchOptions) (nf *Filterer, fn func(), err error) {
-	// Create next filterer
-	if nf, err = NewFilterer(opt.Filter, f.eh, f.cl); err != nil {
-		err = fmt.Errorf("astilibav: creating new filterer failed: %w", err)
-		return
-	}
-
-	// Connect next filterer to previous filterer's children
-	for _, c := range f.Children() {
-		nf.Connect(c.(FrameHandler))
-	}
-
-	// Start next filterer
-	opt.Workflow.StartNodes(nf)
-
-	// Index previous filterer nodes
-	pns := make(map[astiencoder.Node]bool)
-	for _, n := range f.Parents() {
-		pns[n] = true
-	}
-
-	// Index next filterer nodes
-	nns := make(map[astiencoder.Node]bool)
-	for _, i := range opt.Filter.Inputs {
-		nns[i] = true
-	}
-
-	// Handle out
-	f.eh.Add(f, EventNameFiltererSwitchOutDone, func(e astiencoder.Event) bool {
-		// Disconnect previous filterer's children
-		for _, c := range f.Children() {
-			f.Disconnect(c.(FrameHandler))
-		}
-
-		// Make sure to close the previous filter once stopped
-		f.eh.Add(f, astiencoder.EventNameNodeStopped, func(e astiencoder.Event) bool {
-			if err := f.ccl.Close(); err != nil {
-				f.eh.Emit(astiencoder.EventError(f, fmt.Errorf("astilibav: closing filterer failed: %w", err)))
-			}
-			return true
-		})
-
-		// Stop previous filterer
-		f.Stop()
-		return true
-	})
-
-	// Handle in
-	o := &sync.Once{}
-	f.eh.Add(f, EventNameFiltererSwitchInDone, func(e astiencoder.Event) bool {
-		// Assert node
-		n := e.Payload.(astiencoder.Node)
-		c := e.Payload.(FrameHandlerConnector)
-
-		// Disconnect node
-		c.Disconnect(f)
-
-		// Connect node if part of next filterer's inputs
-		if _, ok := nns[n]; ok {
-			c.Connect(nf)
-		}
-
-		// Connect other nodes only once
-		o.Do(func() {
-			for n := range nns {
-				if _, ok := pns[n]; !ok {
-					n.(FrameHandlerConnector).Connect(nf)
-				}
-			}
-		})
-		return len(f.Parents()) == 0
-	})
-
-	// Create switch func
-	fn = f.s.Switch
 	return
 }
 
