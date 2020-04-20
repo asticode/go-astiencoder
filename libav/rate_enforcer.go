@@ -176,9 +176,12 @@ func (r *RateEnforcer) HandleFrame(p *FrameHandlerPayload) {
 		//   node. That way, if the desired node doesn't dispatch frames for some time, we fallback to the previous
 		//   node instead of the previous item
 		if r.slots[len(r.slots)-1] == nil || (r.n != r.slots[len(r.slots)-1].n && r.n == p.Node) {
+			// Create slot
 			r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(p)
+
+			// Emit event
 			r.eh.Emit(astiencoder.Event{
-				Name:    EventNameRateEnforcerSwitched,
+				Name:    RateEnforcerSwitchedIn,
 				Payload: p.Node,
 				Target:  r,
 			})
@@ -217,15 +220,16 @@ func (r *RateEnforcer) newRateEnforcerItem(p *FrameHandlerPayload) *rateEnforcer
 func (r *RateEnforcer) startTick(ctx context.Context) {
 	go func() {
 		nextAt := time.Now()
+		var previousNode astiencoder.Node
 		for {
-			if stop := r.tickFunc(ctx, &nextAt); stop {
+			if stop := r.tickFunc(ctx, &nextAt, &previousNode); stop {
 				return
 			}
 		}
 	}()
 }
 
-func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time) (stop bool) {
+func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time, previousNode *astiencoder.Node) (stop bool) {
 	// Compute next at
 	*nextAt = nextAt.Add(r.period)
 
@@ -270,6 +274,19 @@ func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time) (stop bo
 
 		// Dispatch frame
 		r.d.dispatch(i.f, i.d)
+
+		// New node has been dispatched
+		if *previousNode != i.n {
+			// Emit event
+			r.eh.Emit(astiencoder.Event{
+				Name:    RateEnforcerSwitchedOut,
+				Payload: i.n,
+				Target:  r,
+			})
+
+			// Update previous node
+			*previousNode = i.n
+		}
 	}
 
 	// Remove first slot

@@ -2,7 +2,8 @@ package astilibav
 
 // Event names
 const (
-	EventNameFiltererSwitchInDone  = "astilibav.filterer.switch.in.done"
-	EventNameFiltererSwitchOutDone = "astilibav.filterer.switch.out.done"
-	EventNameRateEnforcerSwitched  = "astilibav.rate.enforcer.switched"
+	// First packet of new node has been received by the rate enforcer
+	RateEnforcerSwitchedIn = "astilibav.rate.enforcer.switched.in"
+	// First packet of new node has been dispatched by the rate enforcer
+	RateEnforcerSwitchedOut = "astilibav.rate.enforcer.switched.out"
 )
