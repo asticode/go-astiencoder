@@ -151,6 +151,9 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 			args = fmt.Sprintf("channel_layout=%s:sample_fmt=%s:time_base=%d/%d:sample_rate=%d", avutil.AvGetChannelLayoutString(ctx.ChannelLayout), avutil.AvGetSampleFmtName(int(ctx.SampleFmt)), ctx.TimeBase.Num(), ctx.TimeBase.Den(), ctx.SampleRate)
 		case avcodec.AVMEDIA_TYPE_VIDEO:
 			args = fmt.Sprintf("video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d", ctx.Width, ctx.Height, ctx.PixelFormat, ctx.TimeBase.Num(), ctx.TimeBase.Den(), ctx.SampleAspectRatio.Num(), ctx.SampleAspectRatio.Den())
+			if ctx.FrameRate.Num() > 0 {
+				args += fmt.Sprintf(":frame_rate=%d/%d", ctx.FrameRate.Num(), ctx.FrameRate.Den())
+			}
 		default:
 			err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", ctx.CodecType)
 			return
