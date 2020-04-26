@@ -40,7 +40,7 @@ type MuxerOptions struct {
 func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (m *Muxer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countMuxer, uint64(1))
-	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("muxer_%d", count), fmt.Sprintf("Muxer #%d", count), fmt.Sprintf("Muxes to %s", o.URL))
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("muxer_%d", count), fmt.Sprintf("Muxer #%d", count), fmt.Sprintf("Muxes to %s", o.URL), "muxer")
 
 	// Create muxer
 	m = &Muxer{

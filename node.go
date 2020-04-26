@@ -28,10 +28,11 @@ type NodeMetadata struct {
 	Description string
 	Label       string
 	Name        string
+	Tags        []string
 }
 
 // Extend extends the node metadata
-func (m NodeMetadata) Extend(name, label, description string) NodeMetadata {
+func (m NodeMetadata) Extend(name, label, description string, tags ...string) NodeMetadata {
 	if len(m.Description) == 0 {
 		m.Description = description
 	}
@@ -40,6 +41,18 @@ func (m NodeMetadata) Extend(name, label, description string) NodeMetadata {
 	}
 	if len(m.Name) == 0 {
 		m.Name = name
+	}
+	for _, t := range tags {
+		var found bool
+		for _, ft := range m.Tags {
+			if ft == t {
+				found = true
+				break
+			}
+		}
+		if !found {
+			m.Tags = append(m.Tags, t)
+		}
 	}
 	return m
 }

@@ -62,7 +62,7 @@ type RateEnforcerOptions struct {
 func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (r *RateEnforcer) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countRateEnforcer, uint64(1))
-	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("rate_enforcer_%d", count), fmt.Sprintf("Rate Enforcer #%d", count), "Enforces rate")
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("rate_enforcer_%d", count), fmt.Sprintf("Rate Enforcer #%d", count), "Enforces rate", "rate enforcer")
 
 	// Create rate enforcer
 	r = &RateEnforcer{

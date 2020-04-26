@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Astiencoder</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.13.0/css/all.min.css">
+    <style>/* style */</style>
+</head>
+<body>
+    <header>
+        <div id="search">
+            <input type="text" placeholder="Search" oninput="astiencoder.onSearch(event)" autocomplete="off">
+        </div>
+        <div id="tags">
+            <div class="action" onclick="astiencoder.onResetAllTags()">
+                <span>Reset all</span>
+            </div>
+        </div>
+    </header>
+    <section>
+        <div id="nodes"></div>
+    </section>
+    <footer>
+        <div>
+            <div id="recording-start" onclick="astiencoder.onRecordingStartClick()">
+                <i class="fa fa-dot-circle"></i>Start recording
+            </div>
+            <div id="recording-stop" onclick="astiencoder.onRecordingStopClick()">
+                <i class="fa fa-stop"></i>Stop recording
+            </div>
+            <div id="playback-load" onclick="astiencoder.onPlaybackLoadClick()">
+                <i class="fa fa-file-import"></i>Load recording
+                <input type="file" accept="text/csv" onchange="astiencoder.onPlaybackLoadChange(event)"/>
+            </div>
+            <div id="playback-unload" onclick="astiencoder.onPlaybackUnloadClick()">
+                <i class="fa fa-undo-alt"></i>Unload recording
+            </div>
+        </div>
+        <div>
+            <i id="playback-next" class="fa fa-forward" onclick="astiencoder.onPlaybackNextClick()"></i>
+        </div>
+    </footer>
+
+    <script>/* script */</script>
+</body>
+</html>

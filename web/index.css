@@ -1,0 +1,201 @@
+* {
+    box-sizing: border-box;
+}
+
+html, body {
+    font-family: Roboto;
+    font-size: 12px;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    position: relative;
+    width: 100%;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+}
+
+header {
+    background-color: #333333;
+    border-bottom: solid 1px #000000;
+    color: #ffffff;
+    height: auto;
+    padding: 10px;
+    width: 100%;
+}
+
+header #search input[type="text"] {
+    border: none;
+    border-radius: 5px;
+    font-family: Roboto;
+    font-size: 12px;
+    padding: 7px 10px;
+    width: 300px;
+}
+
+header #tags > div {
+    background-color: #555555;
+    border: solid 1px #777777;
+    border-radius: 5px;
+    display: flex;
+    float: left;
+    padding: 5px 8px;
+    margin: 10px 10px 0 0;
+}
+
+header #tags > div:last-child {
+    margin-right: 0;
+}
+
+header #tags > div:first-child {
+    cursor: pointer;
+}
+
+header #tags .action:hover span {
+    text-decoration: underline;
+}
+
+header #tags .fa {
+    cursor: pointer;
+    margin-top: auto;
+    margin-bottom: auto;
+    opacity: 0.5;
+    vertical-align: middle;
+}
+
+header #tags .fa.active, header #tags .fa:hover {
+    opacity: 1;
+}
+
+header #tags > div > .fa:first-child {
+    margin-right: 8px;
+}
+
+header #tags > div > .fa:last-child {
+    margin-left: 8px;
+}
+
+section {
+    flex-grow: 1;
+    overflow-y: auto;
+}
+
+#nodes {
+    display: grid;
+    grid-column-gap: 10px;
+    grid-row-gap: 10px;
+    grid-template-columns: repeat(7, 1fr);
+    padding: 10px;
+}
+
+#nodes > div {
+    border-radius: 5px;
+    padding: 10px;
+    width: 100%;
+}
+
+#nodes > div.not-in-search, #nodes > div.not-in-tags, #nodes > div.not-active {
+    display: none;
+}
+
+#nodes > div.paused {
+    color: #856404;
+    background-color: #fff3cd;
+    border-color: #ffeeba;
+}
+
+#nodes > div.running {
+    color: #155724;
+    background-color: #d4edda;
+    border-color: #c3e6cb;
+}
+
+#nodes > div.stopped {
+    color: #721c24;
+    background-color: #f8d7da;
+    border-color: #f5c6cb;
+}
+
+#nodes > div > .label {
+    text-align: center;
+}
+
+#nodes > div > .name {
+    font-style: italic;
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+#nodes > div > .stats {
+    width: 100%;
+}
+
+#nodes > div > .stats td {
+    padding: 0;
+}
+
+#nodes > div > .stats tr > td:first-child {
+    white-space:nowrap;
+}
+
+#nodes > div > .stats tr > td:last-child {
+    width: 100%;
+}
+
+footer {
+    background-color: #333333;
+    border-top: solid 1px #000000;
+    color: #ffffff;
+    display: flex;
+    height: auto;
+    padding: 10px;
+    width: 100%;
+}
+
+footer > div:first-child {
+    width: 150px;
+}
+
+footer > div:first-child > div {
+    background-color: #555555;
+    border: solid 1px #777777;
+    border-radius: 5px;
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    padding: 5px 8px;
+    margin-bottom: 10px;
+}
+
+footer #playback-load, footer #playback-unload {
+    margin-bottom: 0;
+}
+
+footer > div:first-child .fa {
+    margin: auto 8px auto 0;
+}
+
+footer.recording-started #recording-start, footer #recording-stop, footer #playback-unload,
+footer.playback-loaded #playback-load, footer #playback-load input, footer #playback-next,
+footer.playback-loaded.playback-done #playback-next, footer.recording-disabled #recording-start,
+footer.recording-disabled #recording-stop {
+    display: none;
+}
+
+footer.recording-started #recording-stop, footer.playback-loaded #playback-unload, footer.playback-loaded #playback-next {
+    display: flex;
+}
+
+footer > div:last-child {
+    display: flex;
+    flex-grow: 1;
+    justify-content: center;
+}
+
+footer > div:last-child .fa {
+    cursor: pointer;
+    font-size: 20px;
+    margin: auto;
+}

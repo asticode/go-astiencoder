@@ -25,8 +25,7 @@ type ConfigurationExec struct {
 }
 
 type ConfigurationServer struct {
-	Addr    string `toml:"addr"`
-	PathWeb string `toml:"path_web"`
+	Addr string `toml:"addr"`
 }
 
 func newConfiguration() (c Configuration, err error) {
@@ -34,8 +33,7 @@ func newConfiguration() (c Configuration, err error) {
 	c = Configuration{
 		Encoder: &ConfigurationEncoder{
 			Server: ConfigurationServer{
-				Addr:    "127.0.0.1:4000",
-				PathWeb: "web",
+				Addr: "127.0.0.1:4000",
 			},
 		},
 	}

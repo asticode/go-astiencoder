@@ -78,7 +78,7 @@ type DemuxerOptions struct {
 func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (d *Demuxer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countDemuxer, uint64(1))
-	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("demuxer_%d", count), fmt.Sprintf("Demuxer #%d", count), fmt.Sprintf("Demuxes %s", o.URL))
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("demuxer_%d", count), fmt.Sprintf("Demuxer #%d", count), fmt.Sprintf("Demuxes %s", o.URL), "demuxer")
 
 	// Create demuxer
 	d = &Demuxer{

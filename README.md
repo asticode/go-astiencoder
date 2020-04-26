@@ -2,7 +2,7 @@
 
 Right now this project has only been tested on FFMpeg 4.1.1.
 
-![screenshot-1](doc/screenshot-1.png)
+![screenshot-1](doc/screenshot-1.jpg)
 
 # Why use this project when I can use `ffmpeg` binary?
 
@@ -118,21 +118,11 @@ $ make server
 
 ## Web UI
 
-Whatever mode you're in, you can open the Web UI in order to either interact with your workflows or see their stats. 
+Whatever mode you're in, you can open the Web UI in order to see your node's stats. 
 
 By default it's accessible at http://127.0.0.1:4000 but you can change it using the encoder configuration.
 
-![screenshot-1](doc/screenshot-1.png)
-
-### Pause/continue a workflow
-
-On the left-hand side, you'll see the names of all your workflows. Click once the slider on the right of its name to pause the workflow:
-
-![screenshot-4](doc/screenshot-2.png)
-
-You can also start/pause/continue nodes individually by clicking on them:
-
-![screenshot-6](doc/screenshot-3.png)
+![screenshot-1](doc/screenshot-1.jpg)
 
 ### What do those stats mean?
 
@@ -202,8 +192,6 @@ Let say the absolute path to your current dir is `/path/to`, here are their resp
 - [x] stats
 - [x] web ui
 - [ ] proper tests
-- [ ] [mosaic](https://trac.ffmpeg.org/wiki/Create%20a%20mosaic%20out%20of%20several%20input%20videos)
-- [ ] audio resampling
 - [ ] packaging (dash + hls + smooth)
 - [ ] add plugin in [snickers](https://github.com/snickers/snickers/tree/master/encoders)
 - [ ] many others :D

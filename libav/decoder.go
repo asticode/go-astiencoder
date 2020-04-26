@@ -36,7 +36,7 @@ type DecoderOptions struct {
 func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (d *Decoder, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countDecoder, uint64(1))
-	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("decoder_%d", count), fmt.Sprintf("Decoder #%d", count), "Decodes")
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("decoder_%d", count), fmt.Sprintf("Decoder #%d", count), "Decodes", "decoder")
 
 	// Create decoder
 	d = &Decoder{

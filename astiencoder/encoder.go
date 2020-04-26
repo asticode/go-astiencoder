@@ -12,17 +12,17 @@ type encoder struct {
 	eh        *astiencoder.EventHandler
 	m         *sync.Mutex
 	w         *astikit.Worker
-	wp        *astiencoder.WorkflowPool
+	ws        *astiencoder.Server
 	wsStarted map[string]bool
 }
 
-func newEncoder(c *ConfigurationEncoder, eh *astiencoder.EventHandler, wp *astiencoder.WorkflowPool, l astikit.StdLogger) (e *encoder) {
+func newEncoder(c *ConfigurationEncoder, eh *astiencoder.EventHandler, ws *astiencoder.Server, l astikit.StdLogger) (e *encoder) {
 	e = &encoder{
 		c:         c,
 		eh:        eh,
 		m:         &sync.Mutex{},
 		w:         astikit.NewWorker(astikit.WorkerOptions{Logger: l}),
-		wp:        wp,
+		ws:        ws,
 		wsStarted: make(map[string]bool),
 	}
 	e.adaptEventHandler(e.eh)

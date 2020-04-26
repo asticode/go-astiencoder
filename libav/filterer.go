@@ -44,7 +44,7 @@ type FiltererOptions struct {
 func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (f *Filterer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countFilterer, uint64(1))
-	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("filterer_%d", count), fmt.Sprintf("Filterer #%d", count), "Filters")
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("filterer_%d", count), fmt.Sprintf("Filterer #%d", count), "Filters", "filterer")
 
 	// Create filterer
 	f = &Filterer{

@@ -33,7 +33,7 @@ type ForwarderOptions struct {
 func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (f *Forwarder) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countForwarder, uint64(1))
-	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("forwarder_%d", count), fmt.Sprintf("Forwarder #%d", count), "Forwards")
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("forwarder_%d", count), fmt.Sprintf("Forwarder #%d", count), "Forwards", "forwarder")
 
 	// Create forwarder
 	f = &Forwarder{

@@ -10,6 +10,9 @@ build:
 server:
 	$(env) go run ./astiencoder
 
+server-bind:
+	go run cmd/server/main.go
+
 test:
 	$(env) go test -cover -v ./...
 

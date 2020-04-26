@@ -27,8 +27,8 @@ func addWorkflow(name string, j Job, e *encoder) (w *astiencoder.Workflow, err e
 		return
 	}
 
-	// Add workflow to pool
-	e.wp.AddWorkflow(w)
+	// Update workflow server
+	e.ws.SetWorkflow(w)
 	return
 }
 

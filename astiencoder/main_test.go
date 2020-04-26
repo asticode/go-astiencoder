@@ -19,16 +19,19 @@ func init() {
 }
 
 func testJob(t *testing.T, jobPath string, assertPaths func(j Job) map[string]string) {
+	// Create logger
+	l := log.New(log.Writer(), log.Prefix(), log.Flags())
+
 	// Create event handler
 	eh := astiencoder.NewEventHandler()
 
-	// Create workflow pool
-	wp := astiencoder.NewWorkflowPool()
+	// Create workflow server
+	ws := astiencoder.NewServer(l)
 
 	// Create encoder
 	cfg := &ConfigurationEncoder{}
 	cfg.Exec.StopWhenWorkflowsAreStopped = true
-	e := newEncoder(cfg, eh, wp, log.New(log.Writer(), log.Prefix(), log.Flags()))
+	e := newEncoder(cfg, eh, ws, l)
 
 	// Open job
 	j, err := openJob(jobPath)

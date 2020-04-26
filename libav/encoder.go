@@ -37,7 +37,7 @@ type EncoderOptions struct {
 func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (e *Encoder, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countEncoder, uint64(1))
-	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("encoder_%d", count), fmt.Sprintf("Encoder #%d", count), "Encodes")
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("encoder_%d", count), fmt.Sprintf("Encoder #%d", count), "Encodes", "encoder")
 
 	// Create encoder
 	e = &Encoder{

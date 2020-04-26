@@ -46,7 +46,7 @@ type PktDumperHandlerArgs struct {
 func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler) (d *PktDumper, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countPktDumper, uint64(1))
-	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("pkt_dumper_%d", count), fmt.Sprintf("Pkt Dumper #%d", count), "Dumps packets")
+	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("pkt_dumper_%d", count), fmt.Sprintf("Pkt Dumper #%d", count), "Dumps packets", "pkt dumper")
 
 	// Create pkt dumper
 	d = &PktDumper{
