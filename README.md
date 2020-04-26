@@ -122,8 +122,6 @@ Whatever mode you're in, you can open the Web UI in order to see your node's sta
 
 By default it's accessible at http://127.0.0.1:4000 but you can change it using the encoder configuration.
 
-![screenshot-1](doc/screenshot-1.jpg)
-
 ### What do those stats mean?
 
 Nodes use the same stats:
