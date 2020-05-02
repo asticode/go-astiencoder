@@ -381,6 +381,7 @@ func (r *RateEnforcer) current() (i *rateEnforcerItem, previous bool) {
 			r.previousItem = &rateEnforcerItem{
 				d: i.d,
 				f: r.p.get(),
+				n: i.n,
 			}
 		} else {
 			avutil.AvFrameUnref(r.previousItem.f)
