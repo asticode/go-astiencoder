@@ -150,10 +150,14 @@ func (r *RateEnforcer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) 
 		defer r.c.Stop()
 
 		// Start tick
-		r.startTick(r.Context())
+		startTickCtx := r.startTick(r.Context())
 
 		// Start chan
 		r.c.Start(r.Context())
+
+		// Wait for start tick to be really over since it's not the blocking pattern
+		// and is executed in a goroutine
+		<-startTickCtx.Done()
 	})
 }
 
@@ -217,16 +221,26 @@ func (r *RateEnforcer) newRateEnforcerItem(p *FrameHandlerPayload) *rateEnforcer
 	}
 }
 
-func (r *RateEnforcer) startTick(ctx context.Context) {
+func (r *RateEnforcer) startTick(parentCtx context.Context) (ctx context.Context) {
+	// Create independant context that only captures when the following goroutine ends
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithCancel(context.Background())
+
+	// Execute the rest in a go routine
 	go func() {
+		// Make sure to cancel local context
+		defer cancel()
+
+		// Loop
 		nextAt := time.Now()
 		var previousNode astiencoder.Node
 		for {
-			if stop := r.tickFunc(ctx, &nextAt, &previousNode); stop {
+			if stop := r.tickFunc(parentCtx, &nextAt, &previousNode); stop {
 				return
 			}
 		}
 	}()
+	return
 }
 
 func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time, previousNode *astiencoder.Node) (stop bool) {

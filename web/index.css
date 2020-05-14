@@ -137,6 +137,7 @@ section {
 }
 
 #nodes > div > .stats tr > td:first-child {
+    padding-right: 3px;
     white-space:nowrap;
 }
 
