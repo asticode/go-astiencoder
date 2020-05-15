@@ -453,6 +453,7 @@ func (b *builder) createFilterer(bd *buildData, outCtx astilibav.Context, n asti
 			Inputs: map[string]astiencoder.Node{
 				"in": n,
 			},
+			OutputCtx: outCtx,
 		}
 
 		// Create filterer

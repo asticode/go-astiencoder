@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
@@ -24,6 +25,7 @@ type Filterer struct {
 	cl               *astikit.Closer
 	d                *frameDispatcher
 	eh               *astiencoder.EventHandler
+	emulatePeriod    time.Duration
 	g                *avfilter.Graph
 	outputCtx        Context
 	restamper        FrameRestamper
@@ -33,11 +35,12 @@ type Filterer struct {
 
 // FiltererOptions represents filterer options
 type FiltererOptions struct {
-	Content   string
-	Inputs    map[string]astiencoder.Node
-	Node      astiencoder.NodeOptions
-	OutputCtx Context
-	Restamper FrameRestamper
+	Content     string
+	EmulateRate avutil.Rational
+	Inputs      map[string]astiencoder.Node
+	Node        astiencoder.NodeOptions
+	OutputCtx   Context
+	Restamper   FrameRestamper
 }
 
 // NewFilterer creates a new filterer
@@ -65,53 +68,37 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	f.d = newFrameDispatcher(f, eh, f.cl)
 	f.addStats()
 
+	// No inputs
+	if len(o.Inputs) == 0 {
+		// No emulate rate
+		if o.EmulateRate.Num() <= 0 || o.EmulateRate.Den() <= 0 {
+			err = errors.New("astilibav: no inputs but no emulate rate either")
+			return
+		}
+
+		// Get emulate period
+		f.emulatePeriod = time.Duration(o.EmulateRate.Den() * 1e9 / o.EmulateRate.Num())
+	}
+
 	// Create graph
 	f.cl.Add(func() error {
 		f.g.AvfilterGraphFree()
 		return nil
 	})
 
-	// No inputs
-	if len(o.Inputs) == 0 {
-		err = errors.New("astilibav: no inputs in filterer options")
-		return
-	}
-
-	// Get codec type
-	codecType := avcodec.MediaType(avcodec.AVMEDIA_TYPE_UNKNOWN)
-	for n, i := range o.Inputs {
-		// Get context
-		v, ok := i.(OutputContexter)
-		if !ok {
-			err = fmt.Errorf("astilibav: input %s is not an OutputContexter", n)
-			return
-		}
-		ctx := v.OutputCtx()
-
-		switch ctx.CodecType {
-		case avcodec.AVMEDIA_TYPE_AUDIO, avcodec.AVMEDIA_TYPE_VIDEO:
-			if codecType == avcodec.AVMEDIA_TYPE_UNKNOWN {
-				codecType = ctx.CodecType
-			} else if codecType != ctx.CodecType {
-				err = fmt.Errorf("astilibav: codec type %d of input %s is different from chosen codec type %d", ctx.CodecType, n, codecType)
-				return
-			}
-		default:
-			err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", ctx.CodecType)
-			return
-		}
-	}
-
 	// Create buffer func and buffer sink
 	var bufferFunc func() *avfilter.Filter
 	var bufferSink *avfilter.Filter
-	switch codecType {
+	switch o.OutputCtx.CodecType {
 	case avcodec.AVMEDIA_TYPE_AUDIO:
 		bufferFunc = func() *avfilter.Filter { return avfilter.AvfilterGetByName("abuffer") }
 		bufferSink = avfilter.AvfilterGetByName("abuffersink")
 	case avcodec.AVMEDIA_TYPE_VIDEO:
 		bufferFunc = func() *avfilter.Filter { return avfilter.AvfilterGetByName("buffer") }
 		bufferSink = avfilter.AvfilterGetByName("buffersink")
+	default:
+		err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", o.OutputCtx.CodecType)
+		return
 	}
 
 	// Create buffer sink ctx
@@ -249,12 +236,44 @@ func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
 		defer f.d.wait()
 
+		// In case there are no inputs, we emulate frames coming in
+		if len(f.bufferSrcCtxs) == 0 {
+			nextAt := time.Now()
+			desc := newFiltererDescriptor(f.bufferSinkCtx, nil)
+			for {
+				if stop := f.tickFunc(&nextAt, desc); stop {
+					break
+				}
+			}
+			return
+		}
+
 		// Make sure to stop the queue properly
 		defer f.c.Stop()
 
 		// Start queue
 		f.c.Start(f.Context())
 	})
+}
+
+func (f *Filterer) tickFunc(nextAt *time.Time, desc Descriptor) (stop bool) {
+	// Compute next at
+	*nextAt = nextAt.Add(f.emulatePeriod)
+
+	// Sleep until next at
+	if delta := time.Until(*nextAt); delta > 0 {
+		astikit.Sleep(f.Context(), delta)
+	}
+
+	// Check context
+	if f.Context().Err() != nil {
+		stop = true
+		return
+	}
+
+	// Pull filtered frame
+	f.pullFilteredFrame(desc)
+	return
 }
 
 // HandleFrame implements the FrameHandler interface
