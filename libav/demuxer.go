@@ -58,8 +58,6 @@ type DemuxerOptions struct {
 	Dict *Dict
 	// If true, the demuxer will sleep between packets for the exact duration of the packet
 	EmulateRate bool
-	// Context used to cancel finding stream info
-	FindStreamInfoCtx context.Context
 	// Exact input format
 	Format *avformat.InputFormat
 	// If true, at the end of the input the demuxer will seek to its beginning and start over
@@ -67,6 +65,8 @@ type DemuxerOptions struct {
 	Loop bool
 	// Basic node options
 	Node astiencoder.NodeOptions
+	// Context used to cancel probing
+	ProbeCtx context.Context
 	// If true, the demuxer will not dispatch packets until, for at least one stream, 2 consecutive packets are received
 	// at an interval >= to the first packet's duration
 	SeekToLive bool
@@ -117,12 +117,32 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	// Set interrupt callback
 	d.interruptRet = ctxFormat.SetInterruptCallback()
 
+	// Handle probe cancellation
+	if o.ProbeCtx != nil {
+		// Create context
+		probeCtx, probeCancel := context.WithCancel(o.ProbeCtx)
+
+		// Handle interrupt
+		*d.interruptRet = 0
+		go func() {
+			<-probeCtx.Done()
+			if o.ProbeCtx.Err() != nil {
+				*d.interruptRet = 1
+			}
+		}()
+
+		// Make sure to cancel context so that go routine is closed
+		defer probeCancel()
+	}
+
 	// Open input
-	// We need to create an intermediate variable to avoid "cgo argument has Go pointer to Go pointer" errors
 	if ret := avformat.AvformatOpenInput(&ctxFormat, o.URL, o.Format, &dict); ret < 0 {
 		err = fmt.Errorf("astilibav: avformat.AvformatOpenInput on %+v failed: %w", o, NewAvError(ret))
 		return
 	}
+
+	// Update ctx
+	// We need to create an intermediate variable to avoid "cgo argument has Go pointer to Go pointer" errors
 	d.ctxFormat = ctxFormat
 
 	// Make sure the input is properly closed
@@ -131,22 +151,10 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		return nil
 	})
 
-	// Handle find stream info cancellation
-	if o.FindStreamInfoCtx != nil {
-		// Create context
-		findStreamInfoCtx, findStreamInfoCancel := context.WithCancel(o.FindStreamInfoCtx)
-
-		// Handle interrupt
-		*d.interruptRet = 0
-		go func() {
-			<-findStreamInfoCtx.Done()
-			if o.FindStreamInfoCtx.Err() != nil {
-				*d.interruptRet = 1
-			}
-		}()
-
-		// Make sure to cancel context so that go routine is closed
-		defer findStreamInfoCancel()
+	// Check whether probe has been cancelled
+	if o.ProbeCtx != nil && o.ProbeCtx.Err() != nil {
+		err = fmt.Errorf("astilibav: probing has been cancelled: %w", o.ProbeCtx.Err())
+		return
 	}
 
 	// Retrieve stream information
@@ -155,9 +163,9 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		return
 	}
 
-	// Check whether find stream info has been cancelled
-	if o.FindStreamInfoCtx != nil && o.FindStreamInfoCtx.Err() != nil {
-		err = fmt.Errorf("astilibav: finding stream info has been cancelled: %w", o.FindStreamInfoCtx.Err())
+	// Check whether probe has been cancelled
+	if o.ProbeCtx != nil && o.ProbeCtx.Err() != nil {
+		err = fmt.Errorf("astilibav: probing has been cancelled: %w", o.ProbeCtx.Err())
 		return
 	}
 
