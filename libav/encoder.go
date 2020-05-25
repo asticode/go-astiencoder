@@ -23,7 +23,7 @@ type Encoder struct {
 	d                  *pktDispatcher
 	eh                 *astiencoder.EventHandler
 	previousDescriptor Descriptor
-	statIncomingRate   *astikit.CounterAvgStat
+	statIncomingRate   *astikit.CounterRateStat
 	statWorkRatio      *astikit.DurationPercentageStat
 }
 
@@ -47,7 +47,7 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		}),
 		d:                newPktDispatcher(c),
 		eh:               eh,
-		statIncomingRate: astikit.NewCounterAvgStat(),
+		statIncomingRate: astikit.NewCounterRateStat(),
 		statWorkRatio:    astikit.NewDurationPercentageStat(),
 	}
 	e.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(e), eh)

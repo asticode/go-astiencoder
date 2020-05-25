@@ -21,7 +21,7 @@ type Decoder struct {
 	d                *frameDispatcher
 	eh               *astiencoder.EventHandler
 	outputCtx        Context
-	statIncomingRate *astikit.CounterAvgStat
+	statIncomingRate *astikit.CounterRateStat
 	statWorkRatio    *astikit.DurationPercentageStat
 }
 
@@ -46,7 +46,7 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		}),
 		eh:               eh,
 		outputCtx:        o.OutputCtx,
-		statIncomingRate: astikit.NewCounterAvgStat(),
+		statIncomingRate: astikit.NewCounterRateStat(),
 		statWorkRatio:    astikit.NewDurationPercentageStat(),
 	}
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)

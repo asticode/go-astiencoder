@@ -31,7 +31,9 @@ type RateEnforcer struct {
 	restamper        FrameRestamper
 	slotsCount       int
 	slots            []*rateEnforcerSlot
-	statIncomingRate *astikit.CounterAvgStat
+	statDelayAvg     *astikit.CounterAvgStat
+	statIncomingRate *astikit.CounterRateStat
+	statRepeatedRate *astikit.CounterRateStat
 	statWorkRatio    *astikit.DurationPercentageStat
 	timeBase         avutil.Rational
 }
@@ -77,7 +79,9 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 		period:           time.Duration(float64(1e9) / o.FrameRate.ToDouble()),
 		restamper:        o.Restamper,
 		slots:            []*rateEnforcerSlot{nil},
-		statIncomingRate: astikit.NewCounterAvgStat(),
+		statDelayAvg:     astikit.NewCounterAvgStat(),
+		statIncomingRate: astikit.NewCounterRateStat(),
+		statRepeatedRate: astikit.NewCounterRateStat(),
 		statWorkRatio:    astikit.NewDurationPercentageStat(),
 		timeBase:         avutil.NewRational(o.FrameRate.Den(), o.FrameRate.Num()),
 	}
@@ -89,12 +93,26 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 }
 
 func (r *RateEnforcer) addStats() {
+	// Add delay avg
+	r.Stater().AddStat(astikit.StatMetadata{
+		Description: "Average delay of frames coming in",
+		Label:       "Average delay",
+		Unit:        "ms",
+	}, r.statDelayAvg)
+
 	// Add incoming rate
 	r.Stater().AddStat(astikit.StatMetadata{
 		Description: "Number of frames coming in per second",
 		Label:       "Incoming rate",
 		Unit:        "fps",
 	}, r.statIncomingRate)
+
+	// Add repeated rate
+	r.Stater().AddStat(astikit.StatMetadata{
+		Description: "Number of frames repeated per second",
+		Label:       "Repeated rate",
+		Unit:        "fps",
+	}, r.statRepeatedRate)
 
 	// Add work ratio
 	r.Stater().AddStat(astikit.StatMetadata{
@@ -202,6 +220,19 @@ func (r *RateEnforcer) HandleFrame(p *FrameHandlerPayload) {
 
 		// Append item
 		r.buf = append(r.buf, i)
+
+		// Get newest slot for this node
+		var s *rateEnforcerSlot
+		for _, rs := range r.slots {
+			if rs != nil && rs.n == i.n && (s == nil || s.ptsMax < rs.ptsMax) {
+				s = rs
+			}
+		}
+
+		// Process delay stat
+		if s != nil {
+			r.statDelayAvg.Add(float64(time.Duration(avutil.AvRescaleQ(s.ptsMax-i.f.Pts(), i.d.TimeBase(), nanosecondRational)).Milliseconds()))
+		}
 	})
 }
 
@@ -303,10 +334,14 @@ func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time, previous
 		}
 	}
 
-	// Remove first slot
-	if !previous {
+	// Frame has been repeated
+	if previous {
+		r.statRepeatedRate.Add(1)
+	} else {
 		r.p.put(i.f)
 	}
+
+	// Remove first slot
 	r.slots = r.slots[1:]
 	return
 }

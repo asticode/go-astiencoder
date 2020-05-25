@@ -24,7 +24,7 @@ type PktDumper struct {
 	count            uint32
 	eh               *astiencoder.EventHandler
 	o                PktDumperOptions
-	statIncomingRate *astikit.CounterAvgStat
+	statIncomingRate *astikit.CounterRateStat
 	statWorkRatio    *astikit.DurationPercentageStat
 	t                *template.Template
 }
@@ -56,7 +56,7 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler) (d *PktDumpe
 		}),
 		eh:               eh,
 		o:                o,
-		statIncomingRate: astikit.NewCounterAvgStat(),
+		statIncomingRate: astikit.NewCounterRateStat(),
 		statWorkRatio:    astikit.NewDurationPercentageStat(),
 	}
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)

@@ -23,7 +23,7 @@ type Muxer struct {
 	eh               *astiencoder.EventHandler
 	o                *sync.Once
 	restamper        PktRestamper
-	statIncomingRate *astikit.CounterAvgStat
+	statIncomingRate *astikit.CounterRateStat
 	statWorkRatio    *astikit.DurationPercentageStat
 }
 
@@ -52,7 +52,7 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (
 		eh:               eh,
 		o:                &sync.Once{},
 		restamper:        o.Restamper,
-		statIncomingRate: astikit.NewCounterAvgStat(),
+		statIncomingRate: astikit.NewCounterRateStat(),
 		statWorkRatio:    astikit.NewDurationPercentageStat(),
 	}
 	m.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(m), eh)

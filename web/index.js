@@ -620,9 +620,10 @@ var astiencoder = {
                 if (item.unit) this.nodes[name].stats[item.label].unit = item.unit
 
                 // Value
-                if (item.value) {
+                if (typeof item.value !== 'undefined') {
                     var v = item.value.toFixed(2)
-                    if (v < 10) v = '0' + v
+                    if (v < 10 && v >= 0) v = '0' + v
+                    else if (v > -10 && v < 0) v = '-0' + (-v)
                     this.nodes[name].stats[item.label].value = v
                 }
             }.bind(this))

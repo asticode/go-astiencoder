@@ -29,7 +29,7 @@ type Filterer struct {
 	g                *avfilter.Graph
 	outputCtx        Context
 	restamper        FrameRestamper
-	statIncomingRate *astikit.CounterAvgStat
+	statIncomingRate *astikit.CounterRateStat
 	statWorkRatio    *astikit.DurationPercentageStat
 }
 
@@ -61,7 +61,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		g:                avfilter.AvfilterGraphAlloc(),
 		outputCtx:        o.OutputCtx,
 		restamper:        o.Restamper,
-		statIncomingRate: astikit.NewCounterAvgStat(),
+		statIncomingRate: astikit.NewCounterRateStat(),
 		statWorkRatio:    astikit.NewDurationPercentageStat(),
 	}
 	f.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(f), eh)

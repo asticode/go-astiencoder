@@ -18,7 +18,7 @@ type Forwarder struct {
 	d                *frameDispatcher
 	outputCtx        Context
 	restamper        FrameRestamper
-	statIncomingRate *astikit.CounterAvgStat
+	statIncomingRate *astikit.CounterRateStat
 	statWorkRatio    *astikit.DurationPercentageStat
 }
 
@@ -43,7 +43,7 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 		}),
 		outputCtx:        o.OutputCtx,
 		restamper:        o.Restamper,
-		statIncomingRate: astikit.NewCounterAvgStat(),
+		statIncomingRate: astikit.NewCounterRateStat(),
 		statWorkRatio:    astikit.NewDurationPercentageStat(),
 	}
 	f.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(f), eh)
