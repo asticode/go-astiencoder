@@ -53,7 +53,8 @@ type rateEnforcerItem struct {
 
 // RateEnforcerOptions represents rate enforcer options
 type RateEnforcerOptions struct {
-	Delay     time.Duration
+	// This is expressed in number of frames in the desired FrameRate
+	Delay     uint
 	FrameRate avutil.Rational
 	Node      astiencoder.NodeOptions
 	OutputCtx Context
@@ -79,6 +80,7 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 		period:           time.Duration(float64(1e9) / o.FrameRate.ToDouble()),
 		restamper:        o.Restamper,
 		slots:            []*rateEnforcerSlot{nil},
+		slotsCount:       int(math.Max(float64(o.Delay), 1)),
 		statDelayAvg:     astikit.NewCounterAvgStat(),
 		statIncomingRate: astikit.NewCounterRateStat(),
 		statRepeatedRate: astikit.NewCounterRateStat(),
@@ -87,7 +89,6 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 	}
 	r.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(r), eh)
 	r.d = newFrameDispatcher(r, eh, c)
-	r.slotsCount = int(math.Max(math.Floor(float64(o.Delay)/float64(r.period)), 1))
 	r.addStats()
 	return
 }
@@ -292,6 +293,15 @@ func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time, previous
 	r.m.Lock()
 	defer r.m.Unlock()
 
+	// Make sure to remove first slot AFTER adding next slot, so that when there's only
+	// one slot, we still can get the .next() slot
+	removeFirstSlot := true
+	defer func(b *bool) {
+		if *b {
+			r.slots = r.slots[1:]
+		}
+	}(&removeFirstSlot)
+
 	// Make sure to add next slot
 	defer func() {
 		var s *rateEnforcerSlot
@@ -303,6 +313,7 @@ func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time, previous
 
 	// Not enough slots
 	if len(r.slots) < r.slotsCount {
+		removeFirstSlot = false
 		return
 	}
 
@@ -340,9 +351,6 @@ func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time, previous
 	} else {
 		r.p.put(i.f)
 	}
-
-	// Remove first slot
-	r.slots = r.slots[1:]
 	return
 }
 
