@@ -156,6 +156,9 @@ footer {
 }
 
 footer > div:first-child {
+    align-items: center;
+    display: flex;
+    flex-direction: column;
     width: 150px;
 }
 
@@ -179,24 +182,38 @@ footer > div:first-child .fa {
 }
 
 footer.recording-started #recording-start, footer #recording-stop, footer #playback-unload,
-footer.playback-loaded #playback-load, footer #playback-load input, footer #playback-next,
-footer.playback-loaded.playback-done #playback-next, footer.recording-disabled #recording-start,
+footer.playback-loaded #playback-load, footer #playback-load input, footer.recording-disabled #recording-start,
 footer.recording-disabled #recording-stop {
     display: none;
 }
 
-footer.recording-started #recording-stop, footer.playback-loaded #playback-unload, footer.playback-loaded #playback-next {
+footer.recording-started #recording-stop, footer.playback-loaded #playback-unload {
     display: flex;
 }
 
 footer > div:last-child {
-    display: flex;
+    display: none;
+    flex-direction: column;
     flex-grow: 1;
+    padding-left: 10px;
+}
+
+footer.playback-loaded > div:last-child {
+    display: flex;
+}
+
+footer > div:last-child > div {
+    display: flex;
     justify-content: center;
+    margin-bottom: 10px;
 }
 
 footer > div:last-child .fa {
     cursor: pointer;
     font-size: 20px;
     margin: auto;
+}
+
+footer > div:last-child input[type="range"] {
+    width: 100%;
 }

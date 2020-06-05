@@ -2,13 +2,13 @@ package astiencoder
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,7 +24,6 @@ import (
 
 type Server struct {
 	l  astikit.SeverityLogger
-	p  *serverPlayback
 	r  *serverRecording
 	w  *Workflow
 	ws *astiws.Manager
@@ -33,7 +32,6 @@ type Server struct {
 func NewServer(l astikit.StdLogger) (s *Server) {
 	s = &Server{
 		l:  astikit.AdaptStdLogger(l),
-		p:  newServerPlayback(),
 		ws: astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 8192}, l),
 	}
 	s.r = newServerRecording(s.l)
@@ -51,9 +49,6 @@ func (s *Server) Handler() http.Handler {
 	// Add routes
 	r.Handler(http.MethodGet, "/", s.serveHomepage())
 	r.Handler(http.MethodGet, "/ok", s.serveOK())
-	r.Handler(http.MethodPost, "/playback/load", s.servePlaybackLoad())
-	r.Handler(http.MethodGet, "/playback/next", s.servePlaybackNext())
-	r.Handler(http.MethodGet, "/playback/unload", s.servePlaybackUnload())
 	r.Handler(http.MethodGet, "/recording/export", s.serveRecordingExport())
 	r.Handler(http.MethodGet, "/recording/start", s.serveRecordingStart())
 	r.Handler(http.MethodGet, "/recording/stop", s.serveRecordingStop())
@@ -132,10 +127,8 @@ func (s *Server) EventHandlerAdapter(eh *EventHandler) {
 			s.l.Error(fmt.Errorf("astiencoder: adding to recording failed: %w", err))
 		}
 
-		// Send if playback not loaded
-		if s.p.r == nil {
-			s.sendWebSocket(e.Name, p)
-		}
+		// Send
+		s.sendWebSocket(e.Name, p)
 		return false
 	})
 }
@@ -256,16 +249,6 @@ type ServerWelcome struct {
 
 func (s *Server) serveWelcome() http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		// Playback is loaded
-		if s.p.r != nil {
-			// Unload playback
-			if err := s.p.unload(); err != nil {
-				s.l.Error(fmt.Errorf("astiencoder: unloading playback failed: %w", err))
-				rw.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-		}
-
 		// Create body
 		b := ServerWelcome{Recording: s.r.w != nil}
 
@@ -347,15 +330,14 @@ func (r *serverRecording) start(dst string, sw ServerWorkflow, onDone func(path 
 	// Create csv writer
 	r.w = csv.NewWriter(f)
 
-	// Marshal server workflow
-	var b []byte
-	if b, err = json.Marshal(sw); err != nil {
-		err = fmt.Errorf("astiencoder: marshaling failed: %w", err)
+	// Update started
+	atomic.StoreUint32(&r.s, 1)
+
+	// Add init
+	if err = r.add("init", sw); err != nil {
+		err = fmt.Errorf("astiencoder: adding init failed: %w", err)
 		return
 	}
-
-	// Write server workflow
-	r.w.Write([]string{"", "", string(b)})
 
 	// Execute the rest in a goroutine
 	go func() {
@@ -385,9 +367,6 @@ func (r *serverRecording) start(dst string, sw ServerWorkflow, onDone func(path 
 			}
 		}
 	}()
-
-	// Update started
-	atomic.StoreUint32(&r.s, 1)
 	return
 }
 
@@ -406,7 +385,7 @@ func (r *serverRecording) add(name string, payload interface{}) (err error) {
 
 	// Write
 	r.c.Add(func() {
-		r.w.Write([]string{strconv.Itoa(int(time.Now().UTC().Unix())), name, string(b)})
+		r.w.Write([]string{strconv.Itoa(int(time.Now().UTC().Unix())), name, base64.StdEncoding.EncodeToString(b)})
 		r.w.Flush()
 	})
 	return
@@ -494,251 +473,4 @@ func (r *serverRecording) export(rw http.ResponseWriter, w *Workflow) (err error
 		return
 	}
 	return
-}
-
-type serverPlayback struct {
-	b []serverPlaybackItem
-	f *os.File
-	r *csv.Reader
-}
-
-type serverPlaybackItem struct {
-	name    string
-	payload []byte
-	time    time.Time
-}
-
-func newServerPlayback() *serverPlayback {
-	return &serverPlayback{}
-}
-
-func (p *serverPlayback) load(req *http.Request) (payload []byte, err error) {
-	// Playbac already loaded
-	if p.r != nil {
-		return
-	}
-
-	// Get request file
-	var f multipart.File
-	var h *multipart.FileHeader
-	if f, h, err = req.FormFile("file"); err != nil {
-		if err != http.ErrMissingFile {
-			err = fmt.Errorf("astiencoder: getting request file failed: %w", err)
-		} else {
-			err = fmt.Errorf("astiencoder: request file is missing")
-		}
-		return
-	}
-
-	// Invalid content type
-	if c := h.Header.Get("Content-Type"); c != "text/csv" {
-		err = fmt.Errorf("astiencoder: invalid content type %s", c)
-		return
-	}
-
-	// Create file
-	if p.f, err = ioutil.TempFile("", "astiencoder*.csv"); err != nil {
-		err = fmt.Errorf("astiencoder: creating file failed: %w", err)
-		return
-	}
-
-	// Copy
-	if _, err = io.Copy(p.f, f); err != nil {
-		err = fmt.Errorf("astiencoder: copying failed: %w", err)
-		return
-	}
-
-	// Rewind
-	if _, err = p.f.Seek(0, 0); err != nil {
-		err = fmt.Errorf("astiencoder: seeking failed: %w", err)
-		return
-	}
-
-	// Create csv reader
-	p.r = csv.NewReader(p.f)
-
-	// Read
-	var line []string
-	if line, err = p.r.Read(); err != nil {
-		err = fmt.Errorf("astiencoder: reading failed: %w", err)
-		return
-	}
-
-	// Not enough columns
-	if len(line) < 3 {
-		err = fmt.Errorf("astiencoder: line have only %d columns", len(line))
-		return
-	}
-
-	// Parse payload
-	payload = []byte(line[2])
-	return
-}
-
-func (p *serverPlayback) next() (i serverPlaybackItem, err error) {
-	// Playback not loaded
-	if p.r == nil {
-		return
-	}
-
-	// Check buffer first
-	if len(p.b) > 0 {
-		i = p.b[0]
-		p.b = p.b[1:]
-		return
-	}
-
-	// Read
-	var line []string
-	if line, err = p.r.Read(); err != nil {
-		err = fmt.Errorf("astiencoder: reading failed: %w", err)
-		return
-	}
-
-	// Not enough columns
-	if len(line) < 3 {
-		err = fmt.Errorf("astiencoder: line have only %d columns", len(line))
-		return
-	}
-
-	// Parse time
-	var ti int
-	if ti, err = strconv.Atoi(line[0]); err != nil {
-		err = fmt.Errorf("astiencoder: atoi of %s failed: %w", line[0], err)
-		return
-	}
-	i.time = time.Unix(int64(ti), 0)
-
-	// Parse name and payload
-	i.name = line[1]
-	i.payload = []byte(line[2])
-	return
-}
-
-func (p *serverPlayback) unload() (err error) {
-	// Playback not loaded
-	if p.r == nil {
-		return
-	}
-
-	// Close file
-	if err = p.f.Close(); err != nil {
-		err = fmt.Errorf("astiencoder: closing previous file failed: %w", err)
-		return
-	}
-
-	// Remove file
-	if err = os.Remove(p.f.Name()); err != nil {
-		err = fmt.Errorf("astiencoder: removing previous file failed: %w", err)
-		return
-	}
-
-	// Reset
-	p.f = nil
-	p.r = nil
-	return
-}
-
-func (s *Server) servePlaybackLoad() http.Handler {
-	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		// Load
-		payload, err := s.p.load(r)
-		if err != nil {
-			s.l.Error(fmt.Errorf("astiencoder: loading playback failed: %w", err))
-			rw.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		// Write
-		if _, err = rw.Write(payload); err != nil {
-			s.l.Error(fmt.Errorf("astiencoder: writing failed: %w", err))
-			rw.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-	})
-}
-
-type ServerPlaybackItems struct {
-	Done  bool                 `json:"done"`
-	Items []ServerPlaybackItem `json:"items"`
-}
-
-type ServerPlaybackItem struct {
-	Name    string          `json:"name"`
-	Payload json.RawMessage `json:"payload"`
-}
-
-func newServerPlaybackItem(i serverPlaybackItem) ServerPlaybackItem {
-	return ServerPlaybackItem{
-		Name:    i.name,
-		Payload: i.payload,
-	}
-}
-
-func (s *Server) servePlaybackNext() http.Handler {
-	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		// Create body
-		b := ServerPlaybackItems{
-			Items: []ServerPlaybackItem{},
-		}
-
-		// Loop
-		var firstAt time.Time
-		for {
-			// Next
-			i, err := s.p.next()
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					b.Done = true
-					break
-				} else {
-					s.l.Error(fmt.Errorf("astiencoder: next failed: %w", err))
-					rw.WriteHeader(http.StatusInternalServerError)
-					return
-				}
-			}
-
-			// Create first at
-			if firstAt.IsZero() {
-				firstAt = i.time
-			}
-
-			// Event is too old
-			if i.time.Sub(firstAt) > 500*time.Millisecond {
-				// Append in buffer
-				s.p.b = append(s.p.b, i)
-				break
-			}
-
-			// Append event
-			b.Items = append(b.Items, newServerPlaybackItem(i))
-		}
-
-		// Write
-		if err := json.NewEncoder(rw).Encode(b); err != nil {
-			s.l.Error(fmt.Errorf("astiencoder: writing failed: %w", err))
-			rw.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-	})
-}
-
-func (s *Server) servePlaybackUnload() http.Handler {
-	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		// Unload
-		if err := s.p.unload(); err != nil {
-			s.l.Error(fmt.Errorf("astiencoder: unloading playback failed: %w", err))
-			rw.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		// Write
-		if s.w != nil {
-			if err := json.NewEncoder(rw).Encode(s.newServerWorkflow()); err != nil {
-				s.l.Error(fmt.Errorf("astiencoder: writing failed: %w", err))
-				rw.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-		}
-	})
 }

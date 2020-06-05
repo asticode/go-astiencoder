@@ -37,7 +37,16 @@
             </div>
         </div>
         <div>
-            <i id="playback-next" class="fa fa-forward" onclick="astiencoder.onPlaybackNextClick()"></i>
+            <div>
+                <i id="playback-previous" class="fa fa-backward" onclick="astiencoder.onPlaybackNextClick()"></i>
+                <i id="playback-next" class="fa fa-forward" onclick="astiencoder.onPlaybackNextClick()"></i>
+            </div>
+            <div>
+                <input id="progress" min="0" max="100" type="range" disabled/>
+            </div>
+            <div>
+                <span id="time"></span>
+            </div>
         </div>
     </footer>
 

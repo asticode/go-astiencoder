@@ -43,7 +43,8 @@ var astiencoder = {
             }.bind(this)
         })
     },
-    onmessage (name, payload) {
+    onmessage (name, payload, force) {
+        if (this.playback.loaded && !force) return
         switch (name) {
             case 'astiencoder.node.continued':
                 this.apply(payload, {status: 'running'})
@@ -65,7 +66,7 @@ var astiencoder = {
     onKeyUp (event) {
         switch (event.code) {
             case 'ArrowRight':
-                if (this.playback.loaded && !this.playback.done) this.onPlaybackNextClick()
+                this.onPlaybackNextClick()
                 break
         }
     },
@@ -123,7 +124,47 @@ var astiencoder = {
     },
 
     /* playback */
-    playback: new Proxy({}, {
+    playback: new Proxy({
+        lines: [],
+        parse (line) {
+            // Split line
+            const items = line.split(',')
+
+            // Not enough items
+            if (items.length !== 3) return false
+
+            // Create data
+            const d = {}
+            if (items[0] !== '') d.time = new Date(items[0] * 1000)
+            if (items[1] !== '') d.name = items[1]
+            if (items[2] !== '') {
+                const p = atob(items[2])
+                if (p !== "null") d.payload = JSON.parse(p)
+            }
+            return d
+        },
+        next () {
+            // No line left
+            if (this.lines.length === 0) return false
+
+            // Parse last line
+            return this.parse(this.lines[0])
+        },
+        removeNext () {
+            this.lines.shift()
+        },
+        last () {
+            // No line left
+            if (this.lines.length === 0) return false
+
+            // Parse last line
+            return this.parse(this.lines[this.lines.length - 1])
+        },
+        updateTime (t) {
+            document.getElementById('progress').value = ((t.getTime() - this.from.getTime()) / this.duration) * 100
+            document.getElementById('time').innerText = t.getHours().toString().padStart(2, '0') + ':' + t.getMinutes().toString().padStart(2, '0') + ':' + t.getSeconds().toString().padStart(2, '0')
+        }
+    }, {
         set: function(obj, prop, value) {
             // Nothing changed
             if (typeof obj[prop] !== 'undefined' && obj[prop] === value) return
@@ -152,68 +193,110 @@ var astiencoder = {
         // No file
         if (event.target.files.length === 0) return
 
-        // Create form data
-        const d = new FormData()
-        d.append('file', event.target.files[0])
+        // Create reader
+        const r = new FileReader()
+        r.addEventListener('load', () => {
+            // Parse lines
+            this.playback.lines = r.result.split(/\r\n|\n/)
 
-        // Load
-        this.sendHttp({
-            method: 'POST',
-            url: '/playback/load',
-            payload: d,
-            onsuccess: function(data) {
-                // Reset
-                this.reset()
+            // Remove last line if empty
+            if (this.playback.lines[this.playback.lines.length -1] === '') this.playback.lines.pop()
 
-                // Update playback
-                this.playback.done = false
-                this.playback.loaded = true
+            // Reset
+            this.reset()
 
-                // Loop through nodes
-                data.nodes.forEach(function(item) {
-                    // Apply changes
-                    this.apply(item.name, item)
-                }.bind(this))
-            }.bind(this)
-        })
+            // Update playback
+            this.playback.done = false
+            this.playback.loaded = true
+            
+            // Get next
+            const n = this.playback.next()
+            this.playback.removeNext()
+
+            // Loop through nodes
+            n.payload.nodes.forEach(function(item) {
+                // Apply changes
+                this.apply(item.name, item)
+            }.bind(this))
+
+            // Get last
+            const l = this.playback.last()
+
+            // Update time boundaries
+            this.playback.from = n.time
+            this.playback.duration = l.time.getTime() - n.time.getTime()
+
+            // Update time
+            this.playback.updateTime(n.time)
+        });
+        r.readAsText(event.target.files[0])
     },
+
     onPlaybackUnloadClick () {
-        // Unload
-        this.sendHttp({
-            method: 'GET',
-            url: '/playback/unload',
-            onsuccess: function(data) {
-                // Reset
-                this.reset()
+        // Update playback
+        this.playback.loaded = false
 
-                // Update playback
-                this.playback.loaded = false
-
-                // Loop through nodes
-                if (data) {
-                    data.nodes.forEach(function(item) {
-                        // Apply changes
-                        this.apply(item.name, item)
-                    }.bind(this))
-                }
-            }.bind(this)
-        })
+        // On open
+        this.onopen()
     },
     onPlaybackNextClick () {
-        // Next
-        this.sendHttp({
-            method: 'GET',
-            url: '/playback/next',
-            onsuccess: function(data) {
-                // Update playback
-                this.playback.done = data.done
+        // No playback
+        if (!this.playback.loaded || this.playback.done) return
 
-                // Loop through items
-                data.items.forEach(function(item) {
-                    this.onmessage(item.name, item.payload)
-                }.bind(this))
-            }.bind(this)
-        })
+        // Loop
+        var items = []
+        var indexedItems = {}
+        var stop = false
+        while (!stop) {
+            // Get next
+            const n = this.playback.next()
+
+            // Playback is done
+            if (!n) {
+                this.playback.done = true
+                stop = true
+                continue
+            }
+
+            // Get indexed key
+            var k = ''
+            switch (n.name) {
+                case 'astiencoder.node.continued':
+                case 'astiencoder.node.paused':
+                case 'astiencoder.node.stopped':
+                    k = 'status | ' + n.payload
+                    break
+                case 'astiencoder.node.stats':
+                    k = 'stats | ' + n.payload.name
+                case 'astiencoder.node.started':
+                    k = 'status | ' + n.payload.name
+                    break
+                default:
+                    this.playback.removeNext()
+                    continue
+            }
+
+            // Same event name is being processed for same node
+            if (indexedItems[k]) {
+                stop = true
+                continue
+            }
+            indexedItems[k] = true
+
+            // Remove next
+            this.playback.removeNext()
+
+            // Append next
+            items.push(n)
+        }
+
+        // Loop through items
+        items.forEach(function(item) {
+            this.onmessage(item.name, item.payload, true)
+        }.bind(this))
+
+        // Update time
+        this.playback.updateTime(items[0].time)
     },
 
     /* tags */
@@ -652,6 +735,7 @@ var astiencoder = {
     },
 
     /* helpers */
+
     sendHttp (options) {
         const req = new XMLHttpRequest()
         req.onreadystatechange = function() {
