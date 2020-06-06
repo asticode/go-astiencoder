@@ -276,7 +276,7 @@ var astiencoder = {
                     continue
             }
 
-            // Same event name is being processed for same node
+            // Same event type is being processed for same node
             if (indexedItems[k]) {
                 stop = true
                 continue
@@ -707,6 +707,10 @@ var astiencoder = {
                     var v = item.value.toFixed(2)
                     if (v < 10 && v >= 0) v = '0' + v
                     else if (v > -10 && v < 0) v = '-0' + (-v)
+                    if (this.nodes[name].stats[item.label].unit === '%') {
+                        if (v > 1000) v = '+∞'
+                        else if (v < -1000) v = '-∞'
+                    }
                     this.nodes[name].stats[item.label].value = v
                 }
             }.bind(this))
@@ -735,7 +739,6 @@ var astiencoder = {
     },
 
     /* helpers */
-
     sendHttp (options) {
         const req = new XMLHttpRequest()
         req.onreadystatechange = function() {

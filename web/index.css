@@ -156,9 +156,6 @@ footer {
 }
 
 footer > div:first-child {
-    align-items: center;
-    display: flex;
-    flex-direction: column;
     width: 150px;
 }
 
@@ -167,28 +164,28 @@ footer > div:first-child > div {
     border: solid 1px #777777;
     border-radius: 5px;
     cursor: pointer;
-    display: flex;
+    display: none;
     justify-content: center;
     padding: 5px 8px;
     margin-bottom: 10px;
 }
 
 footer #playback-load, footer #playback-unload {
-    margin-bottom: 0;
+    margin: 0;
 }
 
 footer > div:first-child .fa {
     margin: auto 8px auto 0;
 }
 
-footer.recording-started #recording-start, footer #recording-stop, footer #playback-unload,
-footer.playback-loaded #playback-load, footer #playback-load input, footer.recording-disabled #recording-start,
-footer.recording-disabled #recording-stop {
-    display: none;
+footer.recording-started #recording-stop, footer.playback-loaded #playback-unload,
+footer #playback-load {
+    display: flex;
 }
 
-footer.recording-started #recording-stop, footer.playback-loaded #playback-unload {
-    display: flex;
+footer.recording-started #recording-start, footer.playback-loaded #playback-load,
+footer #playback-load input {
+    display: none;
 }
 
 footer > div:last-child {
