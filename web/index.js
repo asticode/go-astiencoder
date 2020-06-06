@@ -43,8 +43,82 @@ var astiencoder = {
             }.bind(this)
         })
     },
-    onmessage (name, payload, force) {
-        if (this.playback.loaded && !force) return
+    onmessage (name, payload, playback) {
+        // Do nothing
+        if (this.playback.loaded && !playback) return
+
+        // Get rollback
+        var rollback = false, n = false
+        if (playback) {
+            switch (name) {
+                case 'astiencoder.node.continued':
+                case 'astiencoder.node.paused':
+                case 'astiencoder.node.stopped':
+                    // Get node
+                    n = this.nodes[payload]
+                    if (!n) break
+                    rollback = {}
+                    
+                    // Get name
+                    switch (n.status) {
+                        case 'paused':
+                            rollback.name = 'astiencoder.node.paused'
+                            break
+                        case 'running':
+                            rollback.name = 'astiencoder.node.continued'
+                            break
+                        case 'stopped':
+                            rollback.name = 'astiencoder.node.stopped'
+                            break
+                    }
+    
+                    // Get payload
+                    rollback.payload = payload
+                    break
+                case 'astiencoder.node.stats':
+                    // Get node
+                    n = this.nodes[payload.name]
+                    if (!n) break
+                    rollback = {}
+
+                    // No stats
+                    if (Object.keys(n.stats).length === 0) {
+                        rollback = {
+                            name: 'astiencoder.rollback.stats.remove',
+                            payload: payload.name
+                        }
+                        break
+                    }
+    
+                    // Get name
+                    rollback.name = name
+    
+                    // Get payload
+                    rollback.payload = {
+                        name: payload.name,
+                        stats: []
+                    }
+
+                    // Get stats
+                    for (var stat in n.stats) {
+                        var s = {}
+                        for (var k in n.stats[stat]) {
+                            s[k] = n.stats[stat][k]
+                        }
+                        rollback.payload.stats.push(s)
+                    }
+                    break
+                case 'astiencoder.node.started':
+                    // Get rollback
+                    rollback = {
+                        name: 'astiencoder.rollback.node.remove',
+                        payload: payload.name
+                    }
+                    break
+            }
+        }
+
+        // Apply
         switch (name) {
             case 'astiencoder.node.continued':
                 this.apply(payload, {status: 'running'})
@@ -62,9 +136,13 @@ var astiencoder = {
                 this.apply(payload, {status: 'stopped'})
                 break
         }
+        return rollback
     },
     onKeyUp (event) {
         switch (event.code) {
+            case 'ArrowLeft':
+                this.onPlaybackPreviousClick()
+                break
             case 'ArrowRight':
                 this.onPlaybackNextClick()
                 break
@@ -125,7 +203,10 @@ var astiencoder = {
 
     /* playback */
     playback: new Proxy({
-        lines: [],
+        cursorNexts: 0,
+        cursorPreviouses: 0,
+        nexts: [],
+        previouses: [],
         parse (line) {
             // Split line
             const items = line.split(',')
@@ -143,24 +224,44 @@ var astiencoder = {
             }
             return d
         },
-        next () {
-            // No line left
-            if (this.lines.length === 0) return false
+        apply (list, direction) {
+            // Loop through items
+            var rollbacks = []
+            list.items.forEach(function(item) {
+                switch (item.name) {
+                    case 'astiencoder.rollback.node.remove':
+                        delete astiencoder.nodes[item.payload]
+                        break
+                    case 'astiencoder.rollback.stats.remove':
+                        // Get node
+                        const n = astiencoder.nodes[item.payload]
+                        if (!n) break
 
-            // Parse last line
-            return this.parse(this.lines[0])
-        },
-        removeNext () {
-            this.lines.shift()
-        },
-        last () {
-            // No line left
-            if (this.lines.length === 0) return false
+                        // Loop through stats
+                        for (var stat in n.stats) {
+                            delete n.stats[stat]
+                        }
+                        break
+                    default:
+                        const r = astiencoder.onmessage(item.name, item.payload, true)
+                        if (r) rollbacks.push(r)
+                        break
+                }
+            })
 
-            // Parse last line
-            return this.parse(this.lines[this.lines.length - 1])
+            // Add previous
+            if (direction === 'next' && this.cursorNexts === this.previouses.length) {
+                if (rollbacks.length > 0) this.previouses.unshift({
+                    items: rollbacks,
+                    time: this.currentTime
+                })
+            }
+
+            // Update time
+            this.updateTime(list.time)
         },
         updateTime (t) {
+            this.currentTime = t
             document.getElementById('progress').value = ((t.getTime() - this.from.getTime()) / this.duration) * 100
             document.getElementById('time').innerText = t.getHours().toString().padStart(2, '0') + ':' + t.getMinutes().toString().padStart(2, '0') + ':' + t.getSeconds().toString().padStart(2, '0')
         }
@@ -197,10 +298,10 @@ var astiencoder = {
         const r = new FileReader()
         r.addEventListener('load', () => {
             // Parse lines
-            this.playback.lines = r.result.split(/\r\n|\n/)
+            var lines = r.result.split(/\r\n|\n/)
 
             // Remove last line if empty
-            if (this.playback.lines[this.playback.lines.length -1] === '') this.playback.lines.pop()
+            if (lines[lines.length -1] === '') lines.pop()
 
             // Reset
             this.reset()
@@ -208,10 +309,13 @@ var astiencoder = {
             // Update playback
             this.playback.done = false
             this.playback.loaded = true
+
+            // No lines
+            if (lines.length === 0) return
             
-            // Get next
-            const n = this.playback.next()
-            this.playback.removeNext()
+            // Get init
+            var n = this.playback.parse(lines[0])
+            lines.shift()
 
             // Loop through nodes
             n.payload.nodes.forEach(function(item) {
@@ -219,15 +323,69 @@ var astiencoder = {
                 this.apply(item.name, item)
             }.bind(this))
 
-            // Get last
-            const l = this.playback.last()
-
-            // Update time boundaries
+            // Update from
             this.playback.from = n.time
-            this.playback.duration = l.time.getTime() - n.time.getTime()
+            
+            // Loop through lines
+            var nexts = []
+            var indexed = {}
+            var stop = false
+            while (!stop) {
+                // No more lines
+                if (lines.length === 0) {
+                    if (nexts.length > 0) this.playback.nexts.push({
+                        items: nexts,
+                        time: nexts[0].time
+                    })
+                    break
+                }
+
+                // Get next
+                n = this.playback.parse(lines[0])
+    
+                // Get indexed key
+                var k = ''
+                switch (n.name) {
+                    case 'astiencoder.node.continued':
+                    case 'astiencoder.node.paused':
+                    case 'astiencoder.node.stopped':
+                        k = 'status | ' + n.payload
+                        break
+                    case 'astiencoder.node.stats':
+                        k = 'stats | ' + n.payload.name
+                    case 'astiencoder.node.started':
+                        k = 'status | ' + n.payload.name
+                        break
+                    default:
+                        lines.shift()
+                        continue
+                }
+    
+                // Same event type is being processed for same node
+                if (indexed[k]) {
+                    if (nexts.length > 0) this.playback.nexts.push({
+                        items: nexts,
+                        time: nexts[0].time
+                    })
+                    nexts = []
+                    indexed = {}
+                    continue
+                }
+                indexed[k] = true
+                lines.shift()
+    
+                // Append next
+                nexts.push(n)
+            }
+
+            // No nexts
+            if (this.playback.nexts.length === 0) return
+
+            // Update duration
+            this.playback.duration = this.playback.nexts[this.playback.nexts.length - 1].time.getTime() - this.playback.from.getTime()
 
             // Update time
-            this.playback.updateTime(n.time)
+            this.playback.updateTime(this.playback.from)
         });
         r.readAsText(event.target.files[0])
     },
@@ -243,60 +401,35 @@ var astiencoder = {
         // No playback
         if (!this.playback.loaded || this.playback.done) return
 
-        // Loop
-        var items = []
-        var indexedItems = {}
-        var stop = false
-        while (!stop) {
-            // Get next
-            const n = this.playback.next()
+        // No nexts
+        if (this.playback.nexts.length <= this.playback.cursorNexts) return
 
-            // Playback is done
-            if (!n) {
-                this.playback.done = true
-                stop = true
-                continue
-            }
+        // Get nexts
+        const nexts = this.playback.nexts[this.playback.cursorNexts]
 
-            // Get indexed key
-            var k = ''
-            switch (n.name) {
-                case 'astiencoder.node.continued':
-                case 'astiencoder.node.paused':
-                case 'astiencoder.node.stopped':
-                    k = 'status | ' + n.payload
-                    break
-                case 'astiencoder.node.stats':
-                    k = 'stats | ' + n.payload.name
-                case 'astiencoder.node.started':
-                    k = 'status | ' + n.payload.name
-                    break
-                default:
-                    this.playback.removeNext()
-                    continue
-            }
+        // Apply
+        this.playback.apply(nexts, 'next')
 
-            // Same event type is being processed for same node
-            if (indexedItems[k]) {
-                stop = true
-                continue
-            }
-            indexedItems[k] = true
+        // Update cursors
+        this.playback.cursorNexts++
+        if (this.playback.cursorPreviouses > 0) this.playback.cursorPreviouses--
+    },
+    onPlaybackPreviousClick () {
+        // No playback
+        if (!this.playback.loaded || this.playback.done) return
 
-            // Remove next
-            this.playback.removeNext()
+        // No previouses
+        if (this.playback.previouses.length <= this.playback.cursorPreviouses) return
 
-            // Append next
-            items.push(n)
-        }
+        // Get previouses
+        const previouses = this.playback.previouses[this.playback.cursorPreviouses]
 
-        // Loop through items
-        items.forEach(function(item) {
-            this.onmessage(item.name, item.payload, true)
-        }.bind(this))
+        // Apply
+        this.playback.apply(previouses, 'previous')
 
-        // Update time
-        this.playback.updateTime(items[0].time)
+        // Update cursors
+        this.playback.cursorPreviouses++
+        if (this.playback.cursorNexts > 0) this.playback.cursorNexts--
     },
 
     /* tags */
@@ -517,6 +650,16 @@ var astiencoder = {
             _ss.className = 'stats'
             n.dom.w.appendChild(_ss)
             n.stats = new Proxy({}, {
+                deleteProperty: function(obj, prop) {
+                    // Stat doesn't exists
+                    if (typeof obj[prop] === 'undefined') return
+
+                    // Remove row
+                    _ss.removeChild(obj[prop].dom.r)
+
+                    // Delete prop
+                    delete(obj[prop])
+                },
                 set: function(obj, prop, value) {
                     // Stat already exists
                     if (typeof obj[prop] !== 'undefined') return
@@ -704,12 +847,15 @@ var astiencoder = {
 
                 // Value
                 if (typeof item.value !== 'undefined') {
-                    var v = item.value.toFixed(2)
-                    if (v < 10 && v >= 0) v = '0' + v
-                    else if (v > -10 && v < 0) v = '-0' + (-v)
-                    if (this.nodes[name].stats[item.label].unit === '%') {
-                        if (v > 1000) v = '+∞'
-                        else if (v < -1000) v = '-∞'
+                    var v = item.value
+                    if (!isNaN(parseFloat(v))) {
+                        v = parseFloat(item.value).toFixed(2)
+                        if (v < 10 && v >= 0) v = '0' + v
+                        else if (v > -10 && v < 0) v = '-0' + (-v)
+                        if (this.nodes[name].stats[item.label].unit === '%') {
+                            if (v > 1000) v = '+∞'
+                            else if (v < -1000) v = '-∞'
+                        }
                     }
                     this.nodes[name].stats[item.label].value = v
                 }
