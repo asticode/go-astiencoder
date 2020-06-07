@@ -264,6 +264,44 @@ var astiencoder = {
             this.currentTime = t
             document.getElementById('progress').value = ((t.getTime() - this.from.getTime()) / this.duration) * 100
             document.getElementById('time').innerText = t.getHours().toString().padStart(2, '0') + ':' + t.getMinutes().toString().padStart(2, '0') + ':' + t.getSeconds().toString().padStart(2, '0')
+        },
+        next () {
+            // No nexts
+            if (this.nexts.length <= this.cursorNexts) return false
+
+            // Get nexts
+            return this.nexts[this.cursorNexts]
+        },
+        applyNext () {
+            // Get nexts
+            const nexts = this.next()
+            if (!nexts) return
+
+            // Apply
+            this.apply(nexts, 'next')
+
+            // Update cursors
+            this.cursorNexts++
+            if (this.cursorPreviouses > 0) this.cursorPreviouses--
+        },
+        previous () {
+            // No previouses
+            if (this.previouses.length <= this.cursorPreviouses) return false
+
+            // Get previouses
+            return this.previouses[this.cursorPreviouses]
+        },
+        applyPrevious () {
+            // Get previouses
+            const previouses = this.previous()
+            if (!previouses) return
+
+            // Apply
+            this.apply(previouses, 'previous')
+
+            // Update cursors
+            this.cursorPreviouses++
+            if (this.cursorNexts > 0) this.cursorNexts--
         }
     }, {
         set: function(obj, prop, value) {
@@ -329,8 +367,7 @@ var astiencoder = {
             // Loop through lines
             var nexts = []
             var indexed = {}
-            var stop = false
-            while (!stop) {
+            while (1 === 1) {
                 // No more lines
                 if (lines.length === 0) {
                     if (nexts.length > 0) this.playback.nexts.push({
@@ -401,35 +438,49 @@ var astiencoder = {
         // No playback
         if (!this.playback.loaded || this.playback.done) return
 
-        // No nexts
-        if (this.playback.nexts.length <= this.playback.cursorNexts) return
-
-        // Get nexts
-        const nexts = this.playback.nexts[this.playback.cursorNexts]
-
-        // Apply
-        this.playback.apply(nexts, 'next')
-
-        // Update cursors
-        this.playback.cursorNexts++
-        if (this.playback.cursorPreviouses > 0) this.playback.cursorPreviouses--
+        // Apply next
+        this.playback.applyNext()
     },
     onPlaybackPreviousClick () {
         // No playback
         if (!this.playback.loaded || this.playback.done) return
 
-        // No previouses
-        if (this.playback.previouses.length <= this.playback.cursorPreviouses) return
+        // Apply previous
+        this.playback.applyPrevious()
+    },
+    onPlaybackSeek (e) {
+        // No playback
+        if (!this.playback.loaded || this.playback.done) return
 
-        // Get previouses
-        const previouses = this.playback.previouses[this.playback.cursorPreviouses]
+        // Get seek time
+        const t = new Date(e.target.value / 100 * this.playback.duration + this.playback.from.getTime())
 
-        // Apply
-        this.playback.apply(previouses, 'previous')
+        // Seek
+        if (t.getTime() > this.playback.currentTime.getTime()) {
+            while (1 === 1) {
+                // Get next
+                const nexts = this.playback.next()
+                if (!nexts) break
 
-        // Update cursors
-        this.playback.cursorPreviouses++
-        if (this.playback.cursorNexts > 0) this.playback.cursorNexts--
+                // Invalid time
+                if (nexts.time.getTime() > t.getTime()) break
+
+                // Apply next
+                this.playback.applyNext()
+            }
+        } else {
+            while (1 === 1) {
+                // Get previous
+                const previouses = this.playback.previous()
+                if (!previouses) break
+
+                // Invalid time
+                if (previouses.time.getTime() < t.getTime()) break
+
+                // Apply previous
+                this.playback.applyPrevious()
+            }
+        }
     },
 
     /* tags */

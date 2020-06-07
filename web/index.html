@@ -42,7 +42,7 @@
                 <i id="playback-next" class="fa fa-forward" onclick="astiencoder.onPlaybackNextClick()"></i>
             </div>
             <div>
-                <input id="progress" min="0" max="100" type="range" disabled/>
+                <input id="progress" min="0" max="100" type="range" onchange="astiencoder.onPlaybackSeek(event)"/>
             </div>
             <div>
                 <span id="time"></span>
