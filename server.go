@@ -1,20 +1,10 @@
 package astiencoder
 
 import (
-	"context"
-	"encoding/base64"
-	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strconv"
-	"sync/atomic"
-	"time"
 
 	"github.com/asticode/go-astikit"
 	"github.com/asticode/go-astiws"
@@ -24,18 +14,19 @@ import (
 
 type Server struct {
 	l  astikit.SeverityLogger
-	r  *serverRecording
 	w  *Workflow
 	ws *astiws.Manager
 }
 
-func NewServer(l astikit.StdLogger) (s *Server) {
-	s = &Server{
-		l:  astikit.AdaptStdLogger(l),
-		ws: astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 8192}, l),
+type ServerOptions struct {
+	Logger astikit.StdLogger
+}
+
+func NewServer(o ServerOptions) *Server {
+	return &Server{
+		l:  astikit.AdaptStdLogger(o.Logger),
+		ws: astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 8192}, o.Logger),
 	}
-	s.r = newServerRecording(s.l)
-	return
 }
 
 func (s *Server) SetWorkflow(w *Workflow) {
@@ -49,9 +40,6 @@ func (s *Server) Handler() http.Handler {
 	// Add routes
 	r.Handler(http.MethodGet, "/", s.serveHomepage())
 	r.Handler(http.MethodGet, "/ok", s.serveOK())
-	r.Handler(http.MethodGet, "/recording/export", s.serveRecordingExport())
-	r.Handler(http.MethodGet, "/recording/start", s.serveRecordingStart())
-	r.Handler(http.MethodGet, "/recording/stop", s.serveRecordingStop())
 	r.Handler(http.MethodGet, "/websocket", s.serveWebSocket())
 	r.Handler(http.MethodGet, "/welcome", s.serveWelcome())
 	return r
@@ -106,7 +94,7 @@ func (s *Server) sendWebSocket(eventName string, payload interface{}) {
 	})
 }
 
-func (s *Server) EventHandlerAdapter(eh *EventHandler) {
+func serverEventHandlerAdapter(eh *EventHandler, fn func(name string, payload interface{})) {
 	// Register catch all handler
 	eh.AddForAll(func(e Event) bool {
 		// Get payload
@@ -122,15 +110,14 @@ func (s *Server) EventHandlerAdapter(eh *EventHandler) {
 			p = newServerNode(e.Target.(Node))
 		}
 
-		// Add to recording
-		if err := s.r.add(e.Name, p); err != nil {
-			s.l.Error(fmt.Errorf("astiencoder: adding to recording failed: %w", err))
-		}
-
-		// Send
-		s.sendWebSocket(e.Name, p)
+		// Custom
+		fn(e.Name, p)
 		return false
 	})
+}
+
+func (s *Server) EventHandlerAdapter(eh *EventHandler) {
+	serverEventHandlerAdapter(eh, s.sendWebSocket)
 }
 
 type ServerWorkflow struct {
@@ -139,23 +126,23 @@ type ServerWorkflow struct {
 	Status string       `json:"status"`
 }
 
-func (s *Server) newServerWorkflow() (w *ServerWorkflow) {
+func newServerWorkflow(w *Workflow) (sw *ServerWorkflow) {
 	// Create server workflow
-	w = &ServerWorkflow{
-		Name:   s.w.Name(),
+	sw = &ServerWorkflow{
+		Name:   w.Name(),
 		Nodes:  []ServerNode{},
-		Status: s.w.Status(),
+		Status: w.Status(),
 	}
 
 	// Discover nodes
 	ns := make(map[string]ServerNode)
-	for _, n := range s.w.Children() {
+	for _, n := range w.Children() {
 		discoverServerNode(n, ns)
 	}
 
 	// Add nodes
 	for _, n := range ns {
-		w.Nodes = append(w.Nodes, n)
+		sw.Nodes = append(sw.Nodes, n)
 	}
 	return
 }
@@ -243,18 +230,15 @@ func newServerStat(e EventStat) ServerStat {
 }
 
 type ServerWelcome struct {
-	Recording bool            `json:"recording"`
-	Workflow  *ServerWorkflow `json:"workflow,omitempty"`
+	Workflow *ServerWorkflow `json:"workflow,omitempty"`
 }
 
 func (s *Server) serveWelcome() http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		// Create body
-		b := ServerWelcome{Recording: s.r.w != nil}
-
-		// Add workflow
+		var b ServerWelcome
 		if s.w != nil {
-			b.Workflow = s.newServerWorkflow()
+			b.Workflow = newServerWorkflow(s.w)
 		}
 
 		// Write
@@ -264,213 +248,4 @@ func (s *Server) serveWelcome() http.Handler {
 			return
 		}
 	})
-}
-
-type serverRecording struct {
-	c    *astikit.Chan
-	l    astikit.SeverityLogger
-	path string
-	s    uint32
-	w    *csv.Writer
-}
-
-func newServerRecording(l astikit.SeverityLogger) *serverRecording {
-	return &serverRecording{
-		c: astikit.NewChan(astikit.ChanOptions{
-			ProcessAll: true,
-		}),
-		l: l,
-	}
-}
-
-func (s *Server) serveRecordingStart() http.Handler {
-	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		// Start
-		if err := s.StartRecording("", nil); err != nil {
-			s.l.Error(err)
-			rw.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-	})
-}
-
-// StartRecording starts the recording
-func (s *Server) StartRecording(dst string, onDone func(path string) error) (err error) {
-	// Start recording
-	if err = s.r.start(dst, *s.newServerWorkflow(), onDone); err != nil {
-		err = fmt.Errorf("astiencoder: starting recording failed: %w", err)
-		return
-	}
-	return
-}
-
-func (r *serverRecording) start(dst string, sw ServerWorkflow, onDone func(path string) error) (err error) {
-	// Recording already started
-	if started := atomic.LoadUint32(&r.s); started > 0 {
-		return
-	}
-
-	// Create destination
-	var f *os.File
-	if dst != "" {
-		if f, err = os.Create(dst); err != nil {
-			err = fmt.Errorf("astiencoder: creating %s failed: %w", dst, err)
-			return
-		}
-	} else {
-		if f, err = ioutil.TempFile("", "astiencoder*.csv"); err != nil {
-			err = fmt.Errorf("astiencoder: creating temp file failed: %w", err)
-			return
-		}
-	}
-
-	// Update path
-	r.path = f.Name()
-
-	// Create csv writer
-	r.w = csv.NewWriter(f)
-
-	// Update started
-	atomic.StoreUint32(&r.s, 1)
-
-	// Add init
-	if err = r.add("init", sw); err != nil {
-		err = fmt.Errorf("astiencoder: adding init failed: %w", err)
-		return
-	}
-
-	// Execute the rest in a goroutine
-	go func() {
-		// Start chan
-		r.c.Start(context.Background())
-
-		// Reset chan
-		r.c.Reset()
-
-		// Flush csv
-		r.w.Flush()
-
-		// Reset csv writer
-		r.w = nil
-
-		// Close file
-		if err := f.Close(); err != nil {
-			r.l.Error(fmt.Errorf("astiencoder: closing file failed: %w", err))
-			return
-		}
-
-		// On done
-		if onDone != nil {
-			if err := onDone(r.path); err != nil {
-				r.l.Error(fmt.Errorf("astiencoder: on done failed: %w", err))
-				return
-			}
-		}
-	}()
-	return
-}
-
-func (r *serverRecording) add(name string, payload interface{}) (err error) {
-	// Recording not started
-	if started := atomic.LoadUint32(&r.s); started == 0 {
-		return
-	}
-
-	// Marshal payload
-	var b []byte
-	if b, err = json.Marshal(payload); err != nil {
-		err = fmt.Errorf("astiencoder: marshaling failed: %w", err)
-		return
-	}
-
-	// Write
-	r.c.Add(func() {
-		r.w.Write([]string{strconv.Itoa(int(time.Now().UTC().Unix())), name, base64.StdEncoding.EncodeToString(b)})
-		r.w.Flush()
-	})
-	return
-}
-
-func (s *Server) serveRecordingStop() http.Handler {
-	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		// Stop recording
-		s.StopRecording()
-	})
-}
-
-// StopRecording stops the recording
-func (s *Server) StopRecording() {
-	// Stop recording
-	s.r.stop()
-}
-
-func (r *serverRecording) stop() {
-	// Recording not started
-	if started := atomic.LoadUint32(&r.s); started == 0 {
-		return
-	}
-
-	// Update started
-	atomic.StoreUint32(&r.s, 0)
-
-	// Stop chan
-	r.c.Stop()
-}
-
-func (s *Server) serveRecordingExport() http.Handler {
-	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		// Export
-		if err := s.r.export(rw, s.w); err != nil {
-			s.l.Error(fmt.Errorf("astiencoder: exporting recording failed: %w", err))
-			rw.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-	})
-}
-
-func (r *serverRecording) export(rw http.ResponseWriter, w *Workflow) (err error) {
-	// No path
-	if r.path == "" {
-		return
-	}
-
-	// Open file
-	var f *os.File
-	if f, err = os.Open(r.path); err != nil {
-		err = fmt.Errorf("astiencoder: opening %s failed: %w", r.path, err)
-		return
-	}
-
-	// Stat
-	var fi os.FileInfo
-	if fi, err = f.Stat(); err != nil {
-		f.Close()
-		err = fmt.Errorf("astiencoder: stating %s failed: %w", r.path, err)
-		return
-	}
-
-	// Set headers
-	rw.Header().Set("Content-Type", "text/csv")
-	rw.Header().Set("Content-Length", strconv.Itoa(int(fi.Size())))
-	rw.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(w.Name()+"-"+time.Now().UTC().Format("2006_01_02_15_04_05.csv")))
-
-	// Copy
-	if _, err = io.Copy(rw, f); err != nil {
-		f.Close()
-		err = fmt.Errorf("astiencoder: copying failed: %w", err)
-		return
-	}
-
-	// Close
-	if err = f.Close(); err != nil {
-		err = fmt.Errorf("astiencoder: closing failed: %w", err)
-		return
-	}
-
-	// Remove
-	if err = os.Remove(r.path); err != nil {
-		err = fmt.Errorf("astiencoder: removing %s failed: %w", r.path, err)
-		return
-	}
-	return
 }

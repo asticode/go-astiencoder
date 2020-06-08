@@ -22,27 +22,21 @@
     </section>
     <footer>
         <div>
-            <div id="recording-start" onclick="astiencoder.onRecordingStartClick()">
-                <i class="fa fa-dot-circle"></i>Start recording
-            </div>
-            <div id="recording-stop" onclick="astiencoder.onRecordingStopClick()">
-                <i class="fa fa-stop"></i>Stop recording
-            </div>
-            <div id="playback-load" onclick="astiencoder.onPlaybackLoadClick()">
+            <div id="recording-load" onclick="astiencoder.onRecordingLoadClick()">
                 <i class="fa fa-file-import"></i>Load recording
-                <input type="file" accept="text/csv" onchange="astiencoder.onPlaybackLoadChange(event)"/>
+                <input type="file" accept="text/csv" onchange="astiencoder.onRecordingLoadChange(event)"/>
             </div>
-            <div id="playback-unload" onclick="astiencoder.onPlaybackUnloadClick()">
+            <div id="recording-unload" onclick="astiencoder.onRecordingUnloadClick()">
                 <i class="fa fa-undo-alt"></i>Unload recording
             </div>
         </div>
         <div>
             <div>
-                <i id="playback-previous" class="fa fa-backward" onclick="astiencoder.onPlaybackPreviousClick()"></i>
-                <i id="playback-next" class="fa fa-forward" onclick="astiencoder.onPlaybackNextClick()"></i>
+                <i id="recording-previous" class="fa fa-backward" onclick="astiencoder.onRecordingPreviousClick()"></i>
+                <i id="recording-next" class="fa fa-forward" onclick="astiencoder.onRecordingNextClick()"></i>
             </div>
             <div>
-                <input id="progress" min="0" max="100" type="range" onchange="astiencoder.onPlaybackSeek(event)"/>
+                <input id="progress" min="0" max="100" type="range" onchange="astiencoder.onRecordingSeek(event)"/>
             </div>
             <div>
                 <span id="time"></span>

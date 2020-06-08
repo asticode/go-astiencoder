@@ -170,7 +170,7 @@ footer > div:first-child > div {
     margin-bottom: 10px;
 }
 
-footer #playback-load, footer #playback-unload {
+footer #recording-load, footer #recording-unload {
     margin: 0;
 }
 
@@ -178,13 +178,11 @@ footer > div:first-child .fa {
     margin: auto 8px auto 0;
 }
 
-footer.recording-started #recording-stop, footer.playback-loaded #playback-unload,
-footer #playback-load {
+footer.recording-loaded #recording-unload, footer #recording-load {
     display: flex;
 }
 
-footer.recording-started #recording-start, footer.playback-loaded #playback-load,
-footer #playback-load input {
+footer.recording-loaded #recording-load, footer #recording-load input {
     display: none;
 }
 
@@ -195,7 +193,7 @@ footer > div:last-child {
     padding-left: 10px;
 }
 
-footer.playback-loaded > div:last-child {
+footer.recording-loaded > div:last-child {
     display: flex;
 }
 

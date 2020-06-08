@@ -28,10 +28,6 @@ var astiencoder = {
             onsuccess: function(data) {
                 // Reset
                 this.reset()
-                
-                // Update recording
-                this.recording.disabled = typeof data.workflow === 'undefined'
-                this.recording.started = data.recording
 
                 // Loop through nodes
                 if (data.workflow) {
@@ -43,13 +39,13 @@ var astiencoder = {
             }.bind(this)
         })
     },
-    onmessage (name, payload, playback) {
+    onmessage (name, payload, recording) {
         // Do nothing
-        if (this.playback.loaded && !playback) return
+        if (this.recording.loaded && !recording) return
 
         // Get rollback
         var rollback = false, n = false
-        if (playback) {
+        if (recording) {
             switch (name) {
                 case 'astiencoder.node.continued':
                 case 'astiencoder.node.paused':
@@ -141,68 +137,16 @@ var astiencoder = {
     onKeyUp (event) {
         switch (event.code) {
             case 'ArrowLeft':
-                this.onPlaybackPreviousClick()
+                this.onRecordingPreviousClick()
                 break
             case 'ArrowRight':
-                this.onPlaybackNextClick()
+                this.onRecordingNextClick()
                 break
         }
     },
 
     /* recording */
-    recording: new Proxy({}, {
-        set: function(obj, prop, value) {
-            // Nothing changed
-            if (typeof obj[prop] !== 'undefined' && obj[prop] === value) return
-
-            // Switch on prop
-            switch (prop) {
-                case 'disabled':
-                    if (value) document.querySelector('footer').classList.add('recording-disabled')
-                    else document.querySelector('footer').classList.remove('recording-disabled')
-                    break
-                case 'started':
-                    if (value) document.querySelector('footer').classList.add('recording-started')
-                    else document.querySelector('footer').classList.remove('recording-started')
-                    break
-            }
-
-            // Store value
-            obj[prop] = value
-            return true
-        }
-    }),
-    onRecordingStartClick () {
-        // Start
-        this.sendHttp({
-            method: 'GET',
-            url: '/recording/start',
-            onsuccess: function() {
-                // Update recording
-                this.recording.started = true
-            }.bind(this)
-        })
-    },
-    onRecordingStopClick () {
-        // Start
-        this.sendHttp({
-            method: 'GET',
-            url: '/recording/stop',
-            onsuccess: function() {
-                // Update recording
-                this.recording.started = false
-
-                // Redirect to export
-                var link = document.createElement('a')
-                link.href = '/recording/export'
-                link.target = '_blank'
-                link.click()
-            }.bind(this)
-        })
-    },
-
-    /* playback */
-    playback: new Proxy({
+    recording: new Proxy({
         cursorNexts: 0,
         cursorPreviouses: 0,
         nexts: [],
@@ -310,13 +254,9 @@ var astiencoder = {
 
             // Switch on prop
             switch (prop) {
-                case 'done':
-                    if (value) document.querySelector('footer').classList.add('playback-done')
-                    else document.querySelector('footer').classList.remove('playback-done')
-                    break
                 case 'loaded':
-                    if (value) document.querySelector('footer').classList.add('playback-loaded')
-                    else document.querySelector('footer').classList.remove('playback-loaded')
+                    if (value) document.querySelector('footer').classList.add('recording-loaded')
+                    else document.querySelector('footer').classList.remove('recording-loaded')
                     break
             }
 
@@ -325,10 +265,10 @@ var astiencoder = {
             return true
         }
     }),
-    onPlaybackLoadClick () {
-        document.querySelector('#playback-load input').click()
+    onRecordingLoadClick () {
+        document.querySelector('#recording-load input').click()
     },
-    onPlaybackLoadChange (event) {
+    onRecordingLoadChange (event) {
         // No file
         if (event.target.files.length === 0) return
 
@@ -344,15 +284,14 @@ var astiencoder = {
             // Reset
             this.reset()
 
-            // Update playback
-            this.playback.done = false
-            this.playback.loaded = true
+            // Update recording
+            this.recording.loaded = true
 
             // No lines
             if (lines.length === 0) return
             
             // Get init
-            var n = this.playback.parse(lines[0])
+            var n = this.recording.parse(lines[0])
             lines.shift()
 
             // Loop through nodes
@@ -362,7 +301,7 @@ var astiencoder = {
             }.bind(this))
 
             // Update from
-            this.playback.from = n.time
+            this.recording.from = n.time
             
             // Loop through lines
             var nexts = []
@@ -370,7 +309,7 @@ var astiencoder = {
             while (1 === 1) {
                 // No more lines
                 if (lines.length === 0) {
-                    if (nexts.length > 0) this.playback.nexts.push({
+                    if (nexts.length > 0) this.recording.nexts.push({
                         items: nexts,
                         time: nexts[0].time
                     })
@@ -378,7 +317,7 @@ var astiencoder = {
                 }
 
                 // Get next
-                n = this.playback.parse(lines[0])
+                n = this.recording.parse(lines[0])
     
                 // Get indexed key
                 var k = ''
@@ -400,7 +339,7 @@ var astiencoder = {
     
                 // Same event type is being processed for same node
                 if (indexed[k]) {
-                    if (nexts.length > 0) this.playback.nexts.push({
+                    if (nexts.length > 0) this.recording.nexts.push({
                         items: nexts,
                         time: nexts[0].time
                     })
@@ -416,69 +355,69 @@ var astiencoder = {
             }
 
             // No nexts
-            if (this.playback.nexts.length === 0) return
+            if (this.recording.nexts.length === 0) return
 
             // Update duration
-            this.playback.duration = this.playback.nexts[this.playback.nexts.length - 1].time.getTime() - this.playback.from.getTime()
+            this.recording.duration = this.recording.nexts[this.recording.nexts.length - 1].time.getTime() - this.recording.from.getTime()
 
             // Update time
-            this.playback.updateTime(this.playback.from)
+            this.recording.updateTime(this.recording.from)
         });
         r.readAsText(event.target.files[0])
     },
 
-    onPlaybackUnloadClick () {
-        // Update playback
-        this.playback.loaded = false
+    onRecordingUnloadClick () {
+        // Update recording
+        this.recording.loaded = false
 
         // On open
         this.onopen()
     },
-    onPlaybackNextClick () {
-        // No playback
-        if (!this.playback.loaded || this.playback.done) return
+    onRecordingNextClick () {
+        // No recording
+        if (!this.recording.loaded) return
 
         // Apply next
-        this.playback.applyNext()
+        this.recording.applyNext()
     },
-    onPlaybackPreviousClick () {
-        // No playback
-        if (!this.playback.loaded || this.playback.done) return
+    onRecordingPreviousClick () {
+        // No recording
+        if (!this.recording.loaded) return
 
         // Apply previous
-        this.playback.applyPrevious()
+        this.recording.applyPrevious()
     },
-    onPlaybackSeek (e) {
-        // No playback
-        if (!this.playback.loaded || this.playback.done) return
+    onRecordingSeek (e) {
+        // No recording
+        if (!this.recording.loaded) return
 
         // Get seek time
-        const t = new Date(e.target.value / 100 * this.playback.duration + this.playback.from.getTime())
+        const t = new Date(e.target.value / 100 * this.recording.duration + this.recording.from.getTime())
 
         // Seek
-        if (t.getTime() > this.playback.currentTime.getTime()) {
+        if (t.getTime() > this.recording.currentTime.getTime()) {
             while (1 === 1) {
                 // Get next
-                const nexts = this.playback.next()
+                const nexts = this.recording.next()
                 if (!nexts) break
 
                 // Invalid time
                 if (nexts.time.getTime() > t.getTime()) break
 
                 // Apply next
-                this.playback.applyNext()
+                this.recording.applyNext()
             }
         } else {
             while (1 === 1) {
                 // Get previous
-                const previouses = this.playback.previous()
+                const previouses = this.recording.previous()
                 if (!previouses) break
 
                 // Invalid time
                 if (previouses.time.getTime() < t.getTime()) break
 
                 // Apply previous
-                this.playback.applyPrevious()
+                this.recording.applyPrevious()
             }
         }
     },

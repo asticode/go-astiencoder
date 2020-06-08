@@ -41,7 +41,7 @@ func main() {
 	eh := astiencoder.NewEventHandler()
 
 	// Create workflow server
-	ws := astiencoder.NewServer(l)
+	ws := astiencoder.NewServer(astiencoder.ServerOptions{Logger: l})
 
 	// Adapt event handler
 	astiencoder.LoggerEventHandlerAdapter(l, eh)

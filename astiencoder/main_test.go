@@ -26,7 +26,7 @@ func testJob(t *testing.T, jobPath string, assertPaths func(j Job) map[string]st
 	eh := astiencoder.NewEventHandler()
 
 	// Create workflow server
-	ws := astiencoder.NewServer(l)
+	ws := astiencoder.NewServer(astiencoder.ServerOptions{Logger: l})
 
 	// Create encoder
 	cfg := &ConfigurationEncoder{}
