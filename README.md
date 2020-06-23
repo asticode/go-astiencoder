@@ -10,21 +10,18 @@ In most cases you won't need this project as the `ffmpeg` binary is pretty aweso
 
 However, this project could be useful to you if you're looking to:
 
-- understand how the video encoding process work
-- integrate your video encoder in a GO ecosystem
-- visualize your encoding workflow and statuses/stats of nodes in real time
-- communicate with the encoder through an HTTP API + websocket to tweak behaviours in real time
-- use native GO subtitle libraries like [astisub](https://github.com/asticode/go-astisub)
-- build your own video encoder and take control of its workflow
+1. understand how the video encoding process work
+1. integrate your video encoder in a GO ecosystem
+1. visualize in real time, record or replay your encoding workflow and nodes statuses and stats
+1. use native GO subtitle libraries like [astisub](https://github.com/asticode/go-astisub)
+1. build your own video encoder and take control of its workflow
 
 # How is this project structured?
 ## The encoder framework
 
-At the root of the project, package `astiencoder` provides the framework to build a [Workflow Pool](workflow_pool.go) that can manage several [Workflows](workflow.go).
+At the root of the project, package `astiencoder` provides the framework to build [Workflows](workflow.go). Workflows are made of [Nodes](node.go). Nodes can start/pause/continue/stop any kind of work.
 
-At this point, [Workflows](workflow.go) are made of [Nodes](node.go) that can start/pause/continue/stop any kind of work. 
- 
-The [Workflow Pool](workflow_pool.go) can serve both an HTTP API and WebSocket events to interact with [Workflows](workflow.go) and [Nodes](node.go).
+It also provides a [Server](server.go) that exposes the UI.
 
 All internal [Events](event.go) can be handled with the proper `EventHandler`.
 
@@ -118,9 +115,7 @@ $ make server
 
 ## Web UI
 
-Whatever mode you're in, you can open the Web UI in order to see your node's stats. 
-
-By default it's accessible at http://127.0.0.1:4000 but you can change it using the encoder configuration.
+If you set up the server correctly, you can open the Web UI in order to see your node's stats.
 
 ### What do those stats mean?
 
