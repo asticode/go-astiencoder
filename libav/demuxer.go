@@ -37,6 +37,7 @@ type demuxerStream struct {
 	emulateRateNextAt time.Time
 	s                 *avformat.Stream
 	seekToLive        bool
+	seekToLiveCount   int
 	seekToLiveLastPkt *demuxerPkt
 }
 
@@ -67,8 +68,8 @@ type DemuxerOptions struct {
 	Node astiencoder.NodeOptions
 	// Context used to cancel probing
 	ProbeCtx context.Context
-	// If true, the demuxer will not dispatch packets of a stream until 2 consecutive packets are received
-	// at an interval >= to the delta of their DTS
+	// If true, the demuxer will not dispatch packets of a stream until the following occurs at least 10 times :
+	// 2 consecutive packets are received at an interval >= to the delta of their DTS
 	SeekToLive bool
 	// URL of the input
 	URL string
@@ -297,7 +298,13 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	// Seek to live
 	if s.seekToLive {
 		// Pkt duration is not always filled therefore we need to rely on <current pkt dts> - <previous pkt dts>
-		if s.seekToLiveLastPkt == nil || s.seekToLiveLastPkt.dts == avutil.AV_NOPTS_VALUE || time.Since(s.seekToLiveLastPkt.receivedAt) < time.Duration(avutil.AvRescaleQ(pkt.Dts()-s.seekToLiveLastPkt.dts, s.s.TimeBase(), nanosecondRational)) {
+		if s.seekToLiveLastPkt != nil && s.seekToLiveLastPkt.dts != avutil.AV_NOPTS_VALUE && time.Since(s.seekToLiveLastPkt.receivedAt) >= time.Duration(avutil.AvRescaleQ(pkt.Dts()-s.seekToLiveLastPkt.dts, s.s.TimeBase(), nanosecondRational)) {
+			s.seekToLiveCount++
+		}
+
+		// Check count
+		// 10 is an arbitrary number
+		if s.seekToLiveCount < 10 {
 			s.seekToLiveLastPkt = newDemuxerPkt(pkt)
 			return
 		}
