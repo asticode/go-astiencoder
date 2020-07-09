@@ -68,7 +68,7 @@ type DemuxerOptions struct {
 	Node astiencoder.NodeOptions
 	// Context used to cancel probing
 	ProbeCtx context.Context
-	// If true, the demuxer will not dispatch packets of a stream until the following occurs at least 10 times :
+	// If true, the demuxer will not dispatch packets of a stream until the following occurs at least 3 times :
 	// 2 consecutive packets are received at an interval >= to the delta of their DTS
 	SeekToLive bool
 	// URL of the input
@@ -303,8 +303,8 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 		}
 
 		// Check count
-		// 10 is an arbitrary number
-		if s.seekToLiveCount < 10 {
+		// 3 is an arbitrary number
+		if s.seekToLiveCount < 3 {
 			s.seekToLiveLastPkt = newDemuxerPkt(pkt)
 			return
 		}
