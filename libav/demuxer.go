@@ -28,7 +28,6 @@ type Demuxer struct {
 	interruptRet  *int
 	loop          bool
 	restamper     PktRestamper
-	seekToLive    bool
 	ss            map[int]*demuxerStream
 	statWorkRatio *astikit.DurationPercentageStat
 }
@@ -37,6 +36,7 @@ type demuxerStream struct {
 	ctx               Context
 	emulateRateNextAt time.Time
 	s                 *avformat.Stream
+	seekToLive        bool
 	seekToLiveLastPkt *demuxerPkt
 }
 
@@ -67,8 +67,8 @@ type DemuxerOptions struct {
 	Node astiencoder.NodeOptions
 	// Context used to cancel probing
 	ProbeCtx context.Context
-	// If true, the demuxer will not dispatch packets until, for at least one stream, 2 consecutive packets are received
-	// at an interval >= to the first packet's duration
+	// If true, the demuxer will not dispatch packets of a stream until 2 consecutive packets are received
+	// at an interval >= to the delta of their DTS
 	SeekToLive bool
 	// URL of the input
 	URL string
@@ -86,7 +86,6 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		eh:            eh,
 		emulateRate:   o.EmulateRate,
 		loop:          o.Loop,
-		seekToLive:    o.SeekToLive,
 		ss:            make(map[int]*demuxerStream),
 		statWorkRatio: astikit.NewDurationPercentageStat(),
 	}
@@ -172,8 +171,9 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	// Index streams
 	for _, s := range d.ctxFormat.Streams() {
 		d.ss[s.Index()] = &demuxerStream{
-			ctx: NewContextFromStream(s),
-			s:   s,
+			ctx:        NewContextFromStream(s),
+			s:          s,
+			seekToLive: o.SeekToLive,
 		}
 	}
 	return
@@ -295,13 +295,13 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	}
 
 	// Seek to live
-	if d.seekToLive {
+	if s.seekToLive {
 		// Pkt duration is not always filled therefore we need to rely on <current pkt dts> - <previous pkt dts>
 		if s.seekToLiveLastPkt == nil || s.seekToLiveLastPkt.dts == avutil.AV_NOPTS_VALUE || time.Since(s.seekToLiveLastPkt.receivedAt) < time.Duration(avutil.AvRescaleQ(pkt.Dts()-s.seekToLiveLastPkt.dts, s.s.TimeBase(), nanosecondRational)) {
 			s.seekToLiveLastPkt = newDemuxerPkt(pkt)
 			return
 		}
-		d.seekToLive = false
+		s.seekToLive = false
 	}
 
 	// Restamp
