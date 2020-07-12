@@ -28,6 +28,7 @@ type Demuxer struct {
 	interruptRet  *int
 	loop          bool
 	restamper     PktRestamper
+	seekToLive    bool
 	ss            map[int]*demuxerStream
 	statWorkRatio *astikit.DurationPercentageStat
 }
@@ -87,6 +88,7 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		eh:            eh,
 		emulateRate:   o.EmulateRate,
 		loop:          o.Loop,
+		seekToLive:    o.SeekToLive,
 		ss:            make(map[int]*demuxerStream),
 		statWorkRatio: astikit.NewDurationPercentageStat(),
 	}
@@ -246,6 +248,13 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			*d.interruptRet = 1
 		}()
 
+		// Flush
+		if d.seekToLive {
+			if ret := d.ctxFormat.AvformatFlush(); ret < 0 {
+				emitAvError(d, d.eh, ret, "ctxFormat.AvformatFlush on %s failed", d.ctxFormat.Filename())
+			}
+		}
+
 		// Loop
 		for {
 			// Read frame
@@ -303,8 +312,8 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 		}
 
 		// Check count
-		// 3 is an arbitrary number
-		if s.seekToLiveCount < 3 {
+		// 5 is an arbitrary number
+		if s.seekToLiveCount < 5 {
 			s.seekToLiveLastPkt = newDemuxerPkt(pkt)
 			return
 		}

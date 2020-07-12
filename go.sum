@@ -7,6 +7,8 @@ github.com/asticode/go-astiws v1.2.0 h1:uzF9yPPDPk/5Rar4fCwqjD+6lYsJZROTllXO6PZ+
 github.com/asticode/go-astiws v1.2.0/go.mod h1:xDs2lfL41R0sUXYniZv7SMFY2VedPpfeydCdpaewgik=
 github.com/asticode/goav v1.0.0 h1:fBE6jccXi8fwaNjsyGVGrDBYxSiAR6uHf8VceMcLYbc=
 github.com/asticode/goav v1.0.0/go.mod h1:PbMRIqgyIjrbfX/HUgO1Gn6YalnFDAevQrt8D8sQgvM=
+github.com/asticode/goav v1.1.0 h1:edun1wAJiVLcGq34KYvyQR0sWCJdoL8FnWRnI1W61OA=
+github.com/asticode/goav v1.1.0/go.mod h1:PbMRIqgyIjrbfX/HUgO1Gn6YalnFDAevQrt8D8sQgvM=
 github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/gorilla/websocket v1.4.1 h1:q7AeDBpnBk8AogcD4DSag/Ukw/KV+YhzLj2bP5HvKCM=
