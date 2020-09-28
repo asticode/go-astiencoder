@@ -77,6 +77,7 @@ func (d *PktDumper) addStats() {
 	d.Stater().AddStat(astikit.StatMetadata{
 		Description: "Number of packets coming in per second",
 		Label:       "Incoming rate",
+		Name:        StatNameIncomingRate,
 		Unit:        "pps",
 	}, d.statIncomingRate)
 
@@ -84,6 +85,7 @@ func (d *PktDumper) addStats() {
 	d.Stater().AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent doing some actual work",
 		Label:       "Work ratio",
+		Name:        StatNameWorkRatio,
 		Unit:        "%",
 	}, d.statWorkRatio)
 

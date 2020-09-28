@@ -57,6 +57,7 @@ func (f *Forwarder) addStats() {
 	f.Stater().AddStat(astikit.StatMetadata{
 		Description: "Number of frames coming in per second",
 		Label:       "Incoming rate",
+		Name:        StatNameIncomingRate,
 		Unit:        "fps",
 	}, f.statIncomingRate)
 
@@ -64,6 +65,7 @@ func (f *Forwarder) addStats() {
 	f.Stater().AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent doing some actual work",
 		Label:       "Work ratio",
+		Name:        StatNameWorkRatio,
 		Unit:        "%",
 	}, f.statWorkRatio)
 

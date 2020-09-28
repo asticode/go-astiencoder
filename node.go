@@ -471,6 +471,7 @@ func (n *BaseNode) Stater() *astikit.Stater {
 type EventStat struct {
 	Description string
 	Label       string
+	Name        string
 	Unit        string
 	Value       interface{}
 }
@@ -487,6 +488,7 @@ func (n *BaseNode) statsHandleFunc(stats []astikit.Stat) {
 		ss = append(ss, EventStat{
 			Description: s.Description,
 			Label:       s.Label,
+			Name:        s.Name,
 			Unit:        s.Unit,
 			Value:       s.Value,
 		})

@@ -118,6 +118,7 @@ func (d *frameDispatcher) addStats(s *astikit.Stater) {
 	s.AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent waiting for first child to finish processing dispatched frame",
 		Label:       "Dispatch ratio",
+		Name:        StatNameDispatchRatio,
 		Unit:        "%",
 	}, d.statDispatch)
 }

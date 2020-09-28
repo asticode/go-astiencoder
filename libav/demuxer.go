@@ -187,6 +187,7 @@ func (d *Demuxer) addStats() {
 	d.Stater().AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent doing some actual work",
 		Label:       "Work ratio",
+		Name:        StatNameWorkRatio,
 		Unit:        "%",
 	}, d.statWorkRatio)
 

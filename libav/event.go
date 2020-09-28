@@ -7,3 +7,12 @@ const (
 	// First packet of new node has been dispatched by the rate enforcer
 	RateEnforcerSwitchedOut = "astilibav.rate.enforcer.switched.out"
 )
+
+// Stat names
+const (
+	StatNameAverageDelay  = "astilibav.average.delay"
+	StatNameDispatchRatio = "astilibav.dispatch.ratio"
+	StatNameIncomingRate  = "astilibav.incoming.rate"
+	StatNameRepeatedRate  = "astilibav.repeated.rate"
+	StatNameWorkRatio     = "astilibav.work.ratio"
+)

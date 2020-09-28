@@ -112,6 +112,7 @@ func (d *pktDispatcher) addStats(s *astikit.Stater) {
 	s.AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent waiting for all previous subprocesses to be done",
 		Label:       "Dispatch ratio",
+		Name:        StatNameDispatchRatio,
 		Unit:        "%",
 	}, d.statDispatch)
 }
