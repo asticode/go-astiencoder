@@ -1,6 +1,8 @@
-`astiencoder` is an open source video encoder written in GO and based on [ffmpeg](https://github.com/FFmpeg/FFmpeg) C bindings.
+`astiencoder` is an open source video encoder written in GO and based on [ffmpeg](https://github.com/FFmpeg/FFmpeg) C bindings
 
-Right now this project has only been tested on FFMpeg 4.1.1.
+Right now this project has only been tested on FFMpeg 4.1.1
+
+You need GO >= 1.13
 
 ![screenshot-1](doc/screenshot-1.jpg)
 
