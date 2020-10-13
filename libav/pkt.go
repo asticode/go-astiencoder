@@ -29,20 +29,22 @@ type PktHandlerPayload struct {
 }
 
 type pktDispatcher struct {
-	hs           map[string]PktHandler
-	m            *sync.Mutex
-	p            *pktPool
-	statDispatch *astikit.DurationPercentageStat
-	wg           *sync.WaitGroup
+	hs               map[string]PktHandler
+	m                *sync.Mutex
+	p                *pktPool
+	statDispatch     *astikit.DurationPercentageStat
+	statOutgoingRate *astikit.CounterRateStat
+	wg               *sync.WaitGroup
 }
 
 func newPktDispatcher(c *astikit.Closer) *pktDispatcher {
 	return &pktDispatcher{
-		hs:           make(map[string]PktHandler),
-		m:            &sync.Mutex{},
-		p:            newPktPool(c),
-		statDispatch: astikit.NewDurationPercentageStat(),
-		wg:           &sync.WaitGroup{},
+		hs:               make(map[string]PktHandler),
+		m:                &sync.Mutex{},
+		p:                newPktPool(c),
+		statDispatch:     astikit.NewDurationPercentageStat(),
+		statOutgoingRate: astikit.NewCounterRateStat(),
+		wg:               &sync.WaitGroup{},
 	}
 }
 
@@ -82,6 +84,9 @@ func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, descriptor Descriptor) {
 	d.wait()
 	d.statDispatch.End()
 
+	// Increment outgoing rate
+	d.statOutgoingRate.Add(1)
+
 	// Add subprocesses
 	d.wg.Add(len(hs))
 
@@ -108,6 +113,14 @@ func (d *pktDispatcher) wait() {
 }
 
 func (d *pktDispatcher) addStats(s *astikit.Stater) {
+	// Add outgoing rate
+	s.AddStat(astikit.StatMetadata{
+		Description: "Number of packets going out per second",
+		Label:       "Outgoing rate",
+		Name:        StatNameOutgoingRate,
+		Unit:        "pps",
+	}, d.statOutgoingRate)
+
 	// Add wait time
 	s.AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent waiting for all previous subprocesses to be done",

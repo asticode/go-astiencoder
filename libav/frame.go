@@ -28,25 +28,27 @@ type FrameHandlerPayload struct {
 }
 
 type frameDispatcher struct {
-	c            *astikit.Closer
-	eh           *astiencoder.EventHandler
-	hs           map[string]FrameHandler
-	m            *sync.Mutex
-	n            astiencoder.Node
-	p            *framePool
-	statDispatch *astikit.DurationPercentageStat
-	wg           *sync.WaitGroup
+	c                *astikit.Closer
+	eh               *astiencoder.EventHandler
+	hs               map[string]FrameHandler
+	m                *sync.Mutex
+	n                astiencoder.Node
+	p                *framePool
+	statDispatch     *astikit.DurationPercentageStat
+	statOutgoingRate *astikit.CounterRateStat
+	wg               *sync.WaitGroup
 }
 
 func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, c *astikit.Closer) *frameDispatcher {
 	return &frameDispatcher{
-		eh:           eh,
-		hs:           make(map[string]FrameHandler),
-		m:            &sync.Mutex{},
-		n:            n,
-		p:            newFramePool(c),
-		statDispatch: astikit.NewDurationPercentageStat(),
-		wg:           &sync.WaitGroup{},
+		eh:               eh,
+		hs:               make(map[string]FrameHandler),
+		m:                &sync.Mutex{},
+		n:                n,
+		p:                newFramePool(c),
+		statDispatch:     astikit.NewDurationPercentageStat(),
+		statOutgoingRate: astikit.NewCounterRateStat(),
+		wg:               &sync.WaitGroup{},
 	}
 }
 
@@ -83,6 +85,9 @@ func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
 	d.wait()
 	d.statDispatch.End()
 
+	// Increment outgoing rate
+	d.statOutgoingRate.Add(1)
+
 	// Add subprocesses
 	d.wg.Add(len(hs))
 
@@ -114,6 +119,14 @@ func (d *frameDispatcher) wait() {
 }
 
 func (d *frameDispatcher) addStats(s *astikit.Stater) {
+	// Add outgoing rate
+	s.AddStat(astikit.StatMetadata{
+		Description: "Number of frames going out per second",
+		Label:       "Outgoing rate",
+		Name:        StatNameOutgoingRate,
+		Unit:        "fps",
+	}, d.statOutgoingRate)
+
 	// Add wait time
 	s.AddStat(astikit.StatMetadata{
 		Description: "Percentage of time spent waiting for first child to finish processing dispatched frame",
