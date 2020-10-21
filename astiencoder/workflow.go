@@ -151,7 +151,10 @@ func (b *builder) openOutputs(j Job, bd *buildData) (os map[string]openedOutput,
 			// The writer is created afterwards
 		default:
 			// Create muxer
-			if oo.m, err = astilibav.NewMuxer(astilibav.MuxerOptions{URL: cfg.URL}, bd.eh, bd.c); err != nil {
+			if oo.m, err = astilibav.NewMuxer(astilibav.MuxerOptions{
+				FormatName: cfg.Format,
+				URL:        cfg.URL,
+			}, bd.eh, bd.c); err != nil {
 				err = fmt.Errorf("main: creating muxer failed: %w", err)
 				return
 			}

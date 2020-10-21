@@ -24,6 +24,7 @@ const (
 
 // JobOutput represents a job output
 type JobOutput struct {
+	Format string `json:"format,omitempty"`
 	// Possible values are "default" and "pkt_dump"
 	Type string `json:"type,omitempty"`
 	URL  string `json:"url"`
