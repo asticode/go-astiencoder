@@ -21,16 +21,15 @@ var (
 // Demuxer represents an object capable of demuxing packets out of an input
 type Demuxer struct {
 	*astiencoder.BaseNode
-	ctxFormat     *avformat.Context
-	d             *pktDispatcher
-	eh            *astiencoder.EventHandler
-	emulateRate   bool
-	interruptRet  *int
-	loop          bool
-	restamper     PktRestamper
-	seekToLive    bool
-	ss            map[int]*demuxerStream
-	statWorkRatio *astikit.DurationPercentageStat
+	ctxFormat    *avformat.Context
+	d            *pktDispatcher
+	eh           *astiencoder.EventHandler
+	emulateRate  bool
+	interruptRet *int
+	loop         bool
+	restamper    PktRestamper
+	seekToLive   bool
+	ss           map[int]*demuxerStream
 }
 
 type demuxerStream struct {
@@ -84,15 +83,14 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Create demuxer
 	d = &Demuxer{
-		d:             newPktDispatcher(c),
-		eh:            eh,
-		emulateRate:   o.EmulateRate,
-		loop:          o.Loop,
-		seekToLive:    o.SeekToLive,
-		ss:            make(map[int]*demuxerStream),
-		statWorkRatio: astikit.NewDurationPercentageStat(),
+		eh:          eh,
+		emulateRate: o.EmulateRate,
+		loop:        o.Loop,
+		seekToLive:  o.SeekToLive,
+		ss:          make(map[int]*demuxerStream),
 	}
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)
+	d.d = newPktDispatcher(d, eh, c)
 	d.addStats()
 
 	// If loop is enabled, we need to add a restamper
@@ -183,14 +181,6 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 }
 
 func (d *Demuxer) addStats() {
-	// Add work ratio
-	d.Stater().AddStat(astikit.StatMetadata{
-		Description: "Percentage of time spent doing some actual work",
-		Label:       "Work ratio",
-		Name:        StatNameWorkRatio,
-		Unit:        "%",
-	}, d.statWorkRatio)
-
 	// Add dispatcher stats
 	d.d.addStats(d.Stater())
 }
@@ -239,9 +229,6 @@ func (d *Demuxer) DisconnectForStream(h PktHandler, i *avformat.Stream) {
 // Start starts the demuxer
 func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	d.BaseNode.Start(ctx, t, func(t *astikit.Task) {
-		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
-		defer d.d.wait()
-
 		// Handle interrupt callback
 		*d.interruptRet = 0
 		go func() {
@@ -280,9 +267,7 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	defer d.d.p.put(pkt)
 
 	// Read frame
-	d.statWorkRatio.Begin()
 	if ret := d.ctxFormat.AvReadFrame(pkt); ret < 0 {
-		d.statWorkRatio.End()
 		if ret != avutil.AVERROR_EOF || !d.loop {
 			if ret != avutil.AVERROR_EOF {
 				emitAvError(d, d.eh, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
@@ -297,7 +282,6 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 		}
 		return
 	}
-	d.statWorkRatio.End()
 
 	// Get stream
 	s, ok := d.ss[pkt.StreamIndex()]

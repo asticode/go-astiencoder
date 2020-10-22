@@ -24,7 +24,7 @@ type Encoder struct {
 	eh                 *astiencoder.EventHandler
 	previousDescriptor Descriptor
 	statIncomingRate   *astikit.CounterRateStat
-	statWorkRatio      *astikit.DurationPercentageStat
+	statProcessedRate  *astikit.CounterRateStat
 }
 
 // EncoderOptions represents encoder options
@@ -41,16 +41,13 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Create encoder
 	e = &Encoder{
-		c: astikit.NewChan(astikit.ChanOptions{
-			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
-			ProcessAll:  true,
-		}),
-		d:                newPktDispatcher(c),
-		eh:               eh,
-		statIncomingRate: astikit.NewCounterRateStat(),
-		statWorkRatio:    astikit.NewDurationPercentageStat(),
+		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		eh:                eh,
+		statIncomingRate:  astikit.NewCounterRateStat(),
+		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 	e.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(e), eh)
+	e.d = newPktDispatcher(e, eh, c)
 	e.addStats()
 
 	// Find encoder
@@ -150,13 +147,13 @@ func (e *Encoder) addStats() {
 		Unit:        "fps",
 	}, e.statIncomingRate)
 
-	// Add work ratio
+	// Add processed rate
 	e.Stater().AddStat(astikit.StatMetadata{
-		Description: "Percentage of time spent doing some actual work",
-		Label:       "Work ratio",
-		Name:        StatNameWorkRatio,
-		Unit:        "%",
-	}, e.statWorkRatio)
+		Description: "Number of frames processed per second",
+		Label:       "Processed rate",
+		Name:        StatNameProcessedRate,
+		Unit:        "fps",
+	}, e.statProcessedRate)
 
 	// Add dispatcher stats
 	e.d.addStats(e.Stater())
@@ -186,9 +183,6 @@ func (e *Encoder) Disconnect(h PktHandler) {
 // Start starts the encoder
 func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	e.BaseNode.Start(ctx, t, func(t *astikit.Task) {
-		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
-		defer e.d.wait()
-
 		// Make sure to flush the encoder
 		defer e.flush()
 
@@ -206,12 +200,19 @@ func (e *Encoder) flush() {
 
 // HandleFrame implements the FrameHandler interface
 func (e *Encoder) HandleFrame(p *FrameHandlerPayload) {
+	// Increment incoming rate
+	e.statIncomingRate.Add(1)
+
+	// Add to chan
 	e.c.Add(func() {
 		// Handle pause
 		defer e.HandlePause()
 
-		// Increment incoming rate
-		e.statIncomingRate.Add(1)
+		// Make sure to close frame payload
+		defer p.Close()
+
+		// Increment processed rate
+		e.statProcessedRate.Add(1)
 
 		// Encode
 		e.encode(p)
@@ -229,13 +230,10 @@ func (e *Encoder) encode(p *FrameHandlerPayload) {
 	}
 
 	// Send frame to encoder
-	e.statWorkRatio.Begin()
 	if ret := avcodec.AvcodecSendFrame(e.ctxCodec, p.Frame); ret < 0 {
-		e.statWorkRatio.End()
 		emitAvError(e, e.eh, ret, "avcodec.AvcodecSendFrame failed")
 		return
 	}
-	e.statWorkRatio.End()
 
 	// Loop
 	for {
@@ -252,16 +250,13 @@ func (e *Encoder) receivePkt(p *FrameHandlerPayload) (stop bool) {
 	defer e.d.p.put(pkt)
 
 	// Receive pkt
-	e.statWorkRatio.Begin()
 	if ret := avcodec.AvcodecReceivePacket(e.ctxCodec, pkt); ret < 0 {
-		e.statWorkRatio.End()
 		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
 			emitAvError(e, e.eh, ret, "avcodec.AvcodecReceivePacket failed")
 		}
 		stop = true
 		return
 	}
-	e.statWorkRatio.End()
 
 	// Get descriptor
 	d := p.Descriptor

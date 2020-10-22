@@ -25,26 +25,32 @@ type PktHandlerConnector interface {
 // PktHandlerPayload represents a PktHandler payload
 type PktHandlerPayload struct {
 	Descriptor Descriptor
+	p          *pktPool
 	Pkt        *avcodec.Packet
 }
 
-type pktDispatcher struct {
-	hs               map[string]PktHandler
-	m                *sync.Mutex
-	p                *pktPool
-	statDispatch     *astikit.DurationPercentageStat
-	statOutgoingRate *astikit.CounterRateStat
-	wg               *sync.WaitGroup
+// Close closes the payload
+func (p *PktHandlerPayload) Close() {
+	p.p.put(p.Pkt)
 }
 
-func newPktDispatcher(c *astikit.Closer) *pktDispatcher {
+type pktDispatcher struct {
+	eh               *astiencoder.EventHandler
+	hs               map[string]PktHandler
+	m                *sync.Mutex
+	n                astiencoder.Node
+	p                *pktPool
+	statOutgoingRate *astikit.CounterRateStat
+}
+
+func newPktDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, c *astikit.Closer) *pktDispatcher {
 	return &pktDispatcher{
+		eh:               eh,
 		hs:               make(map[string]PktHandler),
 		m:                &sync.Mutex{},
+		n:                n,
 		p:                newPktPool(c),
-		statDispatch:     astikit.NewDurationPercentageStat(),
 		statOutgoingRate: astikit.NewCounterRateStat(),
-		wg:               &sync.WaitGroup{},
 	}
 }
 
@@ -60,8 +66,27 @@ func (d *pktDispatcher) delHandler(h PktHandler) {
 	delete(d.hs, h.Metadata().Name)
 }
 
+func (d *pktDispatcher) newPktHandlerPayload(pkt *avcodec.Packet, descriptor Descriptor) (p *PktHandlerPayload, err error) {
+	// Create payload
+	p = &PktHandlerPayload{
+		Descriptor: descriptor,
+		p:          d.p,
+	}
+
+	// Copy pkt
+	p.Pkt = d.p.get()
+	if ret := p.Pkt.AvPacketRef(pkt); ret < 0 {
+		err = fmt.Errorf("astilibav: AvPacketRef failed: %w", NewAvError(ret))
+		return
+	}
+	return
+}
+
 func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, descriptor Descriptor) {
-	// Copy handlers
+	// Increment outgoing rate
+	d.statOutgoingRate.Add(1)
+
+	// Get handlers
 	d.m.Lock()
 	var hs []PktHandler
 	for _, h := range d.hs {
@@ -77,39 +102,18 @@ func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, descriptor Descriptor) {
 		return
 	}
 
-	// Wait for all previous subprocesses to be done
-	// In case a brave soul tries to update this logic so that several packet can be sent to handlers in parallel, bare
-	// in mind that packets must be sent in order whereas sending packets in goroutines doesn't keep this order
-	d.statDispatch.Begin()
-	d.wait()
-	d.statDispatch.End()
-
-	// Increment outgoing rate
-	d.statOutgoingRate.Add(1)
-
-	// Add subprocesses
-	d.wg.Add(len(hs))
-
 	// Loop through handlers
 	for _, h := range hs {
-		// Copy pkt
-		hPkt := d.p.get()
-		hPkt.AvPacketRef(pkt)
+		// Create payload
+		p, err := d.newPktHandlerPayload(pkt, descriptor)
+		if err != nil {
+			d.eh.Emit(astiencoder.EventError(d.n, fmt.Errorf("astilibav: creating pkt handler payload failed: %w", err)))
+			continue
+		}
 
 		// Handle pkt
-		go func(h PktHandler) {
-			defer d.wg.Done()
-			defer d.p.put(hPkt)
-			h.HandlePkt(&PktHandlerPayload{
-				Descriptor: descriptor,
-				Pkt:        hPkt,
-			})
-		}(h)
+		h.HandlePkt(p)
 	}
-}
-
-func (d *pktDispatcher) wait() {
-	d.wg.Wait()
 }
 
 func (d *pktDispatcher) addStats(s *astikit.Stater) {
@@ -120,14 +124,6 @@ func (d *pktDispatcher) addStats(s *astikit.Stater) {
 		Name:        StatNameOutgoingRate,
 		Unit:        "pps",
 	}, d.statOutgoingRate)
-
-	// Add wait time
-	s.AddStat(astikit.StatMetadata{
-		Description: "Percentage of time spent waiting for all previous subprocesses to be done",
-		Label:       "Dispatch ratio",
-		Name:        StatNameDispatchRatio,
-		Unit:        "%",
-	}, d.statDispatch)
 }
 
 // PktCond represents an object that can decide whether to use a pkt

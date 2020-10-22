@@ -19,18 +19,18 @@ var countFilterer uint64
 // Filterer represents an object capable of applying a filter to frames
 type Filterer struct {
 	*astiencoder.BaseNode
-	bufferSinkCtx    *avfilter.Context
-	bufferSrcCtxs    map[astiencoder.Node][]*avfilter.Context
-	c                *astikit.Chan
-	cl               *astikit.Closer
-	d                *frameDispatcher
-	eh               *astiencoder.EventHandler
-	emulatePeriod    time.Duration
-	g                *avfilter.Graph
-	outputCtx        Context
-	restamper        FrameRestamper
-	statIncomingRate *astikit.CounterRateStat
-	statWorkRatio    *astikit.DurationPercentageStat
+	bufferSinkCtx     *avfilter.Context
+	bufferSrcCtxs     map[astiencoder.Node][]*avfilter.Context
+	c                 *astikit.Chan
+	cl                *astikit.Closer
+	d                 *frameDispatcher
+	eh                *astiencoder.EventHandler
+	emulatePeriod     time.Duration
+	g                 *avfilter.Graph
+	outputCtx         Context
+	restamper         FrameRestamper
+	statIncomingRate  *astikit.CounterRateStat
+	statProcessedRate *astikit.CounterRateStat
 }
 
 // FiltererOptions represents filterer options
@@ -51,18 +51,15 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 
 	// Create filterer
 	f = &Filterer{
-		bufferSrcCtxs: make(map[astiencoder.Node][]*avfilter.Context),
-		c: astikit.NewChan(astikit.ChanOptions{
-			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
-			ProcessAll:  true,
-		}),
-		cl:               c.NewChild(),
-		eh:               eh,
-		g:                avfilter.AvfilterGraphAlloc(),
-		outputCtx:        o.OutputCtx,
-		restamper:        o.Restamper,
-		statIncomingRate: astikit.NewCounterRateStat(),
-		statWorkRatio:    astikit.NewDurationPercentageStat(),
+		bufferSrcCtxs:     make(map[astiencoder.Node][]*avfilter.Context),
+		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		cl:                c.NewChild(),
+		eh:                eh,
+		g:                 avfilter.AvfilterGraphAlloc(),
+		outputCtx:         o.OutputCtx,
+		restamper:         o.Restamper,
+		statIncomingRate:  astikit.NewCounterRateStat(),
+		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 	f.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(f), eh)
 	f.d = newFrameDispatcher(f, eh, f.cl)
@@ -194,18 +191,18 @@ func (f *Filterer) addStats() {
 		Unit:        "fps",
 	}, f.statIncomingRate)
 
-	// Add work ratio
+	// Add processed rate
 	f.Stater().AddStat(astikit.StatMetadata{
-		Description: "Percentage of time spent doing some actual work",
-		Label:       "Work ratio",
-		Name:        StatNameWorkRatio,
-		Unit:        "%",
-	}, f.statWorkRatio)
+		Description: "Number of frames processed per second",
+		Label:       "Processed rate",
+		Name:        StatNameProcessedRate,
+		Unit:        "fps",
+	}, f.statProcessedRate)
 
 	// Add dispatcher stats
 	f.d.addStats(f.Stater())
 
-	// Add queue stats
+	// Add chan stats
 	f.c.AddStats(f.Stater())
 }
 
@@ -235,9 +232,6 @@ func (f *Filterer) Disconnect(h FrameHandler) {
 // Start starts the filterer
 func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	f.BaseNode.Start(ctx, t, func(t *astikit.Task) {
-		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
-		defer f.d.wait()
-
 		// In case there are no inputs, we emulate frames coming in
 		if len(f.bufferSrcCtxs) == 0 {
 			nextAt := time.Now()
@@ -280,12 +274,19 @@ func (f *Filterer) tickFunc(nextAt *time.Time, desc Descriptor) (stop bool) {
 
 // HandleFrame implements the FrameHandler interface
 func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
+	// Increment incoming rate
+	f.statIncomingRate.Add(1)
+
+	// Add to chan
 	f.c.Add(func() {
 		// Handle pause
 		defer f.HandlePause()
 
-		// Increment incoming rate
-		f.statIncomingRate.Add(1)
+		// Make sure to close frame payload
+		defer p.Close()
+
+		// Increment processed rate
+		f.statProcessedRate.Add(1)
 
 		// Retrieve buffer ctxs
 		bufferSrcCtxs, ok := f.bufferSrcCtxs[p.Node]
@@ -296,13 +297,10 @@ func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
 		// Loop through buffer ctxs
 		for _, bufferSrcCtx := range bufferSrcCtxs {
 			// Push frame in graph
-			f.statWorkRatio.Begin()
 			if ret := f.g.AvBuffersrcAddFrameFlags(bufferSrcCtx, p.Frame, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
-				f.statWorkRatio.End()
 				emitAvError(f, f.eh, ret, "f.g.AvBuffersrcAddFrameFlags failed")
 				return
 			}
-			f.statWorkRatio.End()
 		}
 
 		// Loop
@@ -321,22 +319,17 @@ func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 	defer f.d.p.put(fm)
 
 	// Pull filtered frame from graph
-	f.statWorkRatio.Begin()
 	if ret := f.g.AvBuffersinkGetFrame(f.bufferSinkCtx, fm); ret < 0 {
-		f.statWorkRatio.End()
 		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
 			emitAvError(f, f.eh, ret, "f.g.AvBuffersinkGetFrame failed")
 		}
 		stop = true
 		return
 	}
-	f.statWorkRatio.End()
 
 	// Restamp
 	if f.restamper != nil {
-		f.statWorkRatio.Begin()
 		f.restamper.Restamp(fm)
-		f.statWorkRatio.End()
 	}
 
 	// Dispatch frame

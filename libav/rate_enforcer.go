@@ -18,24 +18,24 @@ var countRateEnforcer uint64
 // RateEnforcer represents an object capable of enforcing rate based on PTS
 type RateEnforcer struct {
 	*astiencoder.BaseNode
-	buf              []*rateEnforcerItem
-	c                *astikit.Chan
-	d                *frameDispatcher
-	eh               *astiencoder.EventHandler
-	m                *sync.Mutex
-	n                astiencoder.Node
-	outputCtx        Context
-	p                *framePool
-	period           time.Duration
-	previousItem     *rateEnforcerItem
-	restamper        FrameRestamper
-	slotsCount       int
-	slots            []*rateEnforcerSlot
-	statDelayAvg     *astikit.CounterAvgStat
-	statIncomingRate *astikit.CounterRateStat
-	statRepeatedRate *astikit.CounterRateStat
-	statWorkRatio    *astikit.DurationPercentageStat
-	timeBase         avutil.Rational
+	buf               []*rateEnforcerItem
+	c                 *astikit.Chan
+	d                 *frameDispatcher
+	eh                *astiencoder.EventHandler
+	m                 *sync.Mutex
+	n                 astiencoder.Node
+	outputCtx         Context
+	p                 *framePool
+	period            time.Duration
+	previousItem      *rateEnforcerItem
+	restamper         FrameRestamper
+	slotsCount        int
+	slots             []*rateEnforcerSlot
+	statDelayAvg      *astikit.CounterAvgStat
+	statIncomingRate  *astikit.CounterRateStat
+	statProcessedRate *astikit.CounterRateStat
+	statRepeatedRate  *astikit.CounterRateStat
+	timeBase          avutil.Rational
 }
 
 type rateEnforcerSlot struct {
@@ -69,23 +69,20 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 
 	// Create rate enforcer
 	r = &RateEnforcer{
-		c: astikit.NewChan(astikit.ChanOptions{
-			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
-			ProcessAll:  true,
-		}),
-		eh:               eh,
-		m:                &sync.Mutex{},
-		outputCtx:        o.OutputCtx,
-		p:                newFramePool(c),
-		period:           time.Duration(float64(1e9) / o.FrameRate.ToDouble()),
-		restamper:        o.Restamper,
-		slots:            []*rateEnforcerSlot{nil},
-		slotsCount:       int(math.Max(float64(o.Delay), 1)),
-		statDelayAvg:     astikit.NewCounterAvgStat(),
-		statIncomingRate: astikit.NewCounterRateStat(),
-		statRepeatedRate: astikit.NewCounterRateStat(),
-		statWorkRatio:    astikit.NewDurationPercentageStat(),
-		timeBase:         avutil.NewRational(o.FrameRate.Den(), o.FrameRate.Num()),
+		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		eh:                eh,
+		m:                 &sync.Mutex{},
+		outputCtx:         o.OutputCtx,
+		p:                 newFramePool(c),
+		period:            time.Duration(float64(1e9) / o.FrameRate.ToDouble()),
+		restamper:         o.Restamper,
+		slots:             []*rateEnforcerSlot{nil},
+		slotsCount:        int(math.Max(float64(o.Delay), 1)),
+		statDelayAvg:      astikit.NewCounterAvgStat(),
+		statIncomingRate:  astikit.NewCounterRateStat(),
+		statProcessedRate: astikit.NewCounterRateStat(),
+		statRepeatedRate:  astikit.NewCounterRateStat(),
+		timeBase:          avutil.NewRational(o.FrameRate.Den(), o.FrameRate.Num()),
 	}
 	r.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(r), eh)
 	r.d = newFrameDispatcher(r, eh, c)
@@ -110,6 +107,14 @@ func (r *RateEnforcer) addStats() {
 		Unit:        "fps",
 	}, r.statIncomingRate)
 
+	// Add processed rate
+	r.Stater().AddStat(astikit.StatMetadata{
+		Description: "Number of frames processed per second",
+		Label:       "Processed rate",
+		Name:        StatNameProcessedRate,
+		Unit:        "fps",
+	}, r.statProcessedRate)
+
 	// Add repeated rate
 	r.Stater().AddStat(astikit.StatMetadata{
 		Description: "Number of frames repeated per second",
@@ -117,14 +122,6 @@ func (r *RateEnforcer) addStats() {
 		Name:        StatNameRepeatedRate,
 		Unit:        "fps",
 	}, r.statRepeatedRate)
-
-	// Add work ratio
-	r.Stater().AddStat(astikit.StatMetadata{
-		Description: "Percentage of time spent doing some actual work",
-		Label:       "Work ratio",
-		Name:        StatNameWorkRatio,
-		Unit:        "%",
-	}, r.statWorkRatio)
 
 	// Add dispatcher stats
 	r.d.addStats(r.Stater())
@@ -166,9 +163,6 @@ func (r *RateEnforcer) Disconnect(h FrameHandler) {
 // Start starts the rate enforcer
 func (r *RateEnforcer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	r.BaseNode.Start(ctx, t, func(t *astikit.Task) {
-		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
-		defer r.d.wait()
-
 		// Make sure to stop the chan properly
 		defer r.c.Stop()
 
@@ -186,12 +180,19 @@ func (r *RateEnforcer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) 
 
 // HandleFrame implements the FrameHandler interface
 func (r *RateEnforcer) HandleFrame(p *FrameHandlerPayload) {
+	// Increment incoming rate
+	r.statIncomingRate.Add(1)
+
+	// Add to chan
 	r.c.Add(func() {
 		// Handle pause
 		defer r.HandlePause()
 
-		// Increment incoming rate
-		r.statIncomingRate.Add(1)
+		// Make sure to close frame payload
+		defer p.Close()
+
+		// Increment processed rate
+		r.statProcessedRate.Add(1)
 
 		// Lock
 		r.m.Lock()

@@ -14,12 +14,12 @@ var countForwarder uint64
 // Forwarder represents an object capable of forwarding frames
 type Forwarder struct {
 	*astiencoder.BaseNode
-	c                *astikit.Chan
-	d                *frameDispatcher
-	outputCtx        Context
-	restamper        FrameRestamper
-	statIncomingRate *astikit.CounterRateStat
-	statWorkRatio    *astikit.DurationPercentageStat
+	c                 *astikit.Chan
+	d                 *frameDispatcher
+	outputCtx         Context
+	restamper         FrameRestamper
+	statIncomingRate  *astikit.CounterRateStat
+	statProcessedRate *astikit.CounterRateStat
 }
 
 // ForwarderOptions represents forwarder options
@@ -37,14 +37,11 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 
 	// Create forwarder
 	f = &Forwarder{
-		c: astikit.NewChan(astikit.ChanOptions{
-			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
-			ProcessAll:  true,
-		}),
-		outputCtx:        o.OutputCtx,
-		restamper:        o.Restamper,
-		statIncomingRate: astikit.NewCounterRateStat(),
-		statWorkRatio:    astikit.NewDurationPercentageStat(),
+		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		outputCtx:         o.OutputCtx,
+		restamper:         o.Restamper,
+		statIncomingRate:  astikit.NewCounterRateStat(),
+		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 	f.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(f), eh)
 	f.d = newFrameDispatcher(f, eh, c)
@@ -61,13 +58,13 @@ func (f *Forwarder) addStats() {
 		Unit:        "fps",
 	}, f.statIncomingRate)
 
-	// Add work ratio
+	// Add processed rate
 	f.Stater().AddStat(astikit.StatMetadata{
-		Description: "Percentage of time spent doing some actual work",
-		Label:       "Work ratio",
-		Name:        StatNameWorkRatio,
-		Unit:        "%",
-	}, f.statWorkRatio)
+		Description: "Number of frames processed per second",
+		Label:       "Processed rate",
+		Name:        StatNameProcessedRate,
+		Unit:        "fps",
+	}, f.statProcessedRate)
 
 	// Add dispatcher stats
 	f.d.addStats(f.Stater())
@@ -102,9 +99,6 @@ func (f *Forwarder) Disconnect(h FrameHandler) {
 // Start starts the forwarder
 func (f *Forwarder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	f.BaseNode.Start(ctx, t, func(t *astikit.Task) {
-		// Make sure to wait for all dispatcher subprocesses to be done so that they are properly closed
-		defer f.d.wait()
-
 		// Make sure to stop the chan properly
 		defer f.c.Stop()
 
@@ -115,18 +109,23 @@ func (f *Forwarder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 // HandleFrame implements the FrameHandler interface
 func (f *Forwarder) HandleFrame(p *FrameHandlerPayload) {
+	// Increment incoming rate
+	f.statIncomingRate.Add(1)
+
+	// Add to chan
 	f.c.Add(func() {
 		// Handle pause
 		defer f.HandlePause()
 
-		// Increment incoming rate
-		f.statIncomingRate.Add(1)
+		// Make sure to close frame payload
+		defer p.Close()
+
+		// Increment processed rate
+		f.statProcessedRate.Add(1)
 
 		// Restamp
 		if f.restamper != nil {
-			f.statWorkRatio.Begin()
 			f.restamper.Restamp(p.Frame)
-			f.statWorkRatio.End()
 		}
 
 		// Dispatch frame

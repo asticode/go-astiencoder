@@ -1,6 +1,7 @@
 package astilibav
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/asticode/go-astiencoder"
@@ -25,18 +26,21 @@ type FrameHandlerPayload struct {
 	Descriptor Descriptor
 	Frame      *avutil.Frame
 	Node       astiencoder.Node
+	p          *framePool
+}
+
+// Close closes the payload
+func (p *FrameHandlerPayload) Close() {
+	p.p.put(p.Frame)
 }
 
 type frameDispatcher struct {
-	c                *astikit.Closer
 	eh               *astiencoder.EventHandler
 	hs               map[string]FrameHandler
-	m                *sync.Mutex
+	m                *sync.Mutex // Locks hs
 	n                astiencoder.Node
 	p                *framePool
-	statDispatch     *astikit.DurationPercentageStat
 	statOutgoingRate *astikit.CounterRateStat
-	wg               *sync.WaitGroup
 }
 
 func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, c *astikit.Closer) *frameDispatcher {
@@ -46,9 +50,7 @@ func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, c *ast
 		m:                &sync.Mutex{},
 		n:                n,
 		p:                newFramePool(c),
-		statDispatch:     astikit.NewDurationPercentageStat(),
 		statOutgoingRate: astikit.NewCounterRateStat(),
-		wg:               &sync.WaitGroup{},
 	}
 }
 
@@ -64,8 +66,28 @@ func (d *frameDispatcher) delHandler(h FrameHandler) {
 	delete(d.hs, h.Metadata().Name)
 }
 
+func (d *frameDispatcher) newFrameHandlerPayload(f *avutil.Frame, descriptor Descriptor) (p *FrameHandlerPayload, err error) {
+	// Create payload
+	p = &FrameHandlerPayload{
+		Descriptor: descriptor,
+		Node:       d.n,
+		p:          d.p,
+	}
+
+	// Copy frame
+	p.Frame = d.p.get()
+	if ret := avutil.AvFrameRef(p.Frame, f); ret < 0 {
+		err = fmt.Errorf("astilibav: avutil.AvFrameRef failed: %w", NewAvError(ret))
+		return
+	}
+	return
+}
+
 func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
-	// Copy handlers
+	// Increment outgoing rate
+	d.statOutgoingRate.Add(1)
+
+	// Get handlers
 	d.m.Lock()
 	var hs []FrameHandler
 	for _, h := range d.hs {
@@ -78,44 +100,18 @@ func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
 		return
 	}
 
-	// Wait for all previous subprocesses to be done
-	// In case a brave soul tries to update this logic so that several packet can be sent to handlers in parallel, bare
-	// in mind that packets must be sent in order whereas sending packets in goroutines doesn't keep this order
-	d.statDispatch.Begin()
-	d.wait()
-	d.statDispatch.End()
-
-	// Increment outgoing rate
-	d.statOutgoingRate.Add(1)
-
-	// Add subprocesses
-	d.wg.Add(len(hs))
-
 	// Loop through handlers
 	for _, h := range hs {
-		// Copy frame
-		hF := d.p.get()
-		if ret := avutil.AvFrameRef(hF, f); ret < 0 {
-			emitAvError(d, d.eh, ret, "avutil.AvFrameRef failed")
-			d.wg.Done()
+		// Create payload
+		p, err := d.newFrameHandlerPayload(f, descriptor)
+		if err != nil {
+			d.eh.Emit(astiencoder.EventError(d.n, fmt.Errorf("astilibav: creating frame handler payload failed: %w", err)))
 			continue
 		}
 
 		// Handle frame
-		go func(h FrameHandler) {
-			defer d.wg.Done()
-			defer d.p.put(hF)
-			h.HandleFrame(&FrameHandlerPayload{
-				Descriptor: descriptor,
-				Frame:      hF,
-				Node:       d.n,
-			})
-		}(h)
+		h.HandleFrame(p)
 	}
-}
-
-func (d *frameDispatcher) wait() {
-	d.wg.Wait()
 }
 
 func (d *frameDispatcher) addStats(s *astikit.Stater) {
@@ -126,14 +122,6 @@ func (d *frameDispatcher) addStats(s *astikit.Stater) {
 		Name:        StatNameOutgoingRate,
 		Unit:        "fps",
 	}, d.statOutgoingRate)
-
-	// Add wait time
-	s.AddStat(astikit.StatMetadata{
-		Description: "Percentage of time spent waiting for first child to finish processing dispatched frame",
-		Label:       "Dispatch ratio",
-		Name:        StatNameDispatchRatio,
-		Unit:        "%",
-	}, d.statDispatch)
 }
 
 type framePool struct {

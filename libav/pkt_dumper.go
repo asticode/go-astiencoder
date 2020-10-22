@@ -20,13 +20,13 @@ var countPktDumper uint64
 // PktDumper represents an object capable of dumping packets
 type PktDumper struct {
 	*astiencoder.BaseNode
-	c                *astikit.Chan
-	count            uint32
-	eh               *astiencoder.EventHandler
-	o                PktDumperOptions
-	statIncomingRate *astikit.CounterRateStat
-	statWorkRatio    *astikit.DurationPercentageStat
-	t                *template.Template
+	c                 *astikit.Chan
+	count             uint32
+	eh                *astiencoder.EventHandler
+	o                 PktDumperOptions
+	statIncomingRate  *astikit.CounterRateStat
+	statProcessedRate *astikit.CounterRateStat
+	t                 *template.Template
 }
 
 // PktDumperOptions represents pkt dumper options
@@ -50,14 +50,11 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler) (d *PktDumpe
 
 	// Create pkt dumper
 	d = &PktDumper{
-		c: astikit.NewChan(astikit.ChanOptions{
-			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
-			ProcessAll:  true,
-		}),
-		eh:               eh,
-		o:                o,
-		statIncomingRate: astikit.NewCounterRateStat(),
-		statWorkRatio:    astikit.NewDurationPercentageStat(),
+		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		eh:                eh,
+		o:                 o,
+		statIncomingRate:  astikit.NewCounterRateStat(),
+		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)
 	d.addStats()
@@ -81,13 +78,13 @@ func (d *PktDumper) addStats() {
 		Unit:        "pps",
 	}, d.statIncomingRate)
 
-	// Add work ratio
+	// Add processed rate
 	d.Stater().AddStat(astikit.StatMetadata{
-		Description: "Percentage of time spent doing some actual work",
-		Label:       "Work ratio",
-		Name:        StatNameWorkRatio,
-		Unit:        "%",
-	}, d.statWorkRatio)
+		Description: "Number of packets processed per second",
+		Label:       "Processed rate",
+		Name:        StatNameProcessedRate,
+		Unit:        "pps",
+	}, d.statProcessedRate)
 
 	// Add chan stats
 	d.c.AddStats(d.Stater())
@@ -106,12 +103,19 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 // HandlePkt implements the PktHandler interface
 func (d *PktDumper) HandlePkt(p *PktHandlerPayload) {
+	// Increment incoming rate
+	d.statIncomingRate.Add(1)
+
+	// Add to chan
 	d.c.Add(func() {
 		// Handle pause
 		defer d.HandlePause()
 
-		// Increment incoming rate
-		d.statIncomingRate.Add(1)
+		// Make sure to close pkt payload
+		defer p.Close()
+
+		// Increment processed rate
+		d.statProcessedRate.Add(1)
 
 		// Get pattern
 		var args PktDumperHandlerArgs
@@ -125,27 +129,21 @@ func (d *PktDumper) HandlePkt(p *PktHandlerPayload) {
 			d.o.Data["stream_idx"] = p.Pkt.StreamIndex()
 
 			// Execute template
-			d.statWorkRatio.Begin()
 			buf := &bytes.Buffer{}
 			if err := d.t.Execute(buf, d.o.Data); err != nil {
-				d.statWorkRatio.End()
 				d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: executing template %s with data %+v failed: %w", d.o.Pattern, d.o.Data, err)))
 				return
 			}
-			d.statWorkRatio.End()
 
 			// Add to args
 			args.Pattern = buf.String()
 		}
 
 		// Dump
-		d.statWorkRatio.Begin()
 		if err := d.o.Handler(p.Pkt, args); err != nil {
-			d.statWorkRatio.End()
 			d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: pkt dump func with args %+v failed: %w", args, err)))
 			return
 		}
-		d.statWorkRatio.End()
 	})
 }
 

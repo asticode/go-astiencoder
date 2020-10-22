@@ -1,8 +1,8 @@
 github.com/BurntSushi/toml v0.3.1 h1:WXkYYl6Yr3qBf1K79EBnL4mak0OimBfB0XUf9Vl28OQ=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/asticode/go-astikit v0.1.0/go.mod h1:h4ly7idim1tNhaVkdVBeXQZEE3L0xblP7fCWbgwipF0=
-github.com/asticode/go-astikit v0.9.1 h1:MtugT/oCfBW9w9+R2mnWCxNYCR/EJbs0TzY8AgEdRWo=
-github.com/asticode/go-astikit v0.9.1/go.mod h1:h4ly7idim1tNhaVkdVBeXQZEE3L0xblP7fCWbgwipF0=
+github.com/asticode/go-astikit v0.10.2 h1:SfteifOv5z31KrjGfY+2YVLp0UyuX8hgquxJn3nfD/s=
+github.com/asticode/go-astikit v0.10.2/go.mod h1:h4ly7idim1tNhaVkdVBeXQZEE3L0xblP7fCWbgwipF0=
 github.com/asticode/go-astiws v1.2.0 h1:uzF9yPPDPk/5Rar4fCwqjD+6lYsJZROTllXO6PZ+oh0=
 github.com/asticode/go-astiws v1.2.0/go.mod h1:xDs2lfL41R0sUXYniZv7SMFY2VedPpfeydCdpaewgik=
 github.com/asticode/goav v1.1.0 h1:edun1wAJiVLcGq34KYvyQR0sWCJdoL8FnWRnI1W61OA=

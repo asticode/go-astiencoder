@@ -11,9 +11,9 @@ const (
 // Stat names
 const (
 	StatNameAverageDelay  = "astilibav.average.delay"
-	StatNameDispatchRatio = "astilibav.dispatch.ratio"
 	StatNameIncomingRate  = "astilibav.incoming.rate"
 	StatNameOutgoingRate  = "astilibav.outgoing.rate"
+	StatNameProcessedRate = "astilibav.processed.rate"
 	StatNameRepeatedRate  = "astilibav.repeated.rate"
 	StatNameWorkRatio     = "astilibav.work.ratio"
 )

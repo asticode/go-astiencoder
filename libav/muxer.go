@@ -17,14 +17,14 @@ var countMuxer uint64
 // Muxer represents an object capable of muxing packets into an output
 type Muxer struct {
 	*astiencoder.BaseNode
-	c                *astikit.Chan
-	cl               *astikit.Closer
-	ctxFormat        *avformat.Context
-	eh               *astiencoder.EventHandler
-	o                *sync.Once
-	restamper        PktRestamper
-	statIncomingRate *astikit.CounterRateStat
-	statWorkRatio    *astikit.DurationPercentageStat
+	c                 *astikit.Chan
+	cl                *astikit.Closer
+	ctxFormat         *avformat.Context
+	eh                *astiencoder.EventHandler
+	o                 *sync.Once
+	restamper         PktRestamper
+	statIncomingRate  *astikit.CounterRateStat
+	statProcessedRate *astikit.CounterRateStat
 }
 
 // MuxerOptions represents muxer options
@@ -44,16 +44,13 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (
 
 	// Create muxer
 	m = &Muxer{
-		c: astikit.NewChan(astikit.ChanOptions{
-			AddStrategy: astikit.ChanAddStrategyBlockWhenStarted,
-			ProcessAll:  true,
-		}),
-		cl:               c,
-		eh:               eh,
-		o:                &sync.Once{},
-		restamper:        o.Restamper,
-		statIncomingRate: astikit.NewCounterRateStat(),
-		statWorkRatio:    astikit.NewDurationPercentageStat(),
+		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		cl:                c,
+		eh:                eh,
+		o:                 &sync.Once{},
+		restamper:         o.Restamper,
+		statIncomingRate:  astikit.NewCounterRateStat(),
+		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 	m.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(m), eh)
 	m.addStats()
@@ -105,13 +102,13 @@ func (m *Muxer) addStats() {
 		Unit:        "pps",
 	}, m.statIncomingRate)
 
-	// Add work ratio
+	// Add processed rate
 	m.Stater().AddStat(astikit.StatMetadata{
-		Description: "Percentage of time spent doing some actual work",
-		Label:       "Work ratio",
-		Name:        StatNameWorkRatio,
-		Unit:        "%",
-	}, m.statWorkRatio)
+		Description: "Number of packets processed per second",
+		Label:       "Processed rate",
+		Name:        StatNameProcessedRate,
+		Unit:        "pps",
+	}, m.statProcessedRate)
 
 	// Add chan stats
 	m.c.AddStats(m.Stater())
@@ -165,12 +162,19 @@ func (m *Muxer) NewPktHandler(o *avformat.Stream) *MuxerPktHandler {
 
 // HandlePkt implements the PktHandler interface
 func (h *MuxerPktHandler) HandlePkt(p *PktHandlerPayload) {
+	// Increment incoming rate
+	h.statIncomingRate.Add(1)
+
+	// Add to chan
 	h.c.Add(func() {
 		// Handle pause
 		defer h.HandlePause()
 
-		// Increment incoming rate
-		h.statIncomingRate.Add(1)
+		// Make sure to close pkt payload
+		defer p.Close()
+
+		// Increment processed rate
+		h.statProcessedRate.Add(1)
 
 		// Rescale timestamps
 		p.Pkt.AvPacketRescaleTs(p.Descriptor.TimeBase(), h.o.TimeBase())
@@ -184,12 +188,9 @@ func (h *MuxerPktHandler) HandlePkt(p *PktHandlerPayload) {
 		}
 
 		// Write frame
-		h.statWorkRatio.Begin()
 		if ret := h.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(p.Pkt))); ret < 0 {
-			h.statWorkRatio.End()
 			emitAvError(h, h.eh, ret, "h.ctxFormat.AvInterleavedWriteFrame failed")
 			return
 		}
-		h.statWorkRatio.End()
 	})
 }
