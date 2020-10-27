@@ -124,13 +124,17 @@ func (d *PktDumper) HandlePkt(p *PktHandlerPayload) {
 			c := atomic.AddUint32(&d.count, 1)
 
 			// Create data
-			d.o.Data["count"] = c
-			d.o.Data["pts"] = p.Pkt.Pts()
-			d.o.Data["stream_idx"] = p.Pkt.StreamIndex()
+			data := make(map[string]interface{})
+			if d.o.Data != nil {
+				data = d.o.Data
+			}
+			data["count"] = c
+			data["pts"] = p.Pkt.Pts()
+			data["stream_idx"] = p.Pkt.StreamIndex()
 
 			// Execute template
 			buf := &bytes.Buffer{}
-			if err := d.t.Execute(buf, d.o.Data); err != nil {
+			if err := d.t.Execute(buf, data); err != nil {
 				d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: executing template %s with data %+v failed: %w", d.o.Pattern, d.o.Data, err)))
 				return
 			}

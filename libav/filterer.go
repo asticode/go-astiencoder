@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -129,14 +131,24 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		bufferSrc := bufferFunc()
 
 		// Create filter in args
-		var args string
+		var args []string
 		switch ctx.CodecType {
 		case avcodec.AVMEDIA_TYPE_AUDIO:
-			args = fmt.Sprintf("channel_layout=%s:sample_fmt=%s:time_base=%d/%d:sample_rate=%d", avutil.AvGetChannelLayoutString(ctx.ChannelLayout), avutil.AvGetSampleFmtName(int(ctx.SampleFmt)), ctx.TimeBase.Num(), ctx.TimeBase.Den(), ctx.SampleRate)
+			args = []string{
+				"channel_layout=" + avutil.AvGetChannelLayoutString(ctx.ChannelLayout),
+				"sample_fmt=" + avutil.AvGetSampleFmtName(int(ctx.SampleFmt)),
+				"sample_rate=" + strconv.Itoa(ctx.SampleRate),
+				"time_base=" + ctx.TimeBase.String(),
+			}
 		case avcodec.AVMEDIA_TYPE_VIDEO:
-			args = fmt.Sprintf("video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d", ctx.Width, ctx.Height, ctx.PixelFormat, ctx.TimeBase.Num(), ctx.TimeBase.Den(), ctx.SampleAspectRatio.Num(), ctx.SampleAspectRatio.Den())
+			args = []string{
+				"pix_fmt=" + strconv.Itoa(int(ctx.PixelFormat)),
+				"pixel_aspect=" + ctx.SampleAspectRatio.String(),
+				"time_base=" + ctx.TimeBase.String(),
+				"video_size=" + strconv.Itoa(ctx.Width) + "x" + strconv.Itoa(ctx.Height),
+			}
 			if ctx.FrameRate.Num() > 0 {
-				args += fmt.Sprintf(":frame_rate=%d/%d", ctx.FrameRate.Num(), ctx.FrameRate.Den())
+				args = append(args, "frame_rate="+ctx.FrameRate.String())
 			}
 		default:
 			err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", ctx.CodecType)
@@ -145,7 +157,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 
 		// Create ctx
 		var bufferSrcCtx *avfilter.Context
-		if ret := avfilter.AvfilterGraphCreateFilter(&bufferSrcCtx, bufferSrc, "in", args, nil, f.g); ret < 0 {
+		if ret := avfilter.AvfilterGraphCreateFilter(&bufferSrcCtx, bufferSrc, "in", strings.Join(args, ":"), nil, f.g); ret < 0 {
 			err = fmt.Errorf("astilibav: avfilter.AvfilterGraphCreateFilter on args %s failed: %w", args, NewAvError(ret))
 			return
 		}
