@@ -135,7 +135,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		switch ctx.CodecType {
 		case avcodec.AVMEDIA_TYPE_AUDIO:
 			args = []string{
-				"channel_layout=" + avutil.AvGetChannelLayoutString(ctx.ChannelLayout),
+				"channel_layout=" + avutil.AvGetChannelLayoutString(ctx.Channels, ctx.ChannelLayout),
 				"sample_fmt=" + avutil.AvGetSampleFmtName(int(ctx.SampleFmt)),
 				"sample_rate=" + strconv.Itoa(ctx.SampleRate),
 				"time_base=" + ctx.TimeBase.String(),
