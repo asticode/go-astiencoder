@@ -62,12 +62,15 @@ func LoggerEventHandlerAdapter(o LoggerEventHandlerAdapterOptions, i astikit.Std
 				l.Debug(msg)
 			case avutil.AV_LOG_INFO:
 				l.Info(msg)
-			case avutil.AV_LOG_ERROR:
+			case avutil.AV_LOG_ERROR, avutil.AV_LOG_FATAL, avutil.AV_LOG_PANIC:
+				if v.Level == avutil.AV_LOG_FATAL {
+					msg = "FATAL! " + msg
+				} else if v.Level == avutil.AV_LOG_PANIC {
+					msg = "PANIC! " + msg
+				}
 				l.Error(msg)
 			case avutil.AV_LOG_WARNING:
 				l.Warn(msg)
-			case avutil.AV_LOG_FATAL, avutil.AV_LOG_PANIC:
-				l.Fatal(msg)
 			}
 		}
 		return false
