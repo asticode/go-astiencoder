@@ -209,7 +209,7 @@ func (r *RateEnforcer) HandleFrame(p *FrameHandlerPayload) {
 
 			// Emit event
 			r.eh.Emit(astiencoder.Event{
-				Name:    RateEnforcerSwitchedIn,
+				Name:    EventNameRateEnforcerSwitchedIn,
 				Payload: p.Node,
 				Target:  r,
 			})
@@ -340,7 +340,7 @@ func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time, previous
 		if *previousNode != i.n {
 			// Emit event
 			r.eh.Emit(astiencoder.Event{
-				Name:    RateEnforcerSwitchedOut,
+				Name:    EventNameRateEnforcerSwitchedOut,
 				Payload: i.n,
 				Target:  r,
 			})

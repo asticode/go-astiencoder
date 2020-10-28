@@ -2,10 +2,11 @@ package astilibav
 
 // Event names
 const (
+	EventNameLog = "astilibav.log"
 	// First packet of new node has been received by the rate enforcer
-	RateEnforcerSwitchedIn = "astilibav.rate.enforcer.switched.in"
+	EventNameRateEnforcerSwitchedIn = "astilibav.rate.enforcer.switched.in"
 	// First packet of new node has been dispatched by the rate enforcer
-	RateEnforcerSwitchedOut = "astilibav.rate.enforcer.switched.out"
+	EventNameRateEnforcerSwitchedOut = "astilibav.rate.enforcer.switched.out"
 )
 
 // Stat names
