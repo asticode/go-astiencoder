@@ -1,7 +1,6 @@
 package astilibav
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/asticode/go-astiencoder"
@@ -12,7 +11,7 @@ import (
 // FrameHandler represents a node that can handle a frame
 type FrameHandler interface {
 	astiencoder.Node
-	HandleFrame(p *FrameHandlerPayload)
+	HandleFrame(p FrameHandlerPayload)
 }
 
 // FrameHandlerConnector represents an object that can connect/disconnect with a frame handler
@@ -26,12 +25,6 @@ type FrameHandlerPayload struct {
 	Descriptor Descriptor
 	Frame      *avutil.Frame
 	Node       astiencoder.Node
-	p          *framePool
-}
-
-// Close closes the payload
-func (p *FrameHandlerPayload) Close() {
-	p.p.put(p.Frame)
 }
 
 type frameDispatcher struct {
@@ -43,13 +36,13 @@ type frameDispatcher struct {
 	statOutgoingRate *astikit.CounterRateStat
 }
 
-func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, c *astikit.Closer) *frameDispatcher {
+func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, p *framePool) *frameDispatcher {
 	return &frameDispatcher{
 		eh:               eh,
 		hs:               make(map[string]FrameHandler),
 		m:                &sync.Mutex{},
 		n:                n,
-		p:                newFramePool(c),
+		p:                p,
 		statOutgoingRate: astikit.NewCounterRateStat(),
 	}
 }
@@ -64,23 +57,6 @@ func (d *frameDispatcher) delHandler(h FrameHandler) {
 	d.m.Lock()
 	defer d.m.Unlock()
 	delete(d.hs, h.Metadata().Name)
-}
-
-func (d *frameDispatcher) newFrameHandlerPayload(f *avutil.Frame, descriptor Descriptor) (p *FrameHandlerPayload, err error) {
-	// Create payload
-	p = &FrameHandlerPayload{
-		Descriptor: descriptor,
-		Node:       d.n,
-		p:          d.p,
-	}
-
-	// Copy frame
-	p.Frame = d.p.get()
-	if ret := avutil.AvFrameRef(p.Frame, f); ret < 0 {
-		err = fmt.Errorf("astilibav: avutil.AvFrameRef failed: %w", NewAvError(ret))
-		return
-	}
-	return
 }
 
 func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
@@ -102,15 +78,12 @@ func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
 
 	// Loop through handlers
 	for _, h := range hs {
-		// Create payload
-		p, err := d.newFrameHandlerPayload(f, descriptor)
-		if err != nil {
-			d.eh.Emit(astiencoder.EventError(d.n, fmt.Errorf("astilibav: creating frame handler payload failed: %w", err)))
-			continue
-		}
-
 		// Handle frame
-		h.HandleFrame(p)
+		h.HandleFrame(FrameHandlerPayload{
+			Descriptor: descriptor,
+			Frame:      f,
+			Node:       d.n,
+		})
 	}
 }
 

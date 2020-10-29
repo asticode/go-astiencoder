@@ -21,6 +21,8 @@ type Decoder struct {
 	d                 *frameDispatcher
 	eh                *astiencoder.EventHandler
 	outputCtx         Context
+	fp                *framePool
+	pp                *pktPool
 	statIncomingRate  *astikit.CounterRateStat
 	statProcessedRate *astikit.CounterRateStat
 }
@@ -43,11 +45,13 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
 		eh:                eh,
 		outputCtx:         o.OutputCtx,
+		fp:                newFramePool(c),
+		pp:                newPktPool(c),
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)
-	d.d = newFrameDispatcher(d, eh, c)
+	d.d = newFrameDispatcher(d, eh, d.fp)
 	d.addStats()
 
 	// Find decoder
@@ -144,23 +148,30 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 }
 
 // HandlePkt implements the PktHandler interface
-func (d *Decoder) HandlePkt(p *PktHandlerPayload) {
+func (d *Decoder) HandlePkt(p PktHandlerPayload) {
 	// Increment incoming rate
 	d.statIncomingRate.Add(1)
+
+	// Copy pkt
+	pkt := d.pp.get()
+	if ret := pkt.AvPacketRef(p.Pkt); ret < 0 {
+		emitAvError(d, d.eh, ret, "AvPacketRef failed")
+		return
+	}
 
 	// Add to chan
 	d.c.Add(func() {
 		// Handle pause
 		defer d.HandlePause()
 
-		// Make sure to close pkt payload
-		defer p.Close()
+		// Make sure to close pkt
+		defer d.pp.put(pkt)
 
 		// Increment processed rate
 		d.statProcessedRate.Add(1)
 
 		// Send pkt to decoder
-		if ret := avcodec.AvcodecSendPacket(d.ctxCodec, p.Pkt); ret < 0 {
+		if ret := avcodec.AvcodecSendPacket(d.ctxCodec, pkt); ret < 0 {
 			emitAvError(d, d.eh, ret, "avcodec.AvcodecSendPacket failed")
 			return
 		}
@@ -177,8 +188,8 @@ func (d *Decoder) HandlePkt(p *PktHandlerPayload) {
 
 func (d *Decoder) receiveFrame(descriptor Descriptor) (stop bool) {
 	// Get frame
-	f := d.d.p.get()
-	defer d.d.p.put(f)
+	f := d.fp.get()
+	defer d.fp.put(f)
 
 	// Receive frame
 	if ret := avcodec.AvcodecReceiveFrame(d.ctxCodec, f); ret < 0 {

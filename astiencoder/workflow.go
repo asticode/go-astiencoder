@@ -265,7 +265,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 						Data:    map[string]interface{}{"input": i.c.Name},
 						Handler: astilibav.PktDumpFile,
 						Pattern: o.o.c.URL,
-					}, bd.eh); err != nil {
+					}, bd.eh, bd.c); err != nil {
 						err = fmt.Errorf("main: creating pkt dumper for output %s with conf %+v failed: %w", o.c.Name, o.c, err)
 						return
 					}

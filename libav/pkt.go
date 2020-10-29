@@ -13,7 +13,7 @@ import (
 // PktHandler represents a node that can handle a pkt
 type PktHandler interface {
 	astiencoder.Node
-	HandlePkt(p *PktHandlerPayload)
+	HandlePkt(p PktHandlerPayload)
 }
 
 // PktHandlerConnector represents an object that can connect/disconnect with a pkt handler
@@ -25,13 +25,8 @@ type PktHandlerConnector interface {
 // PktHandlerPayload represents a PktHandler payload
 type PktHandlerPayload struct {
 	Descriptor Descriptor
-	p          *pktPool
+	Node       astiencoder.Node
 	Pkt        *avcodec.Packet
-}
-
-// Close closes the payload
-func (p *PktHandlerPayload) Close() {
-	p.p.put(p.Pkt)
 }
 
 type pktDispatcher struct {
@@ -43,13 +38,13 @@ type pktDispatcher struct {
 	statOutgoingRate *astikit.CounterRateStat
 }
 
-func newPktDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, c *astikit.Closer) *pktDispatcher {
+func newPktDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, p *pktPool) *pktDispatcher {
 	return &pktDispatcher{
 		eh:               eh,
 		hs:               make(map[string]PktHandler),
 		m:                &sync.Mutex{},
 		n:                n,
-		p:                newPktPool(c),
+		p:                p,
 		statOutgoingRate: astikit.NewCounterRateStat(),
 	}
 }
@@ -64,22 +59,6 @@ func (d *pktDispatcher) delHandler(h PktHandler) {
 	d.m.Lock()
 	defer d.m.Unlock()
 	delete(d.hs, h.Metadata().Name)
-}
-
-func (d *pktDispatcher) newPktHandlerPayload(pkt *avcodec.Packet, descriptor Descriptor) (p *PktHandlerPayload, err error) {
-	// Create payload
-	p = &PktHandlerPayload{
-		Descriptor: descriptor,
-		p:          d.p,
-	}
-
-	// Copy pkt
-	p.Pkt = d.p.get()
-	if ret := p.Pkt.AvPacketRef(pkt); ret < 0 {
-		err = fmt.Errorf("astilibav: AvPacketRef failed: %w", NewAvError(ret))
-		return
-	}
-	return
 }
 
 func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, descriptor Descriptor) {
@@ -104,15 +83,12 @@ func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, descriptor Descriptor) {
 
 	// Loop through handlers
 	for _, h := range hs {
-		// Create payload
-		p, err := d.newPktHandlerPayload(pkt, descriptor)
-		if err != nil {
-			d.eh.Emit(astiencoder.EventError(d.n, fmt.Errorf("astilibav: creating pkt handler payload failed: %w", err)))
-			continue
-		}
-
 		// Handle pkt
-		h.HandlePkt(p)
+		h.HandlePkt(PktHandlerPayload{
+			Descriptor: descriptor,
+			Node:       d.n,
+			Pkt:        pkt,
+		})
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
+	"github.com/asticode/goav/avutil"
 )
 
 var countForwarder uint64
@@ -16,7 +17,9 @@ type Forwarder struct {
 	*astiencoder.BaseNode
 	c                 *astikit.Chan
 	d                 *frameDispatcher
+	eh                *astiencoder.EventHandler
 	outputCtx         Context
+	p                 *framePool
 	restamper         FrameRestamper
 	statIncomingRate  *astikit.CounterRateStat
 	statProcessedRate *astikit.CounterRateStat
@@ -38,13 +41,15 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 	// Create forwarder
 	f = &Forwarder{
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		eh:                eh,
 		outputCtx:         o.OutputCtx,
+		p:                 newFramePool(c),
 		restamper:         o.Restamper,
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 	f.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(f), eh)
-	f.d = newFrameDispatcher(f, eh, c)
+	f.d = newFrameDispatcher(f, eh, f.p)
 	f.addStats()
 	return
 }
@@ -108,27 +113,34 @@ func (f *Forwarder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 }
 
 // HandleFrame implements the FrameHandler interface
-func (f *Forwarder) HandleFrame(p *FrameHandlerPayload) {
+func (f *Forwarder) HandleFrame(p FrameHandlerPayload) {
 	// Increment incoming rate
 	f.statIncomingRate.Add(1)
+
+	// Copy frame
+	fm := f.p.get()
+	if ret := avutil.AvFrameRef(fm, p.Frame); ret < 0 {
+		emitAvError(f, f.eh, ret, "avutil.AvFrameRef failed")
+		return
+	}
 
 	// Add to chan
 	f.c.Add(func() {
 		// Handle pause
 		defer f.HandlePause()
 
-		// Make sure to close frame payload
-		defer p.Close()
+		// Make sure to close frame
+		defer f.p.put(fm)
 
 		// Increment processed rate
 		f.statProcessedRate.Add(1)
 
 		// Restamp
 		if f.restamper != nil {
-			f.restamper.Restamp(p.Frame)
+			f.restamper.Restamp(fm)
 		}
 
 		// Dispatch frame
-		f.d.dispatch(p.Frame, p.Descriptor)
+		f.d.dispatch(fm, p.Descriptor)
 	})
 }

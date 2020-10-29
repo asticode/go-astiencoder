@@ -85,7 +85,7 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 		timeBase:          avutil.NewRational(o.FrameRate.Den(), o.FrameRate.Num()),
 	}
 	r.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(r), eh)
-	r.d = newFrameDispatcher(r, eh, c)
+	r.d = newFrameDispatcher(r, eh, r.p)
 	r.addStats()
 	return
 }
@@ -179,17 +179,24 @@ func (r *RateEnforcer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) 
 }
 
 // HandleFrame implements the FrameHandler interface
-func (r *RateEnforcer) HandleFrame(p *FrameHandlerPayload) {
+func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 	// Increment incoming rate
 	r.statIncomingRate.Add(1)
+
+	// Copy frame
+	f := r.p.get()
+	if ret := avutil.AvFrameRef(f, p.Frame); ret < 0 {
+		emitAvError(r, r.eh, ret, "avutil.AvFrameRef failed")
+		return
+	}
 
 	// Add to chan
 	r.c.Add(func() {
 		// Handle pause
 		defer r.HandlePause()
 
-		// Make sure to close frame payload
-		defer p.Close()
+		// Make sure to close frame
+		defer r.p.put(f)
 
 		// Increment processed rate
 		r.statProcessedRate.Add(1)
@@ -205,7 +212,7 @@ func (r *RateEnforcer) HandleFrame(p *FrameHandlerPayload) {
 		//   node instead of the previous item
 		if r.slots[len(r.slots)-1] == nil || (r.n != r.slots[len(r.slots)-1].n && r.n == p.Node) {
 			// Create slot
-			r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(p)
+			r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(f, p.Descriptor)
 
 			// Emit event
 			r.eh.Emit(astiencoder.Event{
@@ -216,10 +223,11 @@ func (r *RateEnforcer) HandleFrame(p *FrameHandlerPayload) {
 		}
 
 		// Create item
-		i := r.newRateEnforcerItem(p)
+		i := r.newRateEnforcerItem(p.Descriptor, p.Node)
 
 		// Copy frame
-		if ret := avutil.AvFrameRef(i.f, p.Frame); ret < 0 {
+		i.f = r.p.get()
+		if ret := avutil.AvFrameRef(i.f, f); ret < 0 {
 			emitAvError(r, r.eh, ret, "avutil.AvFrameRef failed")
 			return
 		}
@@ -242,19 +250,18 @@ func (r *RateEnforcer) HandleFrame(p *FrameHandlerPayload) {
 	})
 }
 
-func (r *RateEnforcer) newRateEnforcerSlot(p *FrameHandlerPayload) *rateEnforcerSlot {
+func (r *RateEnforcer) newRateEnforcerSlot(f *avutil.Frame, d Descriptor) *rateEnforcerSlot {
 	return &rateEnforcerSlot{
 		n:      r.n,
-		ptsMax: p.Frame.Pts() + int64(r.timeBase.ToDouble()/p.Descriptor.TimeBase().ToDouble()),
-		ptsMin: p.Frame.Pts(),
+		ptsMax: f.Pts() + int64(r.timeBase.ToDouble()/d.TimeBase().ToDouble()),
+		ptsMin: f.Pts(),
 	}
 }
 
-func (r *RateEnforcer) newRateEnforcerItem(p *FrameHandlerPayload) *rateEnforcerItem {
+func (r *RateEnforcer) newRateEnforcerItem(d Descriptor, n astiencoder.Node) *rateEnforcerItem {
 	return &rateEnforcerItem{
-		d: p.Descriptor,
-		f: r.p.get(),
-		n: p.Node,
+		d: d,
+		n: n,
 	}
 }
 

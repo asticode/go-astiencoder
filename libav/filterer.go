@@ -30,6 +30,7 @@ type Filterer struct {
 	emulatePeriod     time.Duration
 	g                 *avfilter.Graph
 	outputCtx         Context
+	p                 *framePool
 	restamper         FrameRestamper
 	statIncomingRate  *astikit.CounterRateStat
 	statProcessedRate *astikit.CounterRateStat
@@ -64,7 +65,8 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 	f.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(f), eh)
-	f.d = newFrameDispatcher(f, eh, f.cl)
+	f.p = newFramePool(f.cl)
+	f.d = newFrameDispatcher(f, eh, f.p)
 	f.addStats()
 
 	// No inputs
@@ -285,17 +287,24 @@ func (f *Filterer) tickFunc(nextAt *time.Time, desc Descriptor) (stop bool) {
 }
 
 // HandleFrame implements the FrameHandler interface
-func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
+func (f *Filterer) HandleFrame(p FrameHandlerPayload) {
 	// Increment incoming rate
 	f.statIncomingRate.Add(1)
+
+	// Copy frame
+	fm := f.p.get()
+	if ret := avutil.AvFrameRef(fm, p.Frame); ret < 0 {
+		emitAvError(f, f.eh, ret, "avutil.AvFrameRef failed")
+		return
+	}
 
 	// Add to chan
 	f.c.Add(func() {
 		// Handle pause
 		defer f.HandlePause()
 
-		// Make sure to close frame payload
-		defer p.Close()
+		// Make sure to close frame
+		defer f.p.put(fm)
 
 		// Increment processed rate
 		f.statProcessedRate.Add(1)
@@ -309,7 +318,7 @@ func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
 		// Loop through buffer ctxs
 		for _, bufferSrcCtx := range bufferSrcCtxs {
 			// Push frame in graph
-			if ret := f.g.AvBuffersrcAddFrameFlags(bufferSrcCtx, p.Frame, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
+			if ret := f.g.AvBuffersrcAddFrameFlags(bufferSrcCtx, fm, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
 				emitAvError(f, f.eh, ret, "f.g.AvBuffersrcAddFrameFlags failed")
 				return
 			}
@@ -327,8 +336,8 @@ func (f *Filterer) HandleFrame(p *FrameHandlerPayload) {
 
 func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 	// Get frame
-	fm := f.d.p.get()
-	defer f.d.p.put(fm)
+	fm := f.p.get()
+	defer f.p.put(fm)
 
 	// Pull filtered frame from graph
 	if ret := f.g.AvBuffersinkGetFrame(f.bufferSinkCtx, fm); ret < 0 {

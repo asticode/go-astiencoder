@@ -27,6 +27,7 @@ type Demuxer struct {
 	emulateRate  bool
 	interruptRet *int
 	loop         bool
+	p            *pktPool
 	restamper    PktRestamper
 	seekToLive   bool
 	ss           map[int]*demuxerStream
@@ -86,11 +87,12 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		eh:          eh,
 		emulateRate: o.EmulateRate,
 		loop:        o.Loop,
+		p:           newPktPool(c),
 		seekToLive:  o.SeekToLive,
 		ss:          make(map[int]*demuxerStream),
 	}
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)
-	d.d = newPktDispatcher(d, eh, c)
+	d.d = newPktDispatcher(d, eh, d.p)
 	d.addStats()
 
 	// If loop is enabled, we need to add a restamper
@@ -263,8 +265,8 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	// Get pkt from pool
-	pkt := d.d.p.get()
-	defer d.d.p.put(pkt)
+	pkt := d.p.get()
+	defer d.p.put(pkt)
 
 	// Read frame
 	if ret := d.ctxFormat.AvReadFrame(pkt); ret < 0 {

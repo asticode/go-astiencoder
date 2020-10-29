@@ -22,6 +22,7 @@ type Muxer struct {
 	ctxFormat         *avformat.Context
 	eh                *astiencoder.EventHandler
 	o                 *sync.Once
+	p                 *pktPool
 	restamper         PktRestamper
 	statIncomingRate  *astikit.CounterRateStat
 	statProcessedRate *astikit.CounterRateStat
@@ -48,6 +49,7 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (
 		cl:                c,
 		eh:                eh,
 		o:                 &sync.Once{},
+		p:                 newPktPool(c),
 		restamper:         o.Restamper,
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
@@ -161,34 +163,41 @@ func (m *Muxer) NewPktHandler(o *avformat.Stream) *MuxerPktHandler {
 }
 
 // HandlePkt implements the PktHandler interface
-func (h *MuxerPktHandler) HandlePkt(p *PktHandlerPayload) {
+func (h *MuxerPktHandler) HandlePkt(p PktHandlerPayload) {
 	// Increment incoming rate
 	h.statIncomingRate.Add(1)
+
+	// Copy pkt
+	pkt := h.p.get()
+	if ret := pkt.AvPacketRef(p.Pkt); ret < 0 {
+		emitAvError(h, h.eh, ret, "AvPacketRef failed")
+		return
+	}
 
 	// Add to chan
 	h.c.Add(func() {
 		// Handle pause
 		defer h.HandlePause()
 
-		// Make sure to close pkt payload
-		defer p.Close()
+		// Make sure to close pkt
+		defer h.p.put(pkt)
 
 		// Increment processed rate
 		h.statProcessedRate.Add(1)
 
 		// Rescale timestamps
-		p.Pkt.AvPacketRescaleTs(p.Descriptor.TimeBase(), h.o.TimeBase())
+		pkt.AvPacketRescaleTs(p.Descriptor.TimeBase(), h.o.TimeBase())
 
 		// Set stream index
-		p.Pkt.SetStreamIndex(h.o.Index())
+		pkt.SetStreamIndex(h.o.Index())
 
 		// Restamp
 		if h.restamper != nil {
-			h.restamper.Restamp(p.Pkt)
+			h.restamper.Restamp(pkt)
 		}
 
 		// Write frame
-		if ret := h.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(p.Pkt))); ret < 0 {
+		if ret := h.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(pkt))); ret < 0 {
 			emitAvError(h, h.eh, ret, "h.ctxFormat.AvInterleavedWriteFrame failed")
 			return
 		}

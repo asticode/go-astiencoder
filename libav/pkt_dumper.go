@@ -24,6 +24,7 @@ type PktDumper struct {
 	count             uint32
 	eh                *astiencoder.EventHandler
 	o                 PktDumperOptions
+	p                 *pktPool
 	statIncomingRate  *astikit.CounterRateStat
 	statProcessedRate *astikit.CounterRateStat
 	t                 *template.Template
@@ -43,7 +44,7 @@ type PktDumperHandlerArgs struct {
 }
 
 // NewPktDumper creates a new pk dumper
-func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler) (d *PktDumper, err error) {
+func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (d *PktDumper, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countPktDumper, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("pkt_dumper_%d", count), fmt.Sprintf("Pkt Dumper #%d", count), "Dumps packets", "pkt dumper")
@@ -53,6 +54,7 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler) (d *PktDumpe
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
 		eh:                eh,
 		o:                 o,
+		p:                 newPktPool(c),
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
@@ -102,17 +104,24 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 }
 
 // HandlePkt implements the PktHandler interface
-func (d *PktDumper) HandlePkt(p *PktHandlerPayload) {
+func (d *PktDumper) HandlePkt(p PktHandlerPayload) {
 	// Increment incoming rate
 	d.statIncomingRate.Add(1)
+
+	// Copy pkt
+	pkt := d.p.get()
+	if ret := pkt.AvPacketRef(p.Pkt); ret < 0 {
+		emitAvError(d, d.eh, ret, "AvPacketRef failed")
+		return
+	}
 
 	// Add to chan
 	d.c.Add(func() {
 		// Handle pause
 		defer d.HandlePause()
 
-		// Make sure to close pkt payload
-		defer p.Close()
+		// Make sure to close pkt
+		defer d.p.put(pkt)
 
 		// Increment processed rate
 		d.statProcessedRate.Add(1)
@@ -129,8 +138,8 @@ func (d *PktDumper) HandlePkt(p *PktHandlerPayload) {
 				data = d.o.Data
 			}
 			data["count"] = c
-			data["pts"] = p.Pkt.Pts()
-			data["stream_idx"] = p.Pkt.StreamIndex()
+			data["pts"] = pkt.Pts()
+			data["stream_idx"] = pkt.StreamIndex()
 
 			// Execute template
 			buf := &bytes.Buffer{}
@@ -144,7 +153,7 @@ func (d *PktDumper) HandlePkt(p *PktHandlerPayload) {
 		}
 
 		// Dump
-		if err := d.o.Handler(p.Pkt, args); err != nil {
+		if err := d.o.Handler(pkt, args); err != nil {
 			d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: pkt dump func with args %+v failed: %w", args, err)))
 			return
 		}

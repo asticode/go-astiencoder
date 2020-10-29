@@ -22,6 +22,8 @@ type Encoder struct {
 	ctxCodec           *avcodec.Context
 	d                  *pktDispatcher
 	eh                 *astiencoder.EventHandler
+	fp                 *framePool
+	pp                 *pktPool
 	previousDescriptor Descriptor
 	statIncomingRate   *astikit.CounterRateStat
 	statProcessedRate  *astikit.CounterRateStat
@@ -43,11 +45,13 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	e = &Encoder{
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
 		eh:                eh,
+		fp:                newFramePool(c),
+		pp:                newPktPool(c),
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 	e.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(e), eh)
-	e.d = newPktDispatcher(e, eh, c)
+	e.d = newPktDispatcher(e, eh, e.pp)
 	e.addStats()
 
 	// Find encoder
@@ -195,42 +199,49 @@ func (e *Encoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 }
 
 func (e *Encoder) flush() {
-	e.encode(&FrameHandlerPayload{})
+	e.encode(nil, nil)
 }
 
 // HandleFrame implements the FrameHandler interface
-func (e *Encoder) HandleFrame(p *FrameHandlerPayload) {
+func (e *Encoder) HandleFrame(p FrameHandlerPayload) {
 	// Increment incoming rate
 	e.statIncomingRate.Add(1)
+
+	// Copy frame
+	f := e.fp.get()
+	if ret := avutil.AvFrameRef(f, p.Frame); ret < 0 {
+		emitAvError(e, e.eh, ret, "avutil.AvFrameRef failed")
+		return
+	}
 
 	// Add to chan
 	e.c.Add(func() {
 		// Handle pause
 		defer e.HandlePause()
 
-		// Make sure to close frame payload
-		defer p.Close()
+		// Make sure to close frame
+		defer e.fp.put(f)
 
 		// Increment processed rate
 		e.statProcessedRate.Add(1)
 
 		// Encode
-		e.encode(p)
+		e.encode(f, p.Descriptor)
 	})
 }
 
-func (e *Encoder) encode(p *FrameHandlerPayload) {
+func (e *Encoder) encode(f *avutil.Frame, d Descriptor) {
 	// Reset frame attributes
-	if p.Frame != nil {
+	if f != nil {
 		switch e.ctxCodec.CodecType() {
 		case avutil.AVMEDIA_TYPE_VIDEO:
-			p.Frame.SetKeyFrame(0)
-			p.Frame.SetPictType(avutil.AvPictureType(avutil.AV_PICTURE_TYPE_NONE))
+			f.SetKeyFrame(0)
+			f.SetPictType(avutil.AvPictureType(avutil.AV_PICTURE_TYPE_NONE))
 		}
 	}
 
 	// Send frame to encoder
-	if ret := avcodec.AvcodecSendFrame(e.ctxCodec, p.Frame); ret < 0 {
+	if ret := avcodec.AvcodecSendFrame(e.ctxCodec, f); ret < 0 {
 		emitAvError(e, e.eh, ret, "avcodec.AvcodecSendFrame failed")
 		return
 	}
@@ -238,16 +249,16 @@ func (e *Encoder) encode(p *FrameHandlerPayload) {
 	// Loop
 	for {
 		// Receive pkt
-		if stop := e.receivePkt(p); stop {
+		if stop := e.receivePkt(d); stop {
 			return
 		}
 	}
 }
 
-func (e *Encoder) receivePkt(p *FrameHandlerPayload) (stop bool) {
+func (e *Encoder) receivePkt(d Descriptor) (stop bool) {
 	// Get pkt from pool
-	pkt := e.d.p.get()
-	defer e.d.p.put(pkt)
+	pkt := e.pp.get()
+	defer e.pp.put(pkt)
 
 	// Receive pkt
 	if ret := avcodec.AvcodecReceivePacket(e.ctxCodec, pkt); ret < 0 {
@@ -259,7 +270,6 @@ func (e *Encoder) receivePkt(p *FrameHandlerPayload) (stop bool) {
 	}
 
 	// Get descriptor
-	d := p.Descriptor
 	if d == nil && e.previousDescriptor == nil {
 		e.eh.Emit(astiencoder.EventError(e, errors.New("astilibav: no valid descriptor")))
 		return
