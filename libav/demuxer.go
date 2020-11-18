@@ -29,7 +29,6 @@ type Demuxer struct {
 	loop         bool
 	p            *pktPool
 	restamper    PktRestamper
-	seekToLive   bool
 	ss           map[int]*demuxerStream
 }
 
@@ -37,9 +36,6 @@ type demuxerStream struct {
 	ctx               Context
 	emulateRateNextAt time.Time
 	s                 *avformat.Stream
-	seekToLive        bool
-	seekToLiveCount   int
-	seekToLiveLastPkt *demuxerPkt
 }
 
 type demuxerPkt struct {
@@ -69,9 +65,6 @@ type DemuxerOptions struct {
 	Node astiencoder.NodeOptions
 	// Context used to cancel probing
 	ProbeCtx context.Context
-	// If true, the demuxer will not dispatch packets of a stream until the following occurs at least 3 times :
-	// 2 consecutive packets are received at an interval >= to the delta of their DTS
-	SeekToLive bool
 	// URL of the input
 	URL string
 }
@@ -88,7 +81,6 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		emulateRate: o.EmulateRate,
 		loop:        o.Loop,
 		p:           newPktPool(c),
-		seekToLive:  o.SeekToLive,
 		ss:          make(map[int]*demuxerStream),
 	}
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)
@@ -174,9 +166,8 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	// Index streams
 	for _, s := range d.ctxFormat.Streams() {
 		d.ss[s.Index()] = &demuxerStream{
-			ctx:        NewContextFromStream(s),
-			s:          s,
-			seekToLive: o.SeekToLive,
+			ctx: NewContextFromStream(s),
+			s:   s,
 		}
 	}
 	return
@@ -238,13 +229,6 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			*d.interruptRet = 1
 		}()
 
-		// Flush
-		if d.seekToLive {
-			if ret := d.ctxFormat.AvformatFlush(); ret < 0 {
-				emitAvError(d, d.eh, ret, "ctxFormat.AvformatFlush on %s failed", d.ctxFormat.Filename())
-			}
-		}
-
 		// Loop
 		for {
 			// Read frame
@@ -289,22 +273,6 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	s, ok := d.ss[pkt.StreamIndex()]
 	if !ok {
 		return
-	}
-
-	// Seek to live
-	if s.seekToLive {
-		// Pkt duration is not always filled therefore we need to rely on <current pkt dts> - <previous pkt dts>
-		if s.seekToLiveLastPkt != nil && s.seekToLiveLastPkt.dts != avutil.AV_NOPTS_VALUE && time.Since(s.seekToLiveLastPkt.receivedAt) >= time.Duration(avutil.AvRescaleQ(pkt.Dts()-s.seekToLiveLastPkt.dts, s.s.TimeBase(), nanosecondRational)) {
-			s.seekToLiveCount++
-		}
-
-		// Check count
-		// 5 is an arbitrary number
-		if s.seekToLiveCount < 5 {
-			s.seekToLiveLastPkt = newDemuxerPkt(pkt)
-			return
-		}
-		s.seekToLive = false
 	}
 
 	// Restamp

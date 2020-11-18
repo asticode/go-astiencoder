@@ -205,21 +205,28 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 		r.m.Lock()
 		defer r.m.Unlock()
 
+		// Get last slot
+		l := r.slots[len(r.slots)-1]
+
 		// We update the last slot if:
-		//   - there are no slots
-		//   - the node of the last slot is different from the desired node AND the payload's node is the desired
+		//   - it's empty
+		//   - its node is different from the desired node AND the payload's node is the desired
 		//   node. That way, if the desired node doesn't dispatch frames for some time, we fallback to the previous
 		//   node instead of the previous item
-		if r.slots[len(r.slots)-1] == nil || (r.n != r.slots[len(r.slots)-1].n && r.n == p.Node) {
-			// Create slot
+		//   - it's in the past compared to current frame
+		if c1, c2 := l == nil || (r.n != l.n && r.n == p.Node), l != nil && l.n == p.Node && l.ptsMax < f.Pts(); c1 || c2 {
+			// Update last slot
 			r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(f, p.Descriptor)
 
-			// Emit event
-			r.eh.Emit(astiencoder.Event{
-				Name:    EventNameRateEnforcerSwitchedIn,
-				Payload: p.Node,
-				Target:  r,
-			})
+			// Switched in
+			if c1 {
+				// Emit event
+				r.eh.Emit(astiencoder.Event{
+					Name:    EventNameRateEnforcerSwitchedIn,
+					Payload: p.Node,
+					Target:  r,
+				})
+			}
 		}
 
 		// Create item
@@ -235,17 +242,9 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 		// Append item
 		r.buf = append(r.buf, i)
 
-		// Get newest slot for this node
-		var s *rateEnforcerSlot
-		for _, rs := range r.slots {
-			if rs != nil && rs.n == i.n && (s == nil || s.ptsMax < rs.ptsMax) {
-				s = rs
-			}
-		}
-
 		// Process delay stat
-		if s != nil {
-			r.statDelayAvg.Add(float64(time.Duration(avutil.AvRescaleQ(s.ptsMax-i.f.Pts(), i.d.TimeBase(), nanosecondRational)).Milliseconds()))
+		if l != nil && l.n == i.n {
+			r.statDelayAvg.Add(float64(time.Duration(avutil.AvRescaleQ(l.ptsMax-i.f.Pts(), i.d.TimeBase(), nanosecondRational)).Milliseconds()))
 		}
 	})
 }
@@ -255,6 +254,14 @@ func (r *RateEnforcer) newRateEnforcerSlot(f *avutil.Frame, d Descriptor) *rateE
 		n:      r.n,
 		ptsMax: f.Pts() + int64(r.timeBase.ToDouble()/d.TimeBase().ToDouble()),
 		ptsMin: f.Pts(),
+	}
+}
+
+func (s *rateEnforcerSlot) next() *rateEnforcerSlot {
+	return &rateEnforcerSlot{
+		n:      s.n,
+		ptsMin: s.ptsMax,
+		ptsMax: s.ptsMax - s.ptsMin + s.ptsMax,
 	}
 }
 
@@ -364,14 +371,6 @@ func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time, previous
 		r.p.put(i.f)
 	}
 	return
-}
-
-func (s *rateEnforcerSlot) next() *rateEnforcerSlot {
-	return &rateEnforcerSlot{
-		n:      s.n,
-		ptsMin: s.ptsMax,
-		ptsMax: s.ptsMax - s.ptsMin + s.ptsMax,
-	}
 }
 
 func (r *RateEnforcer) distribute() {
