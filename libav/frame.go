@@ -87,14 +87,18 @@ func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
 	}
 }
 
-func (d *frameDispatcher) addStats(s *astikit.Stater) {
-	// Add outgoing rate
-	s.AddStat(astikit.StatMetadata{
-		Description: "Number of frames going out per second",
-		Label:       "Outgoing rate",
-		Name:        StatNameOutgoingRate,
-		Unit:        "fps",
-	}, d.statOutgoingRate)
+func (d *frameDispatcher) stats() []astikit.StatOptions {
+	return []astikit.StatOptions{
+		astikit.StatOptions{
+			Handler: d.statOutgoingRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of frames going out per second",
+				Label:       "Outgoing rate",
+				Name:        StatNameOutgoingRate,
+				Unit:        "fps",
+			},
+		},
+	}
 }
 
 type framePool struct {

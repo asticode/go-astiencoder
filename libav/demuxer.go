@@ -70,7 +70,7 @@ type DemuxerOptions struct {
 }
 
 // NewDemuxer creates a new demuxer
-func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (d *Demuxer, err error) {
+func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s *astiencoder.Stater) (d *Demuxer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countDemuxer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("demuxer_%d", count), fmt.Sprintf("Demuxer #%d", count), fmt.Sprintf("Demuxes %s", o.URL), "demuxer")
@@ -83,8 +83,14 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		p:           newPktPool(c),
 		ss:          make(map[int]*demuxerStream),
 	}
-	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)
+
+	// Create base node
+	d.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, d, astiencoder.EventTypeToNodeEventName)
+
+	// Create pkt dispatcher
 	d.d = newPktDispatcher(d, eh, d.p)
+
+	// Add stats
 	d.addStats()
 
 	// If loop is enabled, we need to add a restamper
@@ -174,8 +180,11 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 }
 
 func (d *Demuxer) addStats() {
-	// Add dispatcher stats
-	d.d.addStats(d.Stater())
+	// Get stats
+	ss := d.d.stats()
+
+	// Add stats
+	d.BaseNode.AddStats(ss...)
 }
 
 // CtxFormat returns the format ctx

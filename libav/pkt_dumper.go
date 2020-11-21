@@ -44,7 +44,7 @@ type PktDumperHandlerArgs struct {
 }
 
 // NewPktDumper creates a new pk dumper
-func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (d *PktDumper, err error) {
+func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s *astiencoder.Stater) (d *PktDumper, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countPktDumper, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("pkt_dumper_%d", count), fmt.Sprintf("Pkt Dumper #%d", count), "Dumps packets", "pkt dumper")
@@ -58,7 +58,11 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.C
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
-	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)
+
+	// Create base node
+	d.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, d, astiencoder.EventTypeToNodeEventName)
+
+	// Add stats
 	d.addStats()
 
 	// Parse pattern
@@ -72,24 +76,31 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.C
 }
 
 func (d *PktDumper) addStats() {
-	// Add incoming rate
-	d.Stater().AddStat(astikit.StatMetadata{
-		Description: "Number of packets coming in per second",
-		Label:       "Incoming rate",
-		Name:        StatNameIncomingRate,
-		Unit:        "pps",
-	}, d.statIncomingRate)
+	// Get stats
+	ss := d.c.Stats()
+	ss = append(ss,
+		astikit.StatOptions{
+			Handler: d.statIncomingRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of packets coming in per second",
+				Label:       "Incoming rate",
+				Name:        StatNameIncomingRate,
+				Unit:        "pps",
+			},
+		},
+		astikit.StatOptions{
+			Handler: d.statProcessedRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of packets processed per second",
+				Label:       "Processed rate",
+				Name:        StatNameProcessedRate,
+				Unit:        "pps",
+			},
+		},
+	)
 
-	// Add processed rate
-	d.Stater().AddStat(astikit.StatMetadata{
-		Description: "Number of packets processed per second",
-		Label:       "Processed rate",
-		Name:        StatNameProcessedRate,
-		Unit:        "pps",
-	}, d.statProcessedRate)
-
-	// Add chan stats
-	d.c.AddStats(d.Stater())
+	// Add stats
+	d.BaseNode.AddStats(ss...)
 }
 
 // Start starts the pkt dumper

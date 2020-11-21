@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/asticode/go-astikit"
 )
@@ -15,7 +14,6 @@ type Node interface {
 	NodeDescriptor
 	NodeParent
 	Starter
-	Stater
 }
 
 // NodeDescriptor represents an object that can describe a node
@@ -101,11 +99,6 @@ type Starter interface {
 	Stop()
 }
 
-// Stater represents an object that can return its stater
-type Stater interface {
-	Stater() *astikit.Stater
-}
-
 // ConnectNodes connects 2 nodes
 func ConnectNodes(parent, child Node) {
 	parent.AddChild(child)
@@ -133,37 +126,36 @@ type BaseNode struct {
 	ctx             context.Context
 	ctxPause        context.Context
 	eh              *EventHandler
-	eg              EventGenerator
+	et              EventTypeTransformer
 	o               NodeOptions
 	m               *sync.Mutex
 	oStart          *sync.Once
 	oStop           *sync.Once
 	parents         map[string]Node
 	parentsStarted  map[string]bool
-	s               *astikit.Stater
+	s               *Stater
+	ss              []astikit.StatOptions
 	status          string
+	target          interface{}
 }
 
 // NewBaseNode creates a new base node
-func NewBaseNode(o NodeOptions, eg EventGenerator, eh *EventHandler) (n *BaseNode) {
-	n = &BaseNode{
+func NewBaseNode(o NodeOptions, eh *EventHandler, s *Stater, target interface{}, et EventTypeTransformer) *BaseNode {
+	return &BaseNode{
 		children:        make(map[string]Node),
 		childrenStarted: make(map[string]bool),
 		m:               &sync.Mutex{},
 		eh:              eh,
-		eg:              eg,
+		et:              et,
 		o:               o,
 		oStart:          &sync.Once{},
 		oStop:           &sync.Once{},
 		parents:         make(map[string]Node),
 		parentsStarted:  make(map[string]bool),
+		s:               s,
 		status:          StatusStopped,
+		target:          target,
 	}
-	n.s = astikit.NewStater(astikit.StaterOptions{
-		HandleFunc: n.statsHandleFunc,
-		Period:     2 * time.Second,
-	})
-	return
 }
 
 // Context returns the node context
@@ -221,7 +213,10 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 		n.m.Unlock()
 
 		// Send started event
-		n.eh.Emit(n.eg.Event(EventTypeStarted, nil))
+		n.eh.Emit(Event{
+			Name:   n.et(EventTypeStarted),
+			Target: n.target,
+		})
 
 		// Execute the rest in a goroutine
 		go func() {
@@ -229,7 +224,10 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 			defer t.Done()
 
 			// Send stopped event
-			defer n.eh.Emit(n.eg.Event(EventTypeStopped, nil))
+			defer n.eh.Emit(Event{
+				Name:   n.et(EventTypeStopped),
+				Target: n.target,
+			})
 
 			// Make sure the status is updated once everything is done
 			defer func() {
@@ -254,13 +252,32 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 			// Make sure the node is stopped properly
 			defer n.Stop()
 
-			// Handle the stater
+			// Handle stats
 			if n.s != nil {
-				// Make sure the stater is stopped properly
-				defer n.s.Stop()
+				// Make sure to stop and delete stats
+				defer func() {
+					// Lock
+					n.m.Lock()
+					defer n.m.Unlock()
 
-				// Start stater
-				go n.s.Start(n.ctx)
+					// Stop stats
+					for _, s := range n.ss {
+						s.Handler.Stop()
+					}
+
+					// Delete stats
+					n.s.DelStats(n.target, n.ss...)
+				}()
+
+				// Add stats
+				n.m.Lock()
+				n.s.AddStats(n.target, n.ss...)
+
+				// Start stats
+				for _, s := range n.ss {
+					s.Handler.Start()
+				}
+				n.m.Unlock()
 			}
 
 			// Exec func
@@ -306,7 +323,10 @@ func (n *BaseNode) pauseFunc(fn func()) {
 	n.m.Unlock()
 
 	// Send paused event
-	n.eh.Emit(n.eg.Event(EventTypePaused, nil))
+	n.eh.Emit(Event{
+		Name:   n.et(EventTypePaused),
+		Target: n.target,
+	})
 }
 
 // Continue implements the Starter interface
@@ -333,7 +353,10 @@ func (n *BaseNode) continueFunc(fn func()) {
 	n.m.Unlock()
 
 	// Send continued event
-	n.eh.Emit(n.eg.Event(EventTypeContinued, nil))
+	n.eh.Emit(Event{
+		Name:   n.et(EventTypeContinued),
+		Target: n.target,
+	})
 }
 
 // HandlePause handles the pause
@@ -462,38 +485,9 @@ func (n *BaseNode) Metadata() NodeMetadata {
 	return n.o.Metadata
 }
 
-// Stater returns the node stater
-func (n *BaseNode) Stater() *astikit.Stater {
-	return n.s
-}
-
-// EventStat represents a stat event
-type EventStat struct {
-	Description string
-	Label       string
-	Name        string
-	Unit        string
-	Value       interface{}
-}
-
-func (n *BaseNode) statsHandleFunc(stats []astikit.Stat) {
-	// No stats
-	if len(stats) == 0 {
-		return
-	}
-
-	// Loop through stats
-	ss := []EventStat{}
-	for _, s := range stats {
-		ss = append(ss, EventStat{
-			Description: s.Description,
-			Label:       s.Label,
-			Name:        s.Name,
-			Unit:        s.Unit,
-			Value:       s.Value,
-		})
-	}
-
-	// Send event
-	n.eh.Emit(n.eg.Event(EventTypeStats, ss))
+// AddStats adds stats
+func (n *BaseNode) AddStats(ss ...astikit.StatOptions) {
+	n.m.Lock()
+	defer n.m.Unlock()
+	n.ss = append(n.ss, ss...)
 }

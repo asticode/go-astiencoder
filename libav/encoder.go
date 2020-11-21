@@ -36,7 +36,7 @@ type EncoderOptions struct {
 }
 
 // NewEncoder creates a new encoder
-func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (e *Encoder, err error) {
+func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s *astiencoder.Stater) (e *Encoder, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countEncoder, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("encoder_%d", count), fmt.Sprintf("Encoder #%d", count), "Encodes", "encoder")
@@ -50,8 +50,14 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
-	e.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(e), eh)
+
+	// Create base node
+	e.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, e, astiencoder.EventTypeToNodeEventName)
+
+	// Create pkt dispatcher
 	e.d = newPktDispatcher(e, eh, e.pp)
+
+	// Add stats
 	e.addStats()
 
 	// Find encoder
@@ -143,27 +149,32 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 }
 
 func (e *Encoder) addStats() {
-	// Add incoming rate
-	e.Stater().AddStat(astikit.StatMetadata{
-		Description: "Number of frames coming in per second",
-		Label:       "Incoming rate",
-		Name:        StatNameIncomingRate,
-		Unit:        "fps",
-	}, e.statIncomingRate)
+	// Get stats
+	ss := e.c.Stats()
+	ss = append(ss, e.d.stats()...)
+	ss = append(ss,
+		astikit.StatOptions{
+			Handler: e.statIncomingRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of frames coming in per second",
+				Label:       "Incoming rate",
+				Name:        StatNameIncomingRate,
+				Unit:        "fps",
+			},
+		},
+		astikit.StatOptions{
+			Handler: e.statProcessedRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of frames processed per second",
+				Label:       "Processed rate",
+				Name:        StatNameProcessedRate,
+				Unit:        "fps",
+			},
+		},
+	)
 
-	// Add processed rate
-	e.Stater().AddStat(astikit.StatMetadata{
-		Description: "Number of frames processed per second",
-		Label:       "Processed rate",
-		Name:        StatNameProcessedRate,
-		Unit:        "fps",
-	}, e.statProcessedRate)
-
-	// Add dispatcher stats
-	e.d.addStats(e.Stater())
-
-	// Add chan stats
-	e.c.AddStats(e.Stater())
+	// Add stats
+	e.BaseNode.AddStats(ss...)
 }
 
 // Connect implements the PktHandlerConnector interface

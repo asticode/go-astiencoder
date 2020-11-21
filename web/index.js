@@ -12,12 +12,12 @@ var astiencoder = {
     reset () {
         // Remove tags
         for (var name in this.tags) {
-            delete(this.tags[name])
+            delete this.tags[name]
         }
 
         // Remove nodes
         for (var name in this.nodes) {
-            delete(this.nodes[name])
+            delete this.nodes[name]
         }
     },
     onopen () {
@@ -44,7 +44,7 @@ var astiencoder = {
         if (this.recording.loaded && !recording) return
 
         // Get rollback
-        var rollback = false, n = false
+        var rollbacks = [], n = false
         if (recording) {
             switch (name) {
                 case 'astiencoder.node.continued':
@@ -53,7 +53,9 @@ var astiencoder = {
                     // Get node
                     n = this.nodes[payload]
                     if (!n) break
-                    rollback = {}
+
+                    // Create rollback
+                    var rollback = {}
                     
                     // Get name
                     switch (n.status) {
@@ -70,46 +72,53 @@ var astiencoder = {
     
                     // Get payload
                     rollback.payload = payload
-                    break
-                case 'astiencoder.node.stats':
-                    // Get node
-                    n = this.nodes[payload.name]
-                    if (!n) break
-                    rollback = {}
 
-                    // No stats
-                    if (Object.keys(n.stats).length === 0) {
-                        rollback = {
-                            name: 'astiencoder.rollback.stats.remove',
-                            payload: payload.name
-                        }
-                        break
-                    }
-    
+                    // Append rollback
+                    rollbacks.push(rollback)
+                    break
+                case 'astiencoder.node.started':
+                    // Append rollback
+                    rollbacks.push({
+                        name: 'astiencoder.rollback.node.remove',
+                        payload: payload.name
+                    })
+                    break
+                case 'astiencoder.stats':    
+                    // Create rollback
+                    var rollback = {}
+                    
                     // Get name
                     rollback.name = name
     
-                    // Get payload
-                    rollback.payload = {
-                        name: payload.name,
-                        stats: []
+                    // Loop through nodes
+                    rollback.payload = []
+                    for (var nn in this.nodes) {
+                        // Get node
+                        const n = this.nodes[nn]
+
+                        // No stats
+                        if (Object.keys(n.stats).length === 0) {
+                            // Append rollback
+                            rollbacks.push({
+                                name: 'astiencoder.rollback.stats.remove',
+                                payload: nn
+                            })
+                            continue
+                        }
+
+                        // Loop through stats
+                        for (var stat in n.stats) {
+                            var s = {}
+                            for (var k in n.stats[stat]) {
+                                s[k] = n.stats[stat][k]
+                            }
+                            s.target = nn
+                            rollback.payload.push(s)
+                        }
                     }
 
-                    // Get stats
-                    for (var stat in n.stats) {
-                        var s = {}
-                        for (var k in n.stats[stat]) {
-                            s[k] = n.stats[stat][k]
-                        }
-                        rollback.payload.stats.push(s)
-                    }
-                    break
-                case 'astiencoder.node.started':
-                    // Get rollback
-                    rollback = {
-                        name: 'astiencoder.rollback.node.remove',
-                        payload: payload.name
-                    }
+                    // Append rollback
+                    rollbacks.push(rollback)
                     break
             }
         }
@@ -122,17 +131,19 @@ var astiencoder = {
             case 'astiencoder.node.paused':
                 this.apply(payload, {status: 'paused'})
                 break
-            case 'astiencoder.node.stats':
-                this.apply(payload.name, {stats: payload.stats})
-                break
             case 'astiencoder.node.started':
                 this.apply(payload.name, payload)
                 break
             case 'astiencoder.node.stopped':
                 this.apply(payload, {status: 'stopped'})
                 break
+            case 'astiencoder.stats':
+                payload.forEach(stat => {
+                    this.apply(stat.target, {stat: stat})
+                })
+                break
         }
-        return rollback
+        return rollbacks
     },
     onKeyUp (event) {
         switch (event.code) {
@@ -151,6 +162,12 @@ var astiencoder = {
         cursorPreviouses: 0,
         nexts: [],
         previouses: [],
+        reset () {
+            this.cursorNexts = 0
+            this.cursorPreviouses = 0
+            this.nexts = []
+            this.previouses = []
+        },
         parse (line) {
             // Split line
             const items = line.split(',')
@@ -187,8 +204,8 @@ var astiencoder = {
                         }
                         break
                     default:
-                        const r = astiencoder.onmessage(item.name, item.payload, true)
-                        if (r) rollbacks.push(r)
+                        const rs = astiencoder.onmessage(item.name, item.payload, true)
+                        rollbacks.push(...rs)
                         break
                 }
             })
@@ -327,10 +344,11 @@ var astiencoder = {
                     case 'astiencoder.node.stopped':
                         k = 'status | ' + n.payload
                         break
-                    case 'astiencoder.node.stats':
-                        k = 'stats | ' + n.payload.name
                     case 'astiencoder.node.started':
                         k = 'status | ' + n.payload.name
+                        break
+                    case 'astiencoder.stats':
+                        k = 'stats'
                         break
                     default:
                         lines.shift()
@@ -369,6 +387,9 @@ var astiencoder = {
     onRecordingUnloadClick () {
         // Update recording
         this.recording.loaded = false
+
+        // Reset recording
+        this.recording.reset()
 
         // On open
         this.onopen()
@@ -818,38 +839,35 @@ var astiencoder = {
             }.bind(this))
         }
 
-        // Stats
-        if (payload.stats) {
-            // Loop through stats
-            payload.stats.forEach(function(item) {
-                // Add stat
-                // If stat already exists, it will do nothing
-                this.nodes[name].stats[item.label] = item
+        // Stat
+        if (payload.stat) {
+            // Add stat
+            // If stat already exists, it will do nothing
+            this.nodes[name].stats[payload.stat.label] = payload.stat
 
-                // Description
-                if (item.description) this.nodes[name].stats[item.label].description = item.description
+            // Description
+            if (payload.stat.description) this.nodes[name].stats[payload.stat.label].description = payload.stat.description
 
-                // Label
-                if (item.label) this.nodes[name].stats[item.label].label = item.label
+            // Label
+            if (payload.stat.label) this.nodes[name].stats[payload.stat.label].label = payload.stat.label
 
-                // Unit
-                if (item.unit) this.nodes[name].stats[item.label].unit = item.unit
+            // Unit
+            if (payload.stat.unit) this.nodes[name].stats[payload.stat.label].unit = payload.stat.unit
 
-                // Value
-                if (typeof item.value !== 'undefined') {
-                    var v = item.value
-                    if (!isNaN(parseFloat(v))) {
-                        v = parseFloat(item.value).toFixed(2)
-                        if (v < 10 && v >= 0) v = '0' + v
-                        else if (v > -10 && v < 0) v = '-0' + (-v)
-                        if (this.nodes[name].stats[item.label].unit === '%') {
-                            if (v > 1000) v = '+∞'
-                            else if (v < -1000) v = '-∞'
-                        }
+            // Value
+            if (typeof payload.stat.value !== 'undefined') {
+                var v = payload.stat.value
+                if (!isNaN(parseFloat(v))) {
+                    v = parseFloat(payload.stat.value).toFixed(2)
+                    if (v < 10 && v >= 0) v = '0' + v
+                    else if (v > -10 && v < 0) v = '-0' + (-v)
+                    if (this.nodes[name].stats[payload.stat.label].unit === '%') {
+                        if (v > 1000) v = '+∞'
+                        else if (v < -1000) v = '-∞'
                     }
-                    this.nodes[name].stats[item.label].value = v
                 }
-            }.bind(this))
+                this.nodes[name].stats[payload.stat.label].value = v
+            }
         }
 
         // Status

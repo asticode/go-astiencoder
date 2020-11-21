@@ -14,24 +14,16 @@ var (
 	EventNameNodeContinued     = "astiencoder.node.continued"
 	EventNameNodePaused        = "astiencoder.node.paused"
 	EventNameNodeStarted       = "astiencoder.node.started"
-	EventNameNodeStats         = "astiencoder.node.stats"
 	EventNameNodeStopped       = "astiencoder.node.stopped"
+	EventNameStats             = "astiencoder.stats"
 	EventNameWorkflowContinued = "astiencoder.workflow.continued"
 	EventNameWorkflowPaused    = "astiencoder.workflow.paused"
 	EventNameWorkflowStarted   = "astiencoder.workflow.started"
-	EventNameWorkflowStats     = "astiencoder.workflow.stats"
 	EventNameWorkflowStopped   = "astiencoder.workflow.stopped"
 	EventTypeContinued         = "continued"
 	EventTypePaused            = "paused"
 	EventTypeStarted           = "started"
-	EventTypeStats             = "stats"
 	EventTypeStopped           = "stopped"
-)
-
-// Event defaults
-const (
-	eventDefaultEventName = ""
-	eventDefaultTarget    = "default"
 )
 
 // Event is an event coming out of the encoder
@@ -86,17 +78,17 @@ func (h *EventHandler) Add(target interface{}, eventName string, c EventCallback
 
 // AddForEventName adds a new callback for a specific event name
 func (h *EventHandler) AddForEventName(eventName string, c EventCallback) {
-	h.Add(eventDefaultTarget, eventName, c)
+	h.Add(nil, eventName, c)
 }
 
 // AddForTarget adds a new callback for a specific target
 func (h *EventHandler) AddForTarget(target interface{}, c EventCallback) {
-	h.Add(target, eventDefaultEventName, c)
+	h.Add(target, "", c)
 }
 
 // AddForAll adds a new callback for all events
 func (h *EventHandler) AddForAll(c EventCallback) {
-	h.Add(eventDefaultTarget, eventDefaultEventName, c)
+	h.Add(nil, "", c)
 }
 
 func (h *EventHandler) del(target interface{}, eventName string, idx int) {
@@ -126,9 +118,17 @@ func (h *EventHandler) callbacks(target interface{}, eventName string) (cs []eve
 	// Index callbacks
 	ics := make(map[int]eventHandlerCallback)
 	var idxs []int
-	for _, target := range []interface{}{eventDefaultTarget, target} {
+	targets := []interface{}{nil}
+	if target != nil {
+		targets = append(targets, target)
+	}
+	for _, target := range targets {
 		if _, ok := h.cs[target]; ok {
-			for _, eventName := range []string{eventDefaultEventName, eventName} {
+			eventNames := []string{""}
+			if eventName != "" {
+				eventNames = append(eventNames, eventName)
+			}
+			for _, eventName := range eventNames {
 				if _, ok := h.cs[target][eventName]; ok {
 					for idx, c := range h.cs[target][eventName] {
 						ics[idx] = eventHandlerCallback{
@@ -206,63 +206,37 @@ func LoggerEventHandlerAdapter(i astikit.StdLogger, h *EventHandler) {
 	})
 }
 
-// EventGenerator represents an object capable of generating an event based on its type
-type EventGenerator interface {
-	Event(eventType string, payload interface{}) Event
-}
+// EventTypeTransformer represents a function capable of transforming an event type to an event name
+type EventTypeTransformer func(eventType string) string
 
-// EventGeneratorNode represents a node event generator
-type EventGeneratorNode struct {
-	n Node
-}
-
-// NewEventGeneratorNode creates a new node event generator
-func NewEventGeneratorNode(n Node) *EventGeneratorNode {
-	return &EventGeneratorNode{n: n}
-}
-
-// Event implements the EventGenerator interface
-func (g EventGeneratorNode) Event(eventType string, payload interface{}) Event {
+// EventTypeToNodeEventName is the node EventTypeTransformer
+func EventTypeToNodeEventName(eventType string) string {
 	switch eventType {
 	case EventTypeContinued:
-		return Event{Name: EventNameNodeContinued, Target: g.n}
+		return EventNameNodeContinued
 	case EventTypePaused:
-		return Event{Name: EventNameNodePaused, Target: g.n}
+		return EventNameNodePaused
 	case EventTypeStarted:
-		return Event{Name: EventNameNodeStarted, Target: g.n}
-	case EventTypeStats:
-		return Event{Name: EventNameNodeStats, Payload: payload, Target: g.n}
+		return EventNameNodeStarted
 	case EventTypeStopped:
-		return Event{Name: EventNameNodeStopped, Target: g.n}
+		return EventNameNodeStopped
 	default:
-		return Event{}
+		return ""
 	}
 }
 
-// EventGeneratorWorkflow represents a workflow event generator
-type EventGeneratorWorkflow struct {
-	w *Workflow
-}
-
-// NewEventGeneratorWorkflow creates a new workflow event generator
-func NewEventGeneratorWorkflow(w *Workflow) *EventGeneratorWorkflow {
-	return &EventGeneratorWorkflow{w: w}
-}
-
-// Event implements the EventGenerator interface
-func (g EventGeneratorWorkflow) Event(eventType string, payload interface{}) Event {
+// EventTypeToWorkflowEventName is the workflow EventTypeTransformer
+func EventTypeToWorkflowEventName(eventType string) string {
 	switch eventType {
 	case EventTypeContinued:
-		return Event{Name: EventNameWorkflowContinued, Target: g.w}
+		return EventNameWorkflowContinued
 	case EventTypePaused:
-		return Event{Name: EventNameWorkflowPaused, Target: g.w}
+		return EventNameWorkflowPaused
 	case EventTypeStarted:
-		return Event{Name: EventNameWorkflowStarted, Target: g.w}
-	case EventTypeStats:
-		return Event{Name: EventNameWorkflowStats, Payload: payload, Target: g.w}
+		return EventNameWorkflowStarted
 	case EventTypeStopped:
-		return Event{Name: EventNameWorkflowStopped, Target: g.w}
+		return EventNameWorkflowStopped
 	default:
-		return Event{}
+		return ""
 	}
 }

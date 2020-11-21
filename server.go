@@ -25,7 +25,7 @@ type ServerOptions struct {
 func NewServer(o ServerOptions) *Server {
 	return &Server{
 		l:  astikit.AdaptStdLogger(o.Logger),
-		ws: astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 8192}, o.Logger),
+		ws: astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 1e6}, o.Logger),
 	}
 }
 
@@ -102,12 +102,12 @@ func serverEventHandlerAdapter(eh *EventHandler, fn func(name string, payload in
 		switch e.Name {
 		case EventNameError:
 			p = astikit.ErrorCause(e.Payload.(error))
-		case EventNameNodeStats, EventNameWorkflowStats:
-			p = newServerStats(e)
 		case EventNameNodeContinued, EventNameNodePaused, EventNameNodeStopped:
 			p = e.Target.(Node).Metadata().Name
 		case EventNameNodeStarted:
 			p = newServerNode(e.Target.(Node))
+		case EventNameStats:
+			p = newServerStats(e)
 		}
 
 		// Custom
@@ -196,19 +196,9 @@ func newServerNode(n Node) (s ServerNode) {
 	return
 }
 
-type ServerStats struct {
-	Name  string       `json:"name"`
-	Stats []ServerStat `json:"stats"`
-}
-
-func newServerStats(e Event) (s ServerStats) {
-	if e.Name == EventNameNodeStats {
-		s.Name = e.Target.(Node).Metadata().Name
-	} else {
-		s.Name = e.Target.(*Workflow).Name()
-	}
+func newServerStats(e Event) (ss []ServerStat) {
 	for _, es := range e.Payload.([]EventStat) {
-		s.Stats = append(s.Stats, newServerStat(es))
+		ss = append(ss, newServerStat(es))
 	}
 	return
 }
@@ -216,17 +206,24 @@ func newServerStats(e Event) (s ServerStats) {
 type ServerStat struct {
 	Description string      `json:"description"`
 	Label       string      `json:"label"`
+	Target      string      `json:"target"`
 	Unit        string      `json:"unit"`
 	Value       interface{} `json:"value"`
 }
 
-func newServerStat(e EventStat) ServerStat {
-	return ServerStat{
+func newServerStat(e EventStat) (s ServerStat) {
+	s = ServerStat{
 		Description: e.Description,
 		Label:       e.Label,
 		Unit:        e.Unit,
 		Value:       e.Value,
 	}
+	if n, ok := e.Target.(Node); ok {
+		s.Target = n.Metadata().Name
+	} else if w, ok := e.Target.(*Workflow); ok {
+		s.Target = w.Name()
+	}
+	return
 }
 
 type ServerWelcome struct {

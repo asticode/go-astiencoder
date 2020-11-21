@@ -35,7 +35,7 @@ type DecoderOptions struct {
 }
 
 // NewDecoder creates a new decoder
-func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (d *Decoder, err error) {
+func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s *astiencoder.Stater) (d *Decoder, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countDecoder, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("decoder_%d", count), fmt.Sprintf("Decoder #%d", count), "Decodes", "decoder")
@@ -50,8 +50,14 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
-	d.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(d), eh)
+
+	// Create base node
+	d.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, d, astiencoder.EventTypeToNodeEventName)
+
+	// Create frame dispatcher
 	d.d = newFrameDispatcher(d, eh, d.fp)
+
+	// Add stats
 	d.addStats()
 
 	// Find decoder
@@ -90,27 +96,32 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 }
 
 func (d *Decoder) addStats() {
-	// Add incoming rate
-	d.Stater().AddStat(astikit.StatMetadata{
-		Description: "Number of packets coming in per second",
-		Label:       "Incoming rate",
-		Name:        StatNameIncomingRate,
-		Unit:        "pps",
-	}, d.statIncomingRate)
+	// Get stats
+	ss := append(d.c.Stats())
+	ss = append(ss, d.d.stats()...)
+	ss = append(ss,
+		astikit.StatOptions{
+			Handler: d.statIncomingRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of packets coming in per second",
+				Label:       "Incoming rate",
+				Name:        StatNameIncomingRate,
+				Unit:        "pps",
+			},
+		},
+		astikit.StatOptions{
+			Handler: d.statProcessedRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of packets processed per second",
+				Label:       "Processed rate",
+				Name:        StatNameProcessedRate,
+				Unit:        "pps",
+			},
+		},
+	)
 
-	// Add processed rate
-	d.Stater().AddStat(astikit.StatMetadata{
-		Description: "Number of packets processed per second",
-		Label:       "Processed rate",
-		Name:        StatNameProcessedRate,
-		Unit:        "pps",
-	}, d.statProcessedRate)
-
-	// Add dispatcher stats
-	d.d.addStats(d.Stater())
-
-	// Add chan stats
-	d.c.AddStats(d.Stater())
+	// Add stats
+	d.BaseNode.AddStats(ss...)
 }
 
 // OutputCtx returns the output ctx

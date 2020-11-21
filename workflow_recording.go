@@ -42,7 +42,7 @@ func (w *Workflow) NewRecording(o WorkflowRecordingOptions) (r *WorkflowRecordin
 	}
 
 	// Adapt event handler
-	serverEventHandlerAdapter(w.e, func(name string, payload interface{}) {
+	serverEventHandlerAdapter(w.eh, func(name string, payload interface{}) {
 		// Recording not started
 		if r.ctx == nil {
 			return

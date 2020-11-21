@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/goav/avutil"
@@ -28,10 +29,13 @@ func testJob(t *testing.T, jobPath string, assertPaths func(j Job) map[string]st
 	// Create workflow server
 	ws := astiencoder.NewServer(astiencoder.ServerOptions{Logger: l})
 
+	// Create stater
+	s := astiencoder.NewStater(2*time.Second, eh)
+
 	// Create encoder
 	cfg := &ConfigurationEncoder{}
 	cfg.Exec.StopWhenWorkflowsAreStopped = true
-	e := newEncoder(cfg, eh, ws, l)
+	e := newEncoder(cfg, eh, ws, l, s)
 
 	// Open job
 	j, err := openJob(jobPath)

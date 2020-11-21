@@ -12,18 +12,18 @@ type Workflow struct {
 	bn   *BaseNode
 	c    *astikit.Closer
 	ctx  context.Context
-	e    *EventHandler
+	eh   *EventHandler
 	name string
 	t    *astikit.Task
 	tf   CreateTaskFunc
 }
 
 // NewWorkflow creates a new workflow
-func NewWorkflow(ctx context.Context, name string, e *EventHandler, tf CreateTaskFunc, c *astikit.Closer) (w *Workflow) {
+func NewWorkflow(ctx context.Context, name string, eh *EventHandler, tf CreateTaskFunc, c *astikit.Closer) (w *Workflow) {
 	w = &Workflow{
 		c:    c,
 		ctx:  ctx,
-		e:    e,
+		eh:   eh,
 		name: name,
 		tf:   tf,
 	}
@@ -31,7 +31,7 @@ func NewWorkflow(ctx context.Context, name string, e *EventHandler, tf CreateTas
 		Description: "root",
 		Label:       "root",
 		Name:        "root",
-	}}, NewEventGeneratorWorkflow(w), e)
+	}}, eh, nil, w, EventTypeToWorkflowEventName)
 	return
 }
 
@@ -145,7 +145,7 @@ func (w *Workflow) start(ns []Node, o WorkflowStartOptions) {
 
 		// Close
 		if err := w.c.Close(); err != nil {
-			w.e.Emit(EventError(w, fmt.Errorf("astiencoder: closing workflow %s failed: %w", w.name, err)))
+			w.eh.Emit(EventError(w, fmt.Errorf("astiencoder: closing workflow %s failed: %w", w.name, err)))
 		}
 	})
 }

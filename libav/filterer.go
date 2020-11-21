@@ -47,7 +47,7 @@ type FiltererOptions struct {
 }
 
 // NewFilterer creates a new filterer
-func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (f *Filterer, err error) {
+func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s *astiencoder.Stater) (f *Filterer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countFilterer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("filterer_%d", count), fmt.Sprintf("Filterer #%d", count), "Filters", "filterer")
@@ -64,9 +64,17 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
-	f.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(f), eh)
+
+	// Create base node
+	f.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, f, astiencoder.EventTypeToNodeEventName)
+
+	// Create frame pool
 	f.p = newFramePool(f.cl)
+
+	// Create frame dispatcher
 	f.d = newFrameDispatcher(f, eh, f.p)
+
+	// Add stats
 	f.addStats()
 
 	// No inputs
@@ -197,27 +205,32 @@ func (f *Filterer) Close() error {
 }
 
 func (f *Filterer) addStats() {
-	// Add incoming rate
-	f.Stater().AddStat(astikit.StatMetadata{
-		Description: "Number of frames coming in per second",
-		Label:       "Incoming rate",
-		Name:        StatNameIncomingRate,
-		Unit:        "fps",
-	}, f.statIncomingRate)
+	// Get stats
+	ss := f.c.Stats()
+	ss = append(ss, f.d.stats()...)
+	ss = append(ss,
+		astikit.StatOptions{
+			Handler: f.statIncomingRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of frames coming in per second",
+				Label:       "Incoming rate",
+				Name:        StatNameIncomingRate,
+				Unit:        "fps",
+			},
+		},
+		astikit.StatOptions{
+			Handler: f.statProcessedRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of frames processed per second",
+				Label:       "Processed rate",
+				Name:        StatNameProcessedRate,
+				Unit:        "fps",
+			},
+		},
+	)
 
-	// Add processed rate
-	f.Stater().AddStat(astikit.StatMetadata{
-		Description: "Number of frames processed per second",
-		Label:       "Processed rate",
-		Name:        StatNameProcessedRate,
-		Unit:        "fps",
-	}, f.statProcessedRate)
-
-	// Add dispatcher stats
-	f.d.addStats(f.Stater())
-
-	// Add chan stats
-	f.c.AddStats(f.Stater())
+	// Add stats
+	f.BaseNode.AddStats(ss...)
 }
 
 // OutputCtx returns the output ctx

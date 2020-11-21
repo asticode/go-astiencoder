@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/asticode/go-astiencoder"
 	astilibav "github.com/asticode/go-astiencoder/libav"
@@ -47,8 +48,11 @@ func main() {
 	astiencoder.LoggerEventHandlerAdapter(l, eh)
 	ws.EventHandlerAdapter(eh)
 
+	// Create stater
+	s := astiencoder.NewStater(time.Second, eh)
+
 	// Create encoder
-	e := newEncoder(c.Encoder, eh, ws, l)
+	e := newEncoder(c.Encoder, eh, ws, l, s)
 
 	// Handle signals
 	e.w.HandleSignals()
@@ -81,6 +85,10 @@ func main() {
 
 		// Make sure the worker stops when the workflow is stopped
 		c.Encoder.Exec.StopWhenWorkflowsAreStopped = true
+
+		// Start stater
+		go s.Start(e.w.Context())
+		defer s.Stop()
 
 		// Start workflow
 		w.Start()

@@ -38,7 +38,7 @@ type MuxerOptions struct {
 }
 
 // NewMuxer creates a new muxer
-func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (m *Muxer, err error) {
+func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s *astiencoder.Stater) (m *Muxer, err error) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countMuxer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("muxer_%d", count), fmt.Sprintf("Muxer #%d", count), fmt.Sprintf("Muxes to %s", o.URL), "muxer")
@@ -54,7 +54,11 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
-	m.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(m), eh)
+
+	// Create base node
+	m.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, m, astiencoder.EventTypeToNodeEventName)
+
+	// Add stats
 	m.addStats()
 
 	// Alloc format context
@@ -96,24 +100,31 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (
 }
 
 func (m *Muxer) addStats() {
-	// Add incoming rate
-	m.Stater().AddStat(astikit.StatMetadata{
-		Description: "Number of packets coming in per second",
-		Label:       "Incoming rate",
-		Name:        StatNameIncomingRate,
-		Unit:        "pps",
-	}, m.statIncomingRate)
+	// Get stats
+	ss := m.c.Stats()
+	ss = append(ss,
+		astikit.StatOptions{
+			Handler: m.statIncomingRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of packets coming in per second",
+				Label:       "Incoming rate",
+				Name:        StatNameIncomingRate,
+				Unit:        "pps",
+			},
+		},
+		astikit.StatOptions{
+			Handler: m.statProcessedRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of packets processed per second",
+				Label:       "Processed rate",
+				Name:        StatNameProcessedRate,
+				Unit:        "pps",
+			},
+		},
+	)
 
-	// Add processed rate
-	m.Stater().AddStat(astikit.StatMetadata{
-		Description: "Number of packets processed per second",
-		Label:       "Processed rate",
-		Name:        StatNameProcessedRate,
-		Unit:        "pps",
-	}, m.statProcessedRate)
-
-	// Add chan stats
-	m.c.AddStats(m.Stater())
+	// Add stats
+	m.BaseNode.AddStats(ss...)
 }
 
 // CtxFormat returns the format ctx

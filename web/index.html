@@ -36,7 +36,7 @@
                 <i id="recording-next" class="fa fa-forward" onclick="astiencoder.onRecordingNextClick()"></i>
             </div>
             <div>
-                <input id="progress" min="0" max="100" type="range" onchange="astiencoder.onRecordingSeek(event)"/>
+                <input id="progress" min="0" max="100" type="range" onchange="astiencoder.onRecordingSeek(event)" onkeydown="event.preventDefault()"/>
             </div>
             <div>
                 <span id="time"></span>

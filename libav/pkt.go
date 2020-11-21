@@ -92,14 +92,18 @@ func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, descriptor Descriptor) {
 	}
 }
 
-func (d *pktDispatcher) addStats(s *astikit.Stater) {
-	// Add outgoing rate
-	s.AddStat(astikit.StatMetadata{
-		Description: "Number of packets going out per second",
-		Label:       "Outgoing rate",
-		Name:        StatNameOutgoingRate,
-		Unit:        "pps",
-	}, d.statOutgoingRate)
+func (d *pktDispatcher) stats() []astikit.StatOptions {
+	return []astikit.StatOptions{
+		astikit.StatOptions{
+			Handler: d.statOutgoingRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of packets going out per second",
+				Label:       "Outgoing rate",
+				Name:        StatNameOutgoingRate,
+				Unit:        "pps",
+			},
+		},
+	}
 }
 
 // PktCond represents an object that can decide whether to use a pkt

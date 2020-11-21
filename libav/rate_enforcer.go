@@ -62,7 +62,7 @@ type RateEnforcerOptions struct {
 }
 
 // NewRateEnforcer creates a new rate enforcer
-func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *astikit.Closer) (r *RateEnforcer) {
+func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s *astiencoder.Stater) (r *RateEnforcer) {
 	// Extend node metadata
 	count := atomic.AddUint64(&countRateEnforcer, uint64(1))
 	o.Node.Metadata = o.Node.Metadata.Extend(fmt.Sprintf("rate_enforcer_%d", count), fmt.Sprintf("Rate Enforcer #%d", count), "Enforces rate", "rate enforcer")
@@ -84,50 +84,63 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 		statRepeatedRate:  astikit.NewCounterRateStat(),
 		timeBase:          avutil.NewRational(o.FrameRate.Den(), o.FrameRate.Num()),
 	}
-	r.BaseNode = astiencoder.NewBaseNode(o.Node, astiencoder.NewEventGeneratorNode(r), eh)
+
+	// Create base node
+	r.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, r, astiencoder.EventTypeToNodeEventName)
+
+	// Create frame dispatcher
 	r.d = newFrameDispatcher(r, eh, r.p)
+
+	// Add stats
 	r.addStats()
 	return
 }
 
 func (r *RateEnforcer) addStats() {
-	// Add delay avg
-	r.Stater().AddStat(astikit.StatMetadata{
-		Description: "Average delay of frames coming in",
-		Label:       "Average delay",
-		Name:        StatNameAverageDelay,
-		Unit:        "ms",
-	}, r.statDelayAvg)
+	// Get stats
+	ss := r.c.Stats()
+	ss = append(ss, r.d.stats()...)
+	ss = append(ss,
+		astikit.StatOptions{
+			Handler: r.statIncomingRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of frames coming in per second",
+				Label:       "Incoming rate",
+				Name:        StatNameIncomingRate,
+				Unit:        "fps",
+			},
+		},
+		astikit.StatOptions{
+			Handler: r.statProcessedRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of frames processed per second",
+				Label:       "Processed rate",
+				Name:        StatNameProcessedRate,
+				Unit:        "fps",
+			},
+		},
+		astikit.StatOptions{
+			Handler: r.statDelayAvg,
+			Metadata: &astikit.StatMetadata{
+				Description: "Average delay of frames coming in",
+				Label:       "Average delay",
+				Name:        StatNameAverageDelay,
+				Unit:        "ms",
+			},
+		},
+		astikit.StatOptions{
+			Handler: r.statRepeatedRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of frames repeated per second",
+				Label:       "Repeated rate",
+				Name:        StatNameRepeatedRate,
+				Unit:        "fps",
+			},
+		},
+	)
 
-	// Add incoming rate
-	r.Stater().AddStat(astikit.StatMetadata{
-		Description: "Number of frames coming in per second",
-		Label:       "Incoming rate",
-		Name:        StatNameIncomingRate,
-		Unit:        "fps",
-	}, r.statIncomingRate)
-
-	// Add processed rate
-	r.Stater().AddStat(astikit.StatMetadata{
-		Description: "Number of frames processed per second",
-		Label:       "Processed rate",
-		Name:        StatNameProcessedRate,
-		Unit:        "fps",
-	}, r.statProcessedRate)
-
-	// Add repeated rate
-	r.Stater().AddStat(astikit.StatMetadata{
-		Description: "Number of frames repeated per second",
-		Label:       "Repeated rate",
-		Name:        StatNameRepeatedRate,
-		Unit:        "fps",
-	}, r.statRepeatedRate)
-
-	// Add dispatcher stats
-	r.d.addStats(r.Stater())
-
-	// Add chan stats
-	r.c.AddStats(r.Stater())
+	// Add stats
+	r.BaseNode.AddStats(ss...)
 }
 
 // OutputCtx returns the output ctx
