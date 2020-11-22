@@ -94,7 +94,7 @@ func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, descriptor Descriptor) {
 
 func (d *pktDispatcher) stats() []astikit.StatOptions {
 	return []astikit.StatOptions{
-		astikit.StatOptions{
+		{
 			Handler: d.statOutgoingRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of packets going out per second",

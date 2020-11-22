@@ -89,7 +89,7 @@ func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
 
 func (d *frameDispatcher) stats() []astikit.StatOptions {
 	return []astikit.StatOptions{
-		astikit.StatOptions{
+		{
 			Handler: d.statOutgoingRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of frames going out per second",
