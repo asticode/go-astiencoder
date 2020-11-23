@@ -534,21 +534,33 @@ func (f *previousRateEnforcerFiller) NoFill(fm *avutil.Frame) {
 
 type frameRateEnforcerFiller struct{ f *avutil.Frame }
 
-func NewFrameRateEnforcerFiller(fn func(f *avutil.Frame), c *astikit.Closer) *frameRateEnforcerFiller {
+func NewFrameRateEnforcerFiller(fn func(fm *avutil.Frame) error, c *astikit.Closer) (f *frameRateEnforcerFiller, err error) {
 	// Alloc frame
-	f := avutil.AvFrameAlloc()
+	fm := avutil.AvFrameAlloc()
 
 	// Make sure to free frame
-	c.Add(func() error {
-		avutil.AvFrameFree(f)
-		return nil
-	})
+	defer func(err *error) {
+		if *err != nil {
+			avutil.AvFrameFree(fm)
+		} else {
+			c.Add(func() error {
+				avutil.AvFrameFree(fm)
+				return nil
+			})
+		}
+	}(&err)
 
 	// Adapt frame
 	if fn != nil {
-		fn(f)
+		if err = fn(fm); err != nil {
+			err = fmt.Errorf("astilibav: adapting frame failed: %w", err)
+			return
+		}
 	}
-	return &frameRateEnforcerFiller{f: f}
+
+	// Create filler
+	f = &frameRateEnforcerFiller{f: fm}
+	return
 }
 
 func (f *frameRateEnforcerFiller) Fill() *avutil.Frame { return f.f }
