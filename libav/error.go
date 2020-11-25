@@ -15,14 +15,13 @@ func (e AvError) Error() string {
 	return avutil.AvStrerr(int(e))
 }
 
-// IsOneOf checks whether the error is one of the specified raw return code such as avutil.AVERROR_* codes
-func (e AvError) IsOneOf(rs ...int) bool {
-	for _, r := range rs {
-		if e == AvError(r) {
-			return true
-		}
+// Is implements the standard error interface
+func (e AvError) Is(err error) bool {
+	a, ok := err.(AvError)
+	if !ok {
+		return false
 	}
-	return false
+	return int(a) == int(e)
 }
 
 // NewAvError creates a new av error
