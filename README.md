@@ -4,7 +4,7 @@ Right now this project has only been tested on FFMpeg 4.1.1
 
 You need GO >= 1.13
 
-![screenshot-1](doc/screenshot-1.jpg)
+![screenshot-1](doc/screenshot-1.png)
 
 # Why use this project when I can use `ffmpeg` binary?
 

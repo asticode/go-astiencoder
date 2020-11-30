@@ -1,6 +1,7 @@
 var astiencoder = {
     init () {
         // Handle keyboard
+        document.addEventListener('keydown', this.onKeyDown.bind(this))
         document.addEventListener('keyup', this.onKeyUp.bind(this))
 
         // Open websocket
@@ -29,13 +30,21 @@ var astiencoder = {
                 // Reset
                 this.reset()
 
-                // Loop through nodes
-                if (data.workflow) {
-                    data.workflow.nodes.forEach(function(item) {
-                        // Apply changes
-                        this.apply(item.name, item)
-                    }.bind(this))
+                // No workflow or no nodes
+                if (!data.workflow || data.workflow.nodes.length === 0) {
+                    // Refresh nodes position
+                    this.refreshNodesPosition()
+                    return
                 }
+
+                // Loop through nodes
+                data.workflow.nodes.forEach(function(item) {
+                    // Apply changes
+                    this.apply(item.name, item)
+                }.bind(this))
+
+                // Refresh nodes position
+                this.refreshNodesPosition()
             }.bind(this)
         })
     },
@@ -132,28 +141,67 @@ var astiencoder = {
                 this.apply(payload, {status: 'paused'})
                 break
             case 'astiencoder.node.started':
+                // Apply
                 this.apply(payload.name, payload)
+
+                // Refresh nodes position
+                if (!recording) this.refreshNodesPosition()
                 break
             case 'astiencoder.node.stopped':
+                // Apply
                 this.apply(payload, {status: 'stopped'})
+
+                // Refresh nodes position
+                if (!recording) this.refreshNodesPosition()
                 break
             case 'astiencoder.stats':
+                // Apply
                 payload.forEach(stat => {
                     this.apply(stat.target, {stat: stat})
                 })
+
+                // Refresh nodes size
+                if (!recording) this.refreshNodesSize()
                 break
         }
         return rollbacks
     },
+    onKeyDown (event) {
+        // Keys don't exist
+        if (!this.keys) this.keys = {}
+
+        // Add key
+        this.keys[event.code] = true
+    },
     onKeyUp (event) {
-        switch (event.code) {
-            case 'ArrowLeft':
-                this.onRecordingPreviousClick()
-                break
-            case 'ArrowRight':
-                this.onRecordingNextClick()
-                break
+        // Keys don't exist
+        if (!this.keys) return
+
+        // Action
+        if (this.exactKeys('ArrowDown', 'ArrowUp')) this.zoomAuto()
+        else if (this.exactKeys('ArrowDown')) this.zoomOut()
+        else if (this.exactKeys('ArrowLeft')) this.onRecordingPreviousClick()
+        else if (this.exactKeys('ArrowRight')) this.onRecordingNextClick()
+        else if (this.exactKeys('ArrowUp')) this.zoomIn()
+
+        // Remove key
+        this.keys[event.code] = false 
+    },
+    exactKeys(...keys) {
+        // Get number of match
+        var count = 0
+        for (var idx = 0; idx < keys.length; idx++) {
+            if (this.keys[keys[idx]]) count++
         }
+
+        // All keys match
+        if (count === keys.length) {
+            for (var idx = 0; idx < keys.length; idx++) {
+                this.keys[keys[idx]] = false
+            }
+            return true
+        }
+        return false
     },
 
     /* recording */
@@ -191,6 +239,7 @@ var astiencoder = {
             list.items.forEach(function(item) {
                 switch (item.name) {
                     case 'astiencoder.rollback.node.remove':
+                        // Delete
                         delete astiencoder.nodes[item.payload]
                         break
                     case 'astiencoder.rollback.stats.remove':
@@ -400,6 +449,9 @@ var astiencoder = {
 
         // Apply next
         this.recording.applyNext()
+
+        // Refresh nodes position
+        this.refreshNodesPosition()
     },
     onRecordingPreviousClick () {
         // No recording
@@ -407,6 +459,9 @@ var astiencoder = {
 
         // Apply previous
         this.recording.applyPrevious()
+
+        // Refresh nodes position
+        this.refreshNodesPosition()
     },
     onRecordingSeek (e) {
         // No recording
@@ -441,6 +496,9 @@ var astiencoder = {
                 this.recording.applyPrevious()
             }
         }
+
+        // Refresh nodes position
+        this.refreshNodesPosition()
     },
 
     /* tags */
@@ -531,9 +589,13 @@ var astiencoder = {
         }
     }),
     refreshTags () {
+        // Loop through nodes
         for (var name in this.nodes) {
             this.refreshTagsForNode(name)
         }
+
+        // Refresh nodes position
+        this.refreshNodesPosition()
     },
     refreshTagsForNode (name) {
         // Index tags
@@ -566,17 +628,6 @@ var astiencoder = {
 
     /* nodes */
     nodes: new Proxy({}, {
-        deleteProperty: function(obj, prop) {
-            // Get value
-            const value = obj[prop]
-            if (!value) return
-
-            // Delete wrapper
-            document.getElementById('nodes').removeChild(value.dom.w)
-
-            // Delete prop
-            delete(obj[prop])
-        },
         set: function(obj, prop, value) {
             // Node already exists
             if (typeof obj[prop] !== 'undefined') return
@@ -585,6 +636,8 @@ var astiencoder = {
             var n = {
                 _key: value.label,
                 dom: {},
+                notInSearch: false,
+                notInTags: false
             }
 
             // We need to store locally the node name since it's used by refreshTagsForNode
@@ -592,34 +645,24 @@ var astiencoder = {
 
             // Create wrapper
             n.dom.w = document.createElement('div')
-
-            // Append wrapper in label alphabetical order
-            var p = null
-            for (var name in astiencoder.nodes) {
-                const i = astiencoder.nodes[name]
-                if (n._key < i._key && (!p || p._key > i._key)) p = i
-            }
-            if (p) document.getElementById('nodes').insertBefore(n.dom.w, p.dom.w)
-            else document.getElementById('nodes').appendChild(n.dom.w)
+            n.dom.w.className = 'node'
 
             // Add children
             n.children = new Proxy({}, {
-                deleteProperty: function(obj, prop) {
-                    // Delete prop
-                    delete(obj[prop])
-
-                    // Refresh not active
-                    astiencoder.refreshNotActive(n)
-                },
                 set: function(obj, prop, value) {
                     // Nothing changed
-                    if (typeof obj[prop] !== 'undefined' && obj[prop] === value) return
+                    if (typeof obj[prop] !== 'undefined') return
 
                     // Store value
-                    obj[prop] = value
-
-                    // Refresh not active
-                    astiencoder.refreshNotActive(n)
+                    obj[prop] = {
+                        arrow: {
+                            head: {
+                                line1: document.createElementNS("http://www.w3.org/2000/svg", "line"),
+                                line2: document.createElementNS("http://www.w3.org/2000/svg", "line")
+                            },
+                            line: document.createElementNS("http://www.w3.org/2000/svg", "line")
+                        }
+                    }
                     return true
                 }
             })
@@ -635,26 +678,7 @@ var astiencoder = {
             n.dom.w.appendChild(_n)
 
             // Add parents
-            n.parents = new Proxy({}, {
-                deleteProperty: function(obj, prop) {
-                    // Delete prop
-                    delete(obj[prop])
-
-                    // Refresh not active
-                    astiencoder.refreshNotActive(n)
-                },
-                set: function(obj, prop, value) {
-                    // Nothing changed
-                    if (typeof obj[prop] !== 'undefined' && obj[prop] === value) return
-
-                    // Store value
-                    obj[prop] = value
-
-                    // Refresh not active
-                    astiencoder.refreshNotActive(n)
-                    return true
-                }
-            })
+            n.parents = {}
 
             // Add stats
             const _ss = document.createElement('table')
@@ -754,6 +778,11 @@ var astiencoder = {
                 }
             })
 
+            // Methods
+            n.displayed = function() {
+                return !this.notInTags && !this.notInSearch
+            }
+
             // Store node
             obj[prop] = new Proxy(n, {
                 set: function(obj, prop, value) {
@@ -761,21 +790,13 @@ var astiencoder = {
                     if (typeof obj[prop] !== 'undefined' && obj[prop] === value) return
 
                     // Switch on prop
-                    var refreshNotActive = false
+                    var refreshTags = false
                     switch (prop) {
                         case 'label':
                             _l.innerText = value
                             break
                         case 'name':
                             _n.innerText = value
-                            break
-                        case 'notInSearch':
-                            if (value) n.dom.w.classList.add('not-in-search')
-                            else n.dom.w.classList.remove('not-in-search')
-                            break
-                        case 'notInTags':
-                            if (value) n.dom.w.classList.add('not-in-tags')
-                            else n.dom.w.classList.remove('not-in-tags')
                             break
                         case 'status':
                             if (obj[prop] !== value) {
@@ -787,29 +808,314 @@ var astiencoder = {
                                 delete(n.tags[obj[prop]])
                                 n.tags[value] = true
 
-                                // Refresh not active
-                                refreshNotActive = true
+                                // Make sure to refresh tags
+                                refreshTags = true
                             }
                             break
                     }
 
+                    // Refresh tags
+                    if (refreshTags) astiencoder.refreshTagsForNode(nodeName)
+
                     // Store value
                     obj[prop] = value
-
-                    // Refresh not active
-                    // It needs the new value to be set
-                    if (refreshNotActive) astiencoder.refreshNotActive(n)
                     return true
                 }
             })
             return true
         }
     }),
-    refreshNotActive (n) {
-        if (Object.keys(n.children).length === 0
-            && Object.keys(n.parents).length === 0
-            && n.status === 'stopped') n.dom.w.classList.add('not-active')
-        else n.dom.w.classList.remove('not-active')
+    refreshNodesPosition () {
+        // Reset
+        document.getElementById('nodes').innerHTML = ''
+
+        // Create svg
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+        document.getElementById('nodes').appendChild(svg)
+
+        // Get levels
+        var processedNodes = {}, total = Object.keys(this.nodes).length, levels = []
+        while (Object.keys(processedNodes).length < total) {
+            // Loop through nodes
+            var level = [], tempLevel = {}
+            for (var name in this.nodes) {
+                // Already processed
+                if (processedNodes[name]) continue
+
+                // There are no levels yet, we check nodes with no parents
+                if (levels.length === 0) {
+                    if (Object.keys(this.nodes[name].parents).length === 0) level.push(this.nodes[name])
+                    continue
+                }
+                
+                // Loop through previous level nodes
+                levels[levels.length-1].forEach(item => {
+                    if (this.nodes[name].parents[item.name]) tempLevel[name] = this.nodes[name]
+                })
+            }
+
+            // Move children in the same zone as their parent
+            if (levels.length > 0 && Object.keys(tempLevel).length > 0) {
+                // Loop through previous level nodes
+                levels[levels.length - 1].forEach(item => {
+                    // Loop through children
+                    for (var k in item.children) {
+                        const c = tempLevel[k]
+                        if (c) {
+                            level.push(c)
+                            delete tempLevel[k]
+                        }
+                    }
+                })
+            }
+
+            // No nodes in level
+            // This shouldn't happen but we want to avoid infinite loops
+            if (level.length === 0) break
+
+            // Append level
+            levels.push(level)
+            level.forEach(node => processedNodes[node.name] = true)
+        }
+
+        // Loop through levels
+        levels.forEach(level => {
+            // Create wrapper
+            const lw = document.createElement('div')
+
+            // Loop through level items
+            level.forEach(item => {
+                // Node is not displayed
+                if (!item.displayed()) return
+
+                // Append wrapper
+                lw.appendChild(item.dom.w)
+
+                // Loop through children
+                for (var c in item.children) {
+                    // Node is not displayed
+                    const n = this.nodes[c]
+                    if (!n || !n.displayed()) continue
+
+                    // Append arrow
+                    svg.appendChild(item.children[c].arrow.line)
+                    svg.appendChild(item.children[c].arrow.head.line1)
+                    svg.appendChild(item.children[c].arrow.head.line2)
+                }
+            })
+
+            // Append wrapper
+            document.getElementById('nodes').appendChild(lw)
+        })
+        
+        // Refresh size
+        this.refreshNodesSize()
+    },
+    refreshNodesSize () {
+        // Get zoom ratio
+        var zoomRatio = this.zoom.value / 100
+        if (this.zoom.auto) {
+            // Get total width
+            var { totalWidth } = this.nodesTotalSize(1)
+
+            // Update zoom ratio
+            zoomRatio = Math.min(document.querySelector('section').offsetWidth / totalWidth, 1)
+
+            // Update value
+            this.zoom.value = zoomRatio * 100
+        }
+
+        // Get total size
+        var { levelHeights, levelWidths, totalHeight, totalWidth } = this.nodesTotalSize(zoomRatio)
+
+        // Get levels
+        const ls = document.querySelectorAll('#nodes > div')
+
+        // Loop through levels
+        var cursorHeight = 0
+        for (var idxLevel = 0; idxLevel < ls.length; idxLevel++) {
+            // Get level size
+            const levelHeight = levelHeights[idxLevel]
+            const levelWidth = levelWidths[idxLevel]
+
+            // Get horizontal margin between nodes
+            const horizontalMargin = (totalWidth - levelWidth) / ls[idxLevel].childNodes.length / 2
+
+            // Loop through nodes
+            var cursorWidth = 0
+            for (var idxItem = 0; idxItem < ls[idxLevel].childNodes.length; idxItem++) {
+                // Update top
+                ls[idxLevel].childNodes[idxItem].style.top = cursorHeight + ((levelHeight - ls[idxLevel].childNodes[idxItem].offsetHeight) / 2) + 'px'
+
+                // Update left
+                if (idxItem === 0) ls[idxLevel].childNodes[idxItem].style.left = horizontalMargin + 'px'
+                else ls[idxLevel].childNodes[idxItem].style.left = cursorWidth + 2 * horizontalMargin + 'px'
+
+                // Update width cursor
+                cursorWidth = ls[idxLevel].childNodes[idxItem].offsetLeft + ls[idxLevel].childNodes[idxItem].offsetWidth - 1
+            }
+
+            // Update height cursor
+            if (levelHeight > 0) cursorHeight += levelHeight + this.nodeBottomMargin(zoomRatio)
+        }
+
+        // Loop through nodes
+        for (var name in this.nodes) {
+            // Node is not displayed
+            const n = this.nodes[name]
+            if (!n.displayed()) continue
+            
+            // Loop through children
+            for (var k in this.nodes[name].children) {
+                // Node is not displayed
+                const c = this.nodes[k]
+                if (!c || !c.displayed()) continue
+
+                // Node has no height
+                if (c.dom.w.offsetHeight === 0) continue
+
+                // Get direction
+                var d = ""
+                if (n.dom.w.offsetTop + n.dom.w.offsetHeight < c.dom.w.offsetTop) d += "bottom-"
+                else d += "top-"
+                if (n.dom.w.offsetLeft + (n.dom.w.offsetWidth / 2) < c.dom.w.offsetLeft + (c.dom.w.offsetWidth / 2)) d += "right"
+                else d += "left"
+
+                // Get arrow line coordinates
+                var lineFromX, lineFromY, lineToX, lineToY
+                if (d === "bottom-left" || d === "bottom-right") {
+                    lineFromX = n.dom.w.offsetLeft + (n.dom.w.offsetWidth / 2)
+                    lineFromY = n.dom.w.offsetTop + n.dom.w.offsetHeight
+                    lineToX = c.dom.w.offsetLeft + (c.dom.w.offsetWidth / 2)
+                    lineToY = c.dom.w.offsetTop
+                } else if (d === "top-right") {
+                    lineFromX = n.dom.w.offsetLeft + n.dom.w.offsetWidth
+                    lineFromY = n.dom.w.offsetTop + (n.dom.w.offsetHeight / 2)
+                    lineToX = c.dom.w.offsetLeft
+                    lineToY = c.dom.w.offsetTop + (c.dom.w.offsetHeight / 2)
+                } else {
+                    lineFromX = n.dom.w.offsetLeft
+                    lineFromY = n.dom.w.offsetTop + (n.dom.w.offsetHeight / 2)
+                    lineToX = c.dom.w.offsetLeft + c.dom.w.offsetWidth
+                    lineToY = c.dom.w.offsetTop + (c.dom.w.offsetHeight / 2)
+                }
+
+                // Update arrow line
+                this.nodes[name].children[k].arrow.line.style.strokeWidth = zoomRatio + 'px'
+                this.nodes[name].children[k].arrow.line.setAttribute('x1', lineFromX)
+                this.nodes[name].children[k].arrow.line.setAttribute('y1', lineFromY)
+                this.nodes[name].children[k].arrow.line.setAttribute('x2', lineToX)
+                this.nodes[name].children[k].arrow.line.setAttribute('y2', lineToY)
+
+                // Get angles
+                const lineAngle = Math.atan(Math.abs(lineToX - lineFromX) / Math.abs(lineToY - lineFromY))
+                const oppositeLineAngle = (Math.PI / 2 - lineAngle)
+                const arrowAngle = 30 * Math.PI / 180
+
+                // Get arrow length
+                const arrowLength = this.nodeArrowLength(zoomRatio)
+
+                // Get arrow head line coordinates
+                var headLine1FromX, headLine1ToX, headLine1FromY, headLine1ToY, headLine2FromX, headLine2ToX, headLine2FromY, headLine2ToY
+                if (d === 'bottom-right') {
+                    headLine1FromX = lineToX - (Math.sin(lineAngle - arrowAngle) * 0.5)
+                    headLine1FromY = lineToY - (Math.cos(lineAngle - arrowAngle) * 0.5)
+                    headLine1ToX = headLine1FromX - (Math.sin(lineAngle - arrowAngle) * arrowLength)
+                    headLine1ToY = headLine1FromY - (Math.cos(lineAngle - arrowAngle) * arrowLength)
+                    headLine2FromX = lineToX - (Math.cos(oppositeLineAngle - arrowAngle) * 0.5)
+                    headLine2FromY = lineToY - (Math.sin(oppositeLineAngle - arrowAngle) * 0.5)
+                    headLine2ToX = headLine2FromX - (Math.cos(oppositeLineAngle - arrowAngle) * arrowLength)
+                    headLine2ToY = headLine2FromY - (Math.sin(oppositeLineAngle - arrowAngle) * arrowLength)
+                } else if (d === 'bottom-left') {
+                    headLine1FromX = lineToX + (Math.sin(lineAngle - arrowAngle) * 0.5)
+                    headLine1FromY = lineToY - (Math.cos(lineAngle - arrowAngle) * 0.5)
+                    headLine1ToX = headLine1FromX + (Math.sin(lineAngle - arrowAngle) * arrowLength)
+                    headLine1ToY = headLine1FromY - (Math.cos(lineAngle - arrowAngle) * arrowLength)
+                    headLine2FromX = lineToX + (Math.cos(oppositeLineAngle - arrowAngle) * 0.5)
+                    headLine2FromY = lineToY - (Math.sin(oppositeLineAngle - arrowAngle) * 0.5)
+                    headLine2ToX = headLine2FromX + (Math.cos(oppositeLineAngle - arrowAngle) * arrowLength)
+                    headLine2ToY = headLine2FromY - (Math.sin(oppositeLineAngle - arrowAngle) * arrowLength)
+                } else if (d === 'top-right') {
+                    headLine1FromX = lineToX - (Math.sin(lineAngle - arrowAngle) * 0.5)
+                    headLine1FromY = lineToY + (Math.cos(lineAngle - arrowAngle) * 0.5)
+                    headLine1ToX = headLine1FromX - (Math.sin(lineAngle - arrowAngle) * arrowLength)
+                    headLine1ToY = headLine1FromY + (Math.cos(lineAngle - arrowAngle) * arrowLength)
+                    headLine2FromX = lineToX - (Math.cos(oppositeLineAngle - arrowAngle) * 0.5)
+                    headLine2FromY = lineToY + (Math.sin(oppositeLineAngle - arrowAngle) * 0.5)
+                    headLine2ToX = headLine2FromX - (Math.cos(oppositeLineAngle - arrowAngle) * arrowLength)
+                    headLine2ToY = headLine2FromY + (Math.sin(oppositeLineAngle - arrowAngle) * arrowLength)
+                } else if (d === 'top-left') {
+                    headLine1FromX = lineToX + (Math.sin(lineAngle - arrowAngle) * 0.5)
+                    headLine1FromY = lineToY + (Math.cos(lineAngle - arrowAngle) * 0.5)
+                    headLine1ToX = headLine1FromX + (Math.sin(lineAngle - arrowAngle) * arrowLength)
+                    headLine1ToY = headLine1FromY + (Math.cos(lineAngle - arrowAngle) * arrowLength)
+                    headLine2FromX = lineToX + (Math.cos(oppositeLineAngle - arrowAngle) * 0.5)
+                    headLine2FromY = lineToY + (Math.sin(oppositeLineAngle - arrowAngle) * 0.5)
+                    headLine2ToX = headLine2FromX + (Math.cos(oppositeLineAngle - arrowAngle) * arrowLength)
+                    headLine2ToY = headLine2FromY + (Math.sin(oppositeLineAngle - arrowAngle) * arrowLength)
+                }
+
+                // Update arrow head lines
+                this.nodes[name].children[k].arrow.head.line1.style.strokeWidth = zoomRatio + 'px'
+                this.nodes[name].children[k].arrow.head.line1.setAttribute('x1', headLine1FromX)
+                this.nodes[name].children[k].arrow.head.line1.setAttribute('y1', headLine1FromY)
+                this.nodes[name].children[k].arrow.head.line1.setAttribute('x2', headLine1ToX)
+                this.nodes[name].children[k].arrow.head.line1.setAttribute('y2', headLine1ToY)
+                this.nodes[name].children[k].arrow.head.line2.style.strokeWidth = zoomRatio + 'px'
+                this.nodes[name].children[k].arrow.head.line2.setAttribute('x1', headLine2FromX)
+                this.nodes[name].children[k].arrow.head.line2.setAttribute('y1', headLine2FromY)
+                this.nodes[name].children[k].arrow.head.line2.setAttribute('x2', headLine2ToX)
+                this.nodes[name].children[k].arrow.head.line2.setAttribute('y2', headLine2ToY)
+            }
+        }
+
+        // Update size
+        document.getElementById('nodes').style.height = totalHeight + 'px'
+        document.getElementById('nodes').style.width = totalWidth + 'px'
+    },
+    nodeLeftMargin (zoomRatio) {
+        return 2 * 12 * zoomRatio
+    },
+    nodeBottomMargin (zoomRatio) {
+        return 4 * 12 * zoomRatio
+    },
+    nodeArrowLength (zoomRatio) {
+        return 12 * zoomRatio
+    },
+    nodesTotalSize (zoomRatio) {
+        // Reset
+        document.getElementById('nodes').style.fontSize = 12 * zoomRatio + 'px'
+        document.getElementById('nodes').style.height = 1e10 + 'px'
+        document.getElementById('nodes').style.width = 1e10 + 'px'
+
+        // Get levels
+        const ls = document.querySelectorAll('#nodes > div')
+
+        // Loop through levels
+        var totalWidth = 0, levelWidths = [], levelHeights = [], totalHeight = this.nodeBottomMargin(zoomRatio) * (ls.length - 1)
+        for (var idxLevel = 0; idxLevel < ls.length; idxLevel++) {
+            // Create sizes
+            var height = 0
+            var width = 0
+
+            // Update width
+            ls[idxLevel].childNodes.forEach(item => {
+                height = Math.max(height, item.getBoundingClientRect().height)
+                width += item.getBoundingClientRect().width
+            })
+
+            // Update
+            levelHeights.push(height)
+            levelWidths.push(width)
+            totalHeight += height
+            totalWidth = Math.max(totalWidth, width + this.nodeLeftMargin(zoomRatio) * ls[idxLevel].childNodes.length)
+        }
+        return {
+            levelHeights,
+            levelWidths,
+            totalHeight,
+            totalWidth
+        }
     },
     apply (name, payload) {
         // Add node
@@ -819,7 +1125,12 @@ var astiencoder = {
         // Children
         if (payload.children) {
             payload.children.forEach(function(item) {
+                // Update node
                 this.nodes[name].children[item] = true
+
+                // Update child
+                const c = this.nodes[item]
+                if (c) c.parents[name] = true
             }.bind(this))
         }
 
@@ -835,7 +1146,12 @@ var astiencoder = {
         // Parents
         if (payload.parents) {
             payload.parents.forEach(function(item) {
+                // Update node
                 this.nodes[name].parents[item] = true
+
+                // Update parent
+                const p = this.nodes[item]
+                if (p) p.children[name] = true
             }.bind(this))
         }
 
@@ -890,6 +1206,50 @@ var astiencoder = {
                 && this.nodes[name].label.toLowerCase().search(event.target.value.toLowerCase()) === -1
                 && this.nodes[name].name.toLowerCase().search(event.target.value.toLowerCase()) === -1
         }
+
+        // Refresh nodes position
+        this.refreshNodesPosition()
+    },
+
+    /* zoom */
+    zoom: {
+        auto: true,
+        value: 100
+    },
+    zoomIn () {
+        // No nodes
+        if (Object.keys(this.nodes).length === 0) return
+
+        // Update zoom
+        this.zoom.auto = false
+        this.zoom.value += 10
+
+        // Refresh nodes size
+        this.refreshNodesSize()
+    },
+    zoomOut () {
+        // No nodes
+        if (Object.keys(this.nodes).length === 0) return
+
+        // Invalid value
+        if (this.zoom.value <= 10) return
+
+        // Update zoom
+        this.zoom.auto = false
+        this.zoom.value -= 10
+
+        // Refresh nodes size
+        this.refreshNodesSize()
+    },
+    zoomAuto () {
+        // No nodes
+        if (Object.keys(this.nodes).length === 0) return
+        
+        // Update zoom
+        this.zoom.auto = true
+
+        // Refresh nodes size
+        this.refreshNodesSize()
     },
 
     /* helpers */
@@ -961,7 +1321,7 @@ var astiencoder = {
                 // Handle message
                 this.ws.onmessage = function(event) {
                     var data = JSON.parse(event.data)
-                    options.onmessage(data.event_name, data.payload)
+                    options.onmessage(data.event_name, data.payload, false)
                 }.bind(this)
             }.bind(this)
         })

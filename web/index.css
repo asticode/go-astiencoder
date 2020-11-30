@@ -3,9 +3,10 @@
 }
 
 html, body {
-    font-family: Roboto;
+    font-family: Courrier;
     font-size: 12px;
     height: 100%;
+    letter-spacing: 0.005em;
     margin: 0;
     padding: 0;
     position: relative;
@@ -26,13 +27,25 @@ header {
     width: 100%;
 }
 
-header #search input[type="text"] {
+header #top {
+    display: flex;
+    flex-direction: row;
+}
+
+header #search {
     border: none;
     border-radius: 5px;
     font-family: Roboto;
     font-size: 12px;
     padding: 7px 10px;
     width: 300px;
+}
+
+header #top i {
+    cursor: pointer;
+    font-size: 20px;
+    margin-left: 10px;
+    padding: 4px;
 }
 
 header #tags > div {
@@ -78,71 +91,89 @@ header #tags > div > .fa:last-child {
 }
 
 section {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+
     flex-grow: 1;
-    overflow-y: auto;
-}
-
-#nodes {
-    display: grid;
-    grid-column-gap: 10px;
-    grid-row-gap: 10px;
-    grid-template-columns: repeat(7, 1fr);
-    padding: 10px;
-}
-
-#nodes > div {
-    border-radius: 5px;
-    padding: 10px;
+    overflow: auto;
     width: 100%;
 }
 
-#nodes > div.not-in-search, #nodes > div.not-in-tags, #nodes > div.not-active {
-    display: none;
+/* Hide scrollbar for Chrome, Safari and Opera */
+section::-webkit-scrollbar {
+  display: none;
 }
 
-#nodes > div.paused {
+section #nodes {
+    margin: 1em 0;
+    position: relative;
+}
+
+section #nodes svg {
+    height: 100%;
+    left: 0;
+    position: absolute;
+    top: 0;
+    width: 100%;
+    z-index: 1;
+}
+
+section #nodes svg line {
+    stroke: #000000;
+}
+
+section .node {
+    align-items: center;
+    border: solid 0.1em transparent;
+    border-radius: 0.3em;
+    display: flex;
+    flex-direction: column;
+    margin: 0 auto 4em auto;
+    padding: 1em;
+    position: absolute;
+}
+
+section #nodes > div:last-child > div {
+    margin-bottom: 0;
+}
+
+section .node.paused {
     color: #856404;
     background-color: #fff3cd;
     border-color: #ffeeba;
 }
 
-#nodes > div.running {
+section .node.running {
     color: #155724;
     background-color: #d4edda;
     border-color: #c3e6cb;
 }
 
-#nodes > div.stopped {
+section .node.stopped {
     color: #721c24;
     background-color: #f8d7da;
     border-color: #f5c6cb;
 }
 
-#nodes > div > .label {
-    text-align: center;
+section .node .label {
+    text-decoration: underline;
 }
 
-#nodes > div > .name {
+section .node .name {
     font-style: italic;
-    margin-bottom: 10px;
-    text-align: center;
 }
 
-#nodes > div > .stats {
-    width: 100%;
+section .node .stats {
+    margin-top: 1em;
 }
 
-#nodes > div > .stats td {
+section .node .stats td {
     padding: 0;
 }
 
-#nodes > div > .stats tr > td:first-child {
-    padding-right: 3px;
-    white-space:nowrap;
-}
-
-#nodes > div > .stats tr > td:last-child {
-    width: 100%;
+section .node .stats td:first-child {
+    padding-right: 0.3em;
+    white-space: nowrap;
 }
 
 footer {

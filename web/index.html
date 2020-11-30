@@ -8,8 +8,11 @@
 </head>
 <body>
     <header>
-        <div id="search">
-            <input type="text" placeholder="Search" oninput="astiencoder.onSearch(event)" autocomplete="off">
+        <div id="top">
+            <input id="search" type="text" placeholder="Search" oninput="astiencoder.onSearch(event)" autocomplete="off">
+            <i class="fa fa-search-minus" onclick="astiencoder.zoomOut()"></i>
+            <i class="fa fa-expand-arrows-alt" onclick="astiencoder.zoomAuto()"></i>
+            <i class="fa fa-search-plus" onclick="astiencoder.zoomIn()"></i>
         </div>
         <div id="tags">
             <div class="action" onclick="astiencoder.onResetAllTags()">
