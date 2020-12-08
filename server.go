@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/asticode/go-astikit"
 	"github.com/asticode/go-astiws"
@@ -13,7 +14,9 @@ import (
 )
 
 type Server struct {
+	cs map[*astiws.Client]bool
 	l  astikit.SeverityLogger
+	m  *sync.Mutex // Locks cs
 	w  *Workflow
 	ws *astiws.Manager
 }
@@ -24,7 +27,9 @@ type ServerOptions struct {
 
 func NewServer(o ServerOptions) *Server {
 	return &Server{
+		cs: make(map[*astiws.Client]bool),
 		l:  astikit.AdaptStdLogger(o.Logger),
+		m:  &sync.Mutex{},
 		ws: astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 1e6}, o.Logger),
 	}
 }
@@ -63,8 +68,10 @@ func (s *Server) serveWebSocket() http.Handler {
 }
 
 func (s *Server) adaptWebSocketClient(c *astiws.Client) (err error) {
-	// Register client
-	s.ws.AutoRegisterClient(c)
+	// Add client
+	s.m.Lock()
+	s.cs[c] = true
+	s.m.Unlock()
 
 	// Add listeners
 	c.AddListener(astiws.EventNameDisconnect, s.webSocketDisconnected)
@@ -73,7 +80,10 @@ func (s *Server) adaptWebSocketClient(c *astiws.Client) (err error) {
 }
 
 func (s *Server) webSocketDisconnected(c *astiws.Client, eventName string, payload json.RawMessage) error {
-	s.ws.UnregisterClient(c)
+	// Remove client
+	s.m.Lock()
+	delete(s.cs, c)
+	s.m.Unlock()
 	return nil
 }
 
@@ -85,13 +95,20 @@ func (s *Server) webSocketPing(c *astiws.Client, eventName string, payload json.
 }
 
 func (s *Server) sendWebSocket(eventName string, payload interface{}) {
+	// Get clients
+	var cs []*astiws.Client
+	s.m.Lock()
+	for c := range s.cs {
+		cs = append(cs, c)
+	}
+	s.m.Unlock()
+
 	// Loop through clients
-	s.ws.Loop(func(_ interface{}, c *astiws.Client) {
+	for _, c := range cs {
 		if err := c.Write(eventName, payload); err != nil {
 			s.l.Error(fmt.Errorf("astiencoder: writing event %s with payload %+v to websocket client %p failed: %w", eventName, payload, c, err))
-			return
 		}
-	})
+	}
 }
 
 func serverEventHandlerAdapter(eh *EventHandler, fn func(name string, payload interface{})) {
