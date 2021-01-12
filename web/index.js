@@ -1168,21 +1168,49 @@ var astiencoder = {
             if (payload.stat.label) this.nodes[name].stats[payload.stat.label].label = payload.stat.label
 
             // Unit
+            // Process unit before value since we need the updated unit when handling the value
             if (payload.stat.unit) this.nodes[name].stats[payload.stat.label].unit = payload.stat.unit
 
             // Value
             if (typeof payload.stat.value !== 'undefined') {
                 var v = payload.stat.value
-                if (!isNaN(parseFloat(v))) {
-                    v = parseFloat(payload.stat.value).toFixed(2)
-                    if (v < 10 && v >= 0) v = '0' + v
-                    else if (v > -10 && v < 0) v = '-0' + (-v)
+                var f = parseFloat(v)
+                if (!isNaN(f)) {
+                    switch (this.nodes[name].stats[payload.stat.label].unit) {
+                        case 'bps':
+                            if (f > 1e9) {
+                                f /= 1e9
+                                this.nodes[name].stats[payload.stat.label].unit = 'Gbps'
+                            } else if (f > 1e6) {
+                                f /= 1e6
+                                this.nodes[name].stats[payload.stat.label].unit = 'Mbps'
+                            } else if (f > 1e3) {
+                                f /= 1e3
+                                this.nodes[name].stats[payload.stat.label].unit = 'kbps'
+                            }
+                            break
+                        case 'ns':
+                            if (f > 1e9) {
+                                f /= 1e9
+                                this.nodes[name].stats[payload.stat.label].unit = 's'
+                            } else if (f > 1e6) {
+                                f /= 1e6
+                                this.nodes[name].stats[payload.stat.label].unit = 'ms'
+                            } else if (f > 1e3) {
+                                f /= 1e3
+                                this.nodes[name].stats[payload.stat.label].unit = 'µs'
+                            }
+                            break
+                    }
+                    f = f.toFixed(2)
+                    if (f < 10 && f >= 0) f = '0' + f
+                    else if (f > -10 && f < 0) f = '-0' + (-f)
                     if (this.nodes[name].stats[payload.stat.label].unit === '%') {
-                        if (v > 1000) v = '+∞'
-                        else if (v < -1000) v = '-∞'
+                        if (f >= 1000) f = '+∞'
+                        else if (f <= -1000) f = '-∞'
                     }
                 }
-                this.nodes[name].stats[payload.stat.label].value = v
+                this.nodes[name].stats[payload.stat.label].value = f
             }
         }
 

@@ -137,7 +137,7 @@ func (r *RateEnforcer) addStats() {
 				Description: "Average delay of frames coming in",
 				Label:       "Average delay",
 				Name:        StatNameAverageDelay,
-				Unit:        "ms",
+				Unit:        "ns",
 			},
 		},
 		astikit.StatOptions{
@@ -269,7 +269,7 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 
 		// Process delay stat
 		if l != nil && l.n == i.n {
-			r.statDelayAvg.Add(float64(time.Duration(avutil.AvRescaleQ(l.ptsMax-i.f.Pts(), i.d.TimeBase(), nanosecondRational)).Milliseconds()))
+			r.statDelayAvg.Add(float64(time.Duration(avutil.AvRescaleQ(l.ptsMax-i.f.Pts(), i.d.TimeBase(), nanosecondRational))))
 		}
 	})
 }

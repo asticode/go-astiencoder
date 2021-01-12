@@ -21,15 +21,16 @@ var (
 // Demuxer represents an object capable of demuxing packets out of an input
 type Demuxer struct {
 	*astiencoder.BaseNode
-	ctxFormat    *avformat.Context
-	d            *pktDispatcher
-	eh           *astiencoder.EventHandler
-	emulateRate  bool
-	interruptRet *int
-	loop         bool
-	p            *pktPool
-	restamper    PktRestamper
-	ss           map[int]*demuxerStream
+	ctxFormat        *avformat.Context
+	d                *pktDispatcher
+	eh               *astiencoder.EventHandler
+	emulateRate      bool
+	interruptRet     *int
+	loop             bool
+	p                *pktPool
+	restamper        PktRestamper
+	ss               map[int]*demuxerStream
+	statIncomingRate *astikit.CounterRateStat
 }
 
 type demuxerStream struct {
@@ -77,11 +78,12 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Create demuxer
 	d = &Demuxer{
-		eh:          eh,
-		emulateRate: o.EmulateRate,
-		loop:        o.Loop,
-		p:           newPktPool(c),
-		ss:          make(map[int]*demuxerStream),
+		eh:               eh,
+		emulateRate:      o.EmulateRate,
+		loop:             o.Loop,
+		p:                newPktPool(c),
+		ss:               make(map[int]*demuxerStream),
+		statIncomingRate: astikit.NewCounterRateStat(),
 	}
 
 	// Create base node
@@ -182,6 +184,15 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 func (d *Demuxer) addStats() {
 	// Get stats
 	ss := d.d.stats()
+	ss = append(ss, astikit.StatOptions{
+		Handler: d.statIncomingRate,
+		Metadata: &astikit.StatMetadata{
+			Description: "Number of bits going in per second",
+			Label:       "Incoming rate",
+			Name:        StatNameIncomingRate,
+			Unit:        "bps",
+		},
+	})
 
 	// Add stats
 	d.BaseNode.AddStats(ss...)
@@ -277,6 +288,9 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 		}
 		return
 	}
+
+	// Increment incoming rate
+	d.statIncomingRate.Add(float64(pkt.Size() * 8))
 
 	// Get stream
 	s, ok := d.ss[pkt.StreamIndex()]
