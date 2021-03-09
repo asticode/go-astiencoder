@@ -39,18 +39,6 @@ type demuxerStream struct {
 	s                 *avformat.Stream
 }
 
-type demuxerPkt struct {
-	dts        int64
-	receivedAt time.Time
-}
-
-func newDemuxerPkt(pkt *avcodec.Packet) *demuxerPkt {
-	return &demuxerPkt{
-		dts:        pkt.Dts(),
-		receivedAt: time.Now(),
-	}
-}
-
 // DemuxerOptions represents demuxer options
 type DemuxerOptions struct {
 	// String content of the demuxer as you would use in ffmpeg

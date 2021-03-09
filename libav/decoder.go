@@ -97,7 +97,7 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 func (d *Decoder) addStats() {
 	// Get stats
-	ss := append(d.c.Stats())
+	ss := d.c.Stats()
 	ss = append(ss, d.d.stats()...)
 	ss = append(ss,
 		astikit.StatOptions{

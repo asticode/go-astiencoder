@@ -20,6 +20,7 @@ type Context struct {
 	CodecType    avcodec.MediaType
 	Dict         *Dict
 	GlobalHeader bool
+	Index        int
 	ThreadCount  *int
 	TimeBase     avutil.Rational
 
@@ -41,6 +42,7 @@ type Context struct {
 func (ctx Context) String() string {
 	// Shared
 	var ss []string
+	ss = append(ss, "index: "+strconv.Itoa(ctx.Index))
 	if ctx.CodecType >= 0 {
 		var m string
 		switch ctx.CodecType {
@@ -80,9 +82,7 @@ func (ctx Context) String() string {
 	// Switch on codec type
 	switch ctx.CodecType {
 	case avutil.AVMEDIA_TYPE_AUDIO:
-		if ctx.ChannelLayout >= 0 {
-			ss = append(ss, "channel layout: ", avutil.AvGetChannelLayoutString(ctx.Channels, ctx.ChannelLayout))
-		}
+		ss = append(ss, "channel layout: ", avutil.AvGetChannelLayoutString(ctx.Channels, ctx.ChannelLayout))
 		if ctx.SampleFmt >= 0 {
 			ss = append(ss, "sample fmt: "+avutil.AvGetSampleFmtName(int(ctx.SampleFmt)))
 		}
@@ -121,6 +121,7 @@ func NewContextFromStream(s *avformat.Stream) Context {
 		BitRate:   ctxCodec.BitRate(),
 		CodecID:   s.CodecParameters().CodecId(),
 		CodecType: s.CodecParameters().CodecType(),
+		Index:     s.Index(),
 		TimeBase:  s.TimeBase(),
 
 		// Audio
