@@ -1,6 +1,7 @@
 package astilibav
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/asticode/go-astiencoder"
@@ -30,33 +31,38 @@ func HandleLogs(eh *astiencoder.EventHandler) {
 }
 
 type LoggerEventHandlerAdapterOptions struct {
-	IgnoredLogMessages []string
+	IgnoredLogMessages []*regexp.Regexp
 }
 
 func LoggerEventHandlerAdapter(o LoggerEventHandlerAdapterOptions, i astikit.StdLogger, h *astiencoder.EventHandler) {
-	// Create logger
-	l := astikit.AdaptStdLogger(i)
+	h.AddForEventName(EventNameLog, loggerEventHandlerCallback(o, astikit.AdaptStdLogger(i)))
+}
 
-	// Index ignored log messages
-	is := make(map[string]bool)
-	for _, msg := range o.IgnoredLogMessages {
-		is[msg] = true
-	}
-
-	// Log
-	h.AddForEventName(EventNameLog, func(e astiencoder.Event) bool {
+func loggerEventHandlerCallback(o LoggerEventHandlerAdapterOptions, l astikit.CompleteLogger) astiencoder.EventCallback {
+	return func(e astiencoder.Event) bool {
 		if v, ok := e.Payload.(EventLog); ok {
+			// Sanitize
 			msg := strings.TrimSpace(v.Msg)
 			if msg == "" {
 				return false
 			}
-			if _, ok := is[msg]; ok {
-				return false
+
+			// Check ignored messages
+			for _, r := range o.IgnoredLogMessages {
+				if len(r.FindIndex([]byte(msg))) > 0 {
+					return false
+				}
 			}
+
+			// Add prefix
 			msg = "astilibav: " + msg
+
+			// Add parent
 			if strings.Index(v.Parent, "0x") == 0 {
 				msg += " (" + v.Parent + ")"
 			}
+
+			// Add level
 			switch v.Level {
 			case avutil.AV_LOG_DEBUG, avutil.AV_LOG_VERBOSE:
 				l.Debug(msg)
@@ -74,5 +80,5 @@ func LoggerEventHandlerAdapter(o LoggerEventHandlerAdapterOptions, i astikit.Std
 			}
 		}
 		return false
-	})
+	}
 }
