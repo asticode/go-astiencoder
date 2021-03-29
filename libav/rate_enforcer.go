@@ -18,25 +18,24 @@ var countRateEnforcer uint64
 // RateEnforcer represents an object capable of enforcing rate based on PTS
 type RateEnforcer struct {
 	*astiencoder.BaseNode
-	buf                []*rateEnforcerItem
-	c                  *astikit.Chan
-	d                  *frameDispatcher
-	eh                 *astiencoder.EventHandler
-	f                  RateEnforcerFiller
-	m                  *sync.Mutex
-	n                  astiencoder.Node
-	outputCtx          Context
-	p                  *framePool
-	period             time.Duration
-	previousDescriptor *rateEnforcerDescriptor
-	restamper          FrameRestamper
-	slotsCount         int
-	slots              []*rateEnforcerSlot
-	statDelayAvg       *astikit.CounterAvgStat
-	statFilledRate     *astikit.CounterRateStat
-	statIncomingRate   *astikit.CounterRateStat
-	statProcessedRate  *astikit.CounterRateStat
-	timeBase           avutil.Rational
+	buf               []*rateEnforcerItem
+	c                 *astikit.Chan
+	d                 *frameDispatcher
+	eh                *astiencoder.EventHandler
+	f                 RateEnforcerFiller
+	m                 *sync.Mutex
+	n                 astiencoder.Node
+	outputCtx         Context
+	p                 *framePool
+	period            time.Duration
+	restamper         FrameRestamper
+	slotsCount        int
+	slots             []*rateEnforcerSlot
+	statDelayAvg      *astikit.CounterAvgStat
+	statFilledRate    *astikit.CounterRateStat
+	statIncomingRate  *astikit.CounterRateStat
+	statProcessedRate *astikit.CounterRateStat
+	timeBase          avutil.Rational
 }
 
 type rateEnforcerSlot struct {
@@ -47,12 +46,8 @@ type rateEnforcerSlot struct {
 }
 
 type rateEnforcerItem struct {
-	*rateEnforcerDescriptor
-	f *avutil.Frame
-}
-
-type rateEnforcerDescriptor struct {
 	d Descriptor
+	f *avutil.Frame
 	n astiencoder.Node
 }
 
@@ -292,14 +287,8 @@ func (s *rateEnforcerSlot) next() *rateEnforcerSlot {
 
 func newRateEnforcerItem(d Descriptor, f *avutil.Frame, n astiencoder.Node) *rateEnforcerItem {
 	return &rateEnforcerItem{
-		f:                      f,
-		rateEnforcerDescriptor: newRateEnforcerDescriptor(d, n),
-	}
-}
-
-func newRateEnforcerDescriptor(d Descriptor, n astiencoder.Node) *rateEnforcerDescriptor {
-	return &rateEnforcerDescriptor{
 		d: d,
+		f: f,
 		n: n,
 	}
 }
@@ -382,17 +371,20 @@ func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time, previous
 		// Dispatch frame
 		r.d.dispatch(i.f, i.d)
 
-		// New node has been dispatched
-		if *previousNode != i.n {
-			// Emit event
-			r.eh.Emit(astiencoder.Event{
-				Name:    EventNameRateEnforcerSwitchedOut,
-				Payload: i.n,
-				Target:  r,
-			})
+		// Frame is coming from an actual node
+		if i.n != nil {
+			// New node has been dispatched
+			if *previousNode != i.n {
+				// Emit event
+				r.eh.Emit(astiencoder.Event{
+					Name:    EventNameRateEnforcerSwitchedOut,
+					Payload: i.n,
+					Target:  r,
+				})
 
-			// Update previous node
-			*previousNode = i.n
+				// Update previous node
+				*previousNode = i.n
+			}
 		}
 	}
 
@@ -475,15 +467,12 @@ func (r *RateEnforcer) current() (i *rateEnforcerItem, filled bool) {
 		// Get item
 		i = r.slots[0].i
 
-		// Update previous descriptor
-		r.previousDescriptor = i.rateEnforcerDescriptor
-
 		// No fill
-		r.f.NoFill(i.f)
+		r.f.NoFill(i.d, i.f, i.n)
 	} else {
 		// Fill
-		if f := r.f.Fill(); f != nil && r.previousDescriptor != nil {
-			i = newRateEnforcerItem(r.previousDescriptor.d, f, r.previousDescriptor.n)
+		if d, f, n := r.f.Fill(); d != nil && f != nil {
+			i = newRateEnforcerItem(d, f, n)
 		}
 
 		// Update filled
@@ -493,13 +482,15 @@ func (r *RateEnforcer) current() (i *rateEnforcerItem, filled bool) {
 }
 
 type RateEnforcerFiller interface {
-	Fill() *avutil.Frame
-	NoFill(f *avutil.Frame)
+	Fill() (Descriptor, *avutil.Frame, astiencoder.Node)
+	NoFill(Descriptor, *avutil.Frame, astiencoder.Node)
 }
 
 type previousRateEnforcerFiller struct {
+	d      Descriptor
 	eh     *astiencoder.EventHandler
 	f      *avutil.Frame
+	n      astiencoder.Node
 	p      *framePool
 	target interface{}
 }
@@ -512,11 +503,15 @@ func newPreviousRateEnforcerFiller(target interface{}, eh *astiencoder.EventHand
 	}
 }
 
-func (f *previousRateEnforcerFiller) Fill() *avutil.Frame {
-	return f.f
+func (f *previousRateEnforcerFiller) Fill() (Descriptor, *avutil.Frame, astiencoder.Node) {
+	return f.d, f.f, f.n
 }
 
-func (f *previousRateEnforcerFiller) NoFill(fm *avutil.Frame) {
+func (f *previousRateEnforcerFiller) NoFill(d Descriptor, fm *avutil.Frame, n astiencoder.Node) {
+	// Store
+	f.d = d
+	f.n = n
+
 	// Create frame
 	if f.f == nil {
 		f.f = f.p.get()
@@ -532,9 +527,12 @@ func (f *previousRateEnforcerFiller) NoFill(fm *avutil.Frame) {
 	}
 }
 
-type frameRateEnforcerFiller struct{ f *avutil.Frame }
+type frameRateEnforcerFiller struct {
+	d Descriptor
+	f *avutil.Frame
+}
 
-func NewFrameRateEnforcerFiller(fn func(fm *avutil.Frame) error, c *astikit.Closer) (f *frameRateEnforcerFiller, err error) {
+func NewFrameRateEnforcerFiller(fn func(fm *avutil.Frame) (Descriptor, error), c *astikit.Closer) (f *frameRateEnforcerFiller, err error) {
 	// Alloc frame
 	fm := avutil.AvFrameAlloc()
 
@@ -551,18 +549,24 @@ func NewFrameRateEnforcerFiller(fn func(fm *avutil.Frame) error, c *astikit.Clos
 	}(&err)
 
 	// Adapt frame
+	var d Descriptor
 	if fn != nil {
-		if err = fn(fm); err != nil {
+		if d, err = fn(fm); err != nil {
 			err = fmt.Errorf("astilibav: adapting frame failed: %w", err)
 			return
 		}
 	}
 
 	// Create filler
-	f = &frameRateEnforcerFiller{f: fm}
+	f = &frameRateEnforcerFiller{
+		d: d,
+		f: fm,
+	}
 	return
 }
 
-func (f *frameRateEnforcerFiller) Fill() *avutil.Frame { return f.f }
+func (f *frameRateEnforcerFiller) Fill() (Descriptor, *avutil.Frame, astiencoder.Node) {
+	return f.d, f.f, nil
+}
 
-func (f *frameRateEnforcerFiller) NoFill(fm *avutil.Frame) {}
+func (f *frameRateEnforcerFiller) NoFill(d Descriptor, fm *avutil.Frame, n astiencoder.Node) {}

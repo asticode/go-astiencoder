@@ -8,3 +8,15 @@ import (
 type Descriptor interface {
 	TimeBase() avutil.Rational
 }
+
+func NewDescriptor(timeBase avutil.Rational) Descriptor {
+	return descriptor{timeBase: timeBase}
+}
+
+type descriptor struct {
+	timeBase avutil.Rational
+}
+
+func (d descriptor) TimeBase() avutil.Rational {
+	return d.timeBase
+}
