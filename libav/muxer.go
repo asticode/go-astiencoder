@@ -25,6 +25,7 @@ type Muxer struct {
 	p                 *pktPool
 	restamper         PktRestamper
 	statIncomingRate  *astikit.CounterRateStat
+	statOutgoingRate  *astikit.CounterRateStat
 	statProcessedRate *astikit.CounterRateStat
 }
 
@@ -52,6 +53,7 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 		p:                 newPktPool(c),
 		restamper:         o.Restamper,
 		statIncomingRate:  astikit.NewCounterRateStat(),
+		statOutgoingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 
@@ -110,6 +112,15 @@ func (m *Muxer) addStats() {
 				Label:       "Incoming rate",
 				Name:        StatNameIncomingRate,
 				Unit:        "pps",
+			},
+		},
+		astikit.StatOptions{
+			Handler: m.statOutgoingRate,
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of bits going out per second",
+				Label:       "Outgoing rate",
+				Name:        StatNameOutgoingRate,
+				Unit:        "bps",
 			},
 		},
 		astikit.StatOptions{
@@ -201,6 +212,9 @@ func (h *MuxerPktHandler) HandlePkt(p PktHandlerPayload) {
 
 		// Set stream index
 		pkt.SetStreamIndex(h.o.Index())
+
+		// Increment outgoing rate
+		h.statOutgoingRate.Add(float64(pkt.Size() * 8))
 
 		// Restamp
 		if h.restamper != nil {
