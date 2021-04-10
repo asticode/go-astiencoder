@@ -18,24 +18,25 @@ var countRateEnforcer uint64
 // RateEnforcer represents an object capable of enforcing rate based on PTS
 type RateEnforcer struct {
 	*astiencoder.BaseNode
-	buf               []*rateEnforcerItem
-	c                 *astikit.Chan
-	d                 *frameDispatcher
-	eh                *astiencoder.EventHandler
-	f                 RateEnforcerFiller
-	m                 *sync.Mutex
-	n                 astiencoder.Node
-	outputCtx         Context
-	p                 *framePool
-	period            time.Duration
-	restamper         FrameRestamper
-	slotsCount        int
-	slots             []*rateEnforcerSlot
-	statDelayAvg      *astikit.CounterAvgStat
-	statFilledRate    *astikit.CounterRateStat
-	statIncomingRate  *astikit.CounterRateStat
-	statProcessedRate *astikit.CounterRateStat
-	timeBase          avutil.Rational
+	adaptSlotsToIncomingFrames bool
+	buf                        []*rateEnforcerItem
+	c                          *astikit.Chan
+	d                          *frameDispatcher
+	eh                         *astiencoder.EventHandler
+	f                          RateEnforcerFiller
+	m                          *sync.Mutex
+	n                          astiencoder.Node
+	outputCtx                  Context
+	p                          *framePool
+	period                     time.Duration
+	restamper                  FrameRestamper
+	slotsCount                 int
+	slots                      []*rateEnforcerSlot
+	statDelayAvg               *astikit.CounterAvgStat
+	statFilledRate             *astikit.CounterRateStat
+	statIncomingRate           *astikit.CounterRateStat
+	statProcessedRate          *astikit.CounterRateStat
+	timeBase                   avutil.Rational
 }
 
 type rateEnforcerSlot struct {
@@ -53,13 +54,13 @@ type rateEnforcerItem struct {
 
 // RateEnforcerOptions represents rate enforcer options
 type RateEnforcerOptions struct {
-	// This is expressed in number of frames in the desired FrameRate
-	Delay     uint
-	Filler    RateEnforcerFiller
-	FrameRate avutil.Rational
-	Node      astiencoder.NodeOptions
-	OutputCtx Context
-	Restamper FrameRestamper
+	AdaptSlotsToIncomingFrames bool
+	Delay                      uint // Expressed in number of frames in the desired FrameRate
+	Filler                     RateEnforcerFiller
+	FrameRate                  avutil.Rational
+	Node                       astiencoder.NodeOptions
+	OutputCtx                  Context
+	Restamper                  FrameRestamper
 }
 
 // NewRateEnforcer creates a new rate enforcer
@@ -70,21 +71,22 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 
 	// Create rate enforcer
 	r = &RateEnforcer{
-		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		eh:                eh,
-		f:                 o.Filler,
-		m:                 &sync.Mutex{},
-		outputCtx:         o.OutputCtx,
-		p:                 newFramePool(c),
-		period:            time.Duration(float64(1e9) / o.FrameRate.ToDouble()),
-		restamper:         o.Restamper,
-		slots:             []*rateEnforcerSlot{nil},
-		slotsCount:        int(math.Max(float64(o.Delay), 1)),
-		statDelayAvg:      astikit.NewCounterAvgStat(),
-		statFilledRate:    astikit.NewCounterRateStat(),
-		statIncomingRate:  astikit.NewCounterRateStat(),
-		statProcessedRate: astikit.NewCounterRateStat(),
-		timeBase:          avutil.NewRational(o.FrameRate.Den(), o.FrameRate.Num()),
+		adaptSlotsToIncomingFrames: o.AdaptSlotsToIncomingFrames,
+		c:                          astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		eh:                         eh,
+		f:                          o.Filler,
+		m:                          &sync.Mutex{},
+		outputCtx:                  o.OutputCtx,
+		p:                          newFramePool(c),
+		period:                     time.Duration(float64(1e9) / o.FrameRate.ToDouble()),
+		restamper:                  o.Restamper,
+		slots:                      []*rateEnforcerSlot{nil},
+		slotsCount:                 int(math.Max(float64(o.Delay), 1)),
+		statDelayAvg:               astikit.NewCounterAvgStat(),
+		statFilledRate:             astikit.NewCounterRateStat(),
+		statIncomingRate:           astikit.NewCounterRateStat(),
+		statProcessedRate:          astikit.NewCounterRateStat(),
+		timeBase:                   avutil.NewRational(o.FrameRate.Den(), o.FrameRate.Num()),
 	}
 
 	// Create base node
@@ -233,14 +235,15 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 		//   - its node is different from the desired node AND the payload's node is the desired
 		//   node. That way, if the desired node doesn't dispatch frames for some time, we fallback to the previous
 		//   node instead of the previous item
-		//   - it's in the past compared to current frame
+		//   - it's in the past compared to current frame and developer wants to adapt slots to incoming frames
 		if c1, c2 := l == nil || (r.n != l.n && r.n == p.Node), l != nil && l.n == p.Node && l.ptsMax < f.Pts(); c1 || c2 {
 			// Update last slot
-			r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(f, p.Descriptor)
+			if c1 || (c2 && r.adaptSlotsToIncomingFrames) {
+				r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(f, p.Descriptor)
+			}
 
-			// Switched in
+			// Emit event
 			if c1 {
-				// Emit event
 				r.eh.Emit(astiencoder.Event{
 					Name:    EventNameRateEnforcerSwitchedIn,
 					Payload: p.Node,
