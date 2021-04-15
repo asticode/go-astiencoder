@@ -21,17 +21,20 @@ var (
 // Demuxer represents an object capable of demuxing packets out of an input
 type Demuxer struct {
 	*astiencoder.BaseNode
-	ctxFormat        *avformat.Context
-	d                *pktDispatcher
-	eh               *astiencoder.EventHandler
-	emulateRate      bool
-	interruptRet     *int
-	loop             bool
-	p                *pktPool
-	restamper        PktRestamper
-	ss               map[int]*demuxerStream
-	statIncomingRate *astikit.CounterRateStat
+	ctxFormat             *avformat.Context
+	d                     *pktDispatcher
+	eh                    *astiencoder.EventHandler
+	emulateRate           bool
+	interruptRet          *int
+	loop                  bool
+	p                     *pktPool
+	readFrameErrorHandler DemuxerReadFrameErrorHandler
+	restamper             PktRestamper
+	ss                    map[int]*demuxerStream
+	statIncomingRate      *astikit.CounterRateStat
 }
+
+type DemuxerReadFrameErrorHandler func(d *Demuxer, ret int) (stop, handled bool)
 
 type demuxerStream struct {
 	ctx               Context
@@ -54,6 +57,9 @@ type DemuxerOptions struct {
 	Node astiencoder.NodeOptions
 	// Context used to cancel probing
 	ProbeCtx context.Context
+	// Custom read frame error handler
+	// If handled is false, default error handling will be executed
+	ReadFrameErrorHandler DemuxerReadFrameErrorHandler
 	// URL of the input
 	URL string
 }
@@ -66,12 +72,13 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Create demuxer
 	d = &Demuxer{
-		eh:               eh,
-		emulateRate:      o.EmulateRate,
-		loop:             o.Loop,
-		p:                newPktPool(c),
-		ss:               make(map[int]*demuxerStream),
-		statIncomingRate: astikit.NewCounterRateStat(),
+		eh:                    eh,
+		emulateRate:           o.EmulateRate,
+		loop:                  o.Loop,
+		p:                     newPktPool(c),
+		readFrameErrorHandler: o.ReadFrameErrorHandler,
+		ss:                    make(map[int]*demuxerStream),
+		statIncomingRate:      astikit.NewCounterRateStat(),
 	}
 
 	// Create base node
@@ -262,17 +269,26 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 
 	// Read frame
 	if ret := d.ctxFormat.AvReadFrame(pkt); ret < 0 {
-		if ret != avutil.AVERROR_EOF || !d.loop {
-			if ret != avutil.AVERROR_EOF {
-				emitAvError(d, d.eh, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
-			}
-			stop = true
-		} else {
+		if d.loop && ret == avutil.AVERROR_EOF {
 			// Seek to start
 			if ret = d.ctxFormat.AvSeekFrame(-1, d.ctxFormat.StartTime(), avformat.AVSEEK_FLAG_BACKWARD); ret < 0 {
 				emitAvError(d, d.eh, ret, "ctxFormat.AvSeekFrame on %s failed", d.ctxFormat.Filename())
 				stop = true
 			}
+		} else {
+			// Custom error handler
+			if d.readFrameErrorHandler != nil {
+				var handled bool
+				if stop, handled = d.readFrameErrorHandler(d, ret); handled {
+					return
+				}
+			}
+
+			// Default error handling
+			if ret != avutil.AVERROR_EOF {
+				emitAvError(d, d.eh, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
+			}
+			stop = true
 		}
 		return
 	}

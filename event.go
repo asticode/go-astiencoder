@@ -186,6 +186,10 @@ func LoggerEventHandlerAdapter(i astikit.StdLogger, h *EventHandler) {
 	})
 
 	// Node
+	h.AddForEventName(EventNameNodePaused, func(e Event) bool {
+		l.Debugf("astiencoder: node %s (%s) is paused", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
+		return false
+	})
 	h.AddForEventName(EventNameNodeStarted, func(e Event) bool {
 		l.Debugf("astiencoder: node %s (%s) is started", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false

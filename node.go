@@ -293,6 +293,16 @@ func (n *BaseNode) Stop() {
 		// Cancel context
 		if n.cancel != nil {
 			n.cancel()
+			n.cancel = nil
+		}
+
+		// Cancel pause context as well
+		// We need to cancel stop context before cancelling pause context for the following workflow:
+		//   - in its loop, node handles pause before checking stop ctx
+		//   - in that case, we want the stop ctx to be accurate once the pause ctx is done
+		if n.cancelPause != nil {
+			n.cancelPause()
+			n.cancelPause = nil
 		}
 
 		// Reset once
@@ -334,6 +344,7 @@ func (n *BaseNode) Continue() {
 	n.continueFunc(func() {
 		if n.cancelPause != nil {
 			n.cancelPause()
+			n.cancelPause = nil
 		}
 	})
 }
