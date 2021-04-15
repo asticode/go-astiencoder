@@ -2,6 +2,7 @@ package astilibav
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
@@ -29,6 +30,7 @@ type FrameHandlerPayload struct {
 
 type frameDispatcher struct {
 	eh               *astiencoder.EventHandler
+	f                uint32
 	hs               map[string]FrameHandler
 	m                *sync.Mutex // Locks hs
 	n                astiencoder.Node
@@ -62,6 +64,14 @@ func (d *frameDispatcher) delHandler(h FrameHandler) {
 func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
 	// Increment outgoing rate
 	d.statOutgoingRate.Add(1)
+
+	// Emit first frame out event
+	if atomic.CompareAndSwapUint32(&d.f, 0, 1) {
+		d.eh.Emit(astiencoder.Event{
+			Name:   EventNameFirstFrameOut,
+			Target: d.n,
+		})
+	}
 
 	// Get handlers
 	d.m.Lock()

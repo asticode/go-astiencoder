@@ -3,9 +3,11 @@ package astilibav
 // Event names
 const (
 	EventNameLog = "astilibav.log"
-	// First packet of new node has been received by the rate enforcer
+	// First frame has been dispatched by node
+	EventNameFirstFrameOut = "astilibav.first.frame.out"
+	// First frame of new node has been received by the rate enforcer
 	EventNameRateEnforcerSwitchedIn = "astilibav.rate.enforcer.switched.in"
-	// First packet of new node has been dispatched by the rate enforcer
+	// First frame of new node has been dispatched by the rate enforcer
 	EventNameRateEnforcerSwitchedOut = "astilibav.rate.enforcer.switched.out"
 )
 
