@@ -1190,13 +1190,13 @@ var astiencoder = {
                             }
                             break
                         case 'ns':
-                            if (f > 1e9) {
+                            if (f > 1e9 || f < -1e9) {
                                 f /= 1e9
                                 this.nodes[name].stats[payload.stat.label].unit = 's'
-                            } else if (f > 1e6) {
+                            } else if (f > 1e6 || f < -1e6) {
                                 f /= 1e6
                                 this.nodes[name].stats[payload.stat.label].unit = 'ms'
-                            } else if (f > 1e3) {
+                            } else if (f > 1e3 || f < -1e3) {
                                 f /= 1e3
                                 this.nodes[name].stats[payload.stat.label].unit = 'µs'
                             }
