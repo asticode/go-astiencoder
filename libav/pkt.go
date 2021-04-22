@@ -8,6 +8,7 @@ import (
 	"github.com/asticode/go-astikit"
 	"github.com/asticode/goav/avcodec"
 	"github.com/asticode/goav/avformat"
+	"github.com/asticode/goav/avutil"
 )
 
 // PktHandler represents a node that can handle a pkt
@@ -169,4 +170,21 @@ func (p *pktPool) put(pkt *avcodec.Packet) {
 	defer p.m.Unlock()
 	pkt.AvPacketUnref()
 	p.p = append(p.p, pkt)
+}
+
+func pktDuration(pkt *avcodec.Packet, ctx Context) int64 {
+	switch ctx.CodecType {
+	case avutil.AVMEDIA_TYPE_AUDIO:
+		// Get skip samples side data
+		sd := pkt.AvPacketGetSideData(avcodec.AV_PKT_DATA_SKIP_SAMPLES, nil)
+		if sd == nil {
+			return pkt.Duration()
+		}
+
+		// Substract number of samples
+		skipStart, skipEnd := avutil.AV_RL32(sd, 0), avutil.AV_RL32(sd, 4)
+		return pkt.Duration() - avutil.AvRescaleQ(int64(float64(skipStart+skipEnd)/float64(ctx.SampleRate)*1e9), nanosecondRational, ctx.TimeBase)
+	default:
+		return pkt.Duration()
+	}
 }

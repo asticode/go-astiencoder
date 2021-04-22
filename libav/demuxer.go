@@ -3,6 +3,7 @@ package astilibav
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -37,9 +38,9 @@ type Demuxer struct {
 type DemuxerReadFrameErrorHandler func(d *Demuxer, ret int) (stop, handled bool)
 
 type demuxerStream struct {
-	ctx               Context
-	emulateRateNextAt time.Time
-	s                 *avformat.Stream
+	ctx Context
+	e   *demuxerRateEmulator
+	s   *avformat.Stream
 }
 
 // DemuxerOptions represents demuxer options
@@ -48,6 +49,10 @@ type DemuxerOptions struct {
 	Dict *Dict
 	// If true, the demuxer will sleep between packets for the exact duration of the packet
 	EmulateRate bool
+	// Max duration of continuous packets of the same stream the demuxer receives has to be
+	// inferior to this value.
+	// Defaults to 1s
+	EmulateRateBufferDuration time.Duration
 	// Exact input format
 	Format *avformat.InputFormat
 	// If true, at the end of the input the demuxer will seek to its beginning and start over
@@ -168,10 +173,17 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Index streams
 	for _, s := range d.ctxFormat.Streams() {
-		d.ss[s.Index()] = &demuxerStream{
+		// Create stream
+		ds := &demuxerStream{
 			ctx: NewContextFromStream(s),
 			s:   s,
 		}
+
+		// Create rate emulator
+		ds.e = newDemuxerRateEmulator(o.EmulateRateBufferDuration, d.d, d.eh, d.p, s, ds.ctx)
+
+		// Store
+		d.ss[s.Index()] = ds
 	}
 	return
 }
@@ -240,15 +252,35 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		// Handle interrupt callback
 		*d.interruptRet = 0
 		go func() {
-			<-d.BaseNode.Context().Done()
+			<-d.Context().Done()
 			*d.interruptRet = 1
 		}()
+
+		// Emulate rate
+		wg := &sync.WaitGroup{}
+		if d.emulateRate {
+			// Loop through streams
+			for _, s := range d.ss {
+				// Execute the rest in a goroutine
+				wg.Add(1)
+				go func(e *demuxerRateEmulator) {
+					// Make sure to mark task as done
+					defer wg.Done()
+
+					// Make sure to stop rate emulator
+					defer e.stop()
+
+					// Start rate emulator
+					e.start(d.Context())
+				}(s.e)
+			}
+		}
 
 		// Loop
 		for {
 			// Read frame
-			if stop := d.readFrame(ctx); stop {
-				return
+			if stop := d.readFrame(d.Context()); stop {
+				break
 			}
 
 			// Handle pause
@@ -256,9 +288,12 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 			// Check context
 			if d.Context().Err() != nil {
-				return
+				break
 			}
 		}
+
+		// Wait for rate emulators
+		wg.Wait()
 	})
 }
 
@@ -309,37 +344,125 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 
 	// Emulate rate
 	if d.emulateRate {
-		// Sleep until next at
-		if !s.emulateRateNextAt.IsZero() {
-			if delta := time.Until(s.emulateRateNextAt); delta > 0 {
-				astikit.Sleep(ctx, delta)
-			}
-		} else {
-			s.emulateRateNextAt = time.Now()
-		}
-
-		// Compute next at
-		s.emulateRateNextAt = s.emulateRateNextAt.Add(time.Duration(avutil.AvRescaleQ(d.emulateRatePktDuration(pkt, s.ctx), s.s.TimeBase(), nanosecondRational)))
+		// Add to rate emulator
+		s.e.add(ctx, pkt)
+	} else {
+		// Dispatch pkt
+		d.d.dispatch(pkt, s.s)
 	}
-
-	// Dispatch pkt
-	d.d.dispatch(pkt, s.s)
 	return
 }
 
-func (d *Demuxer) emulateRatePktDuration(pkt *avcodec.Packet, ctx Context) int64 {
-	switch ctx.CodecType {
-	case avutil.AVMEDIA_TYPE_AUDIO:
-		// Get skip samples side data
-		sd := pkt.AvPacketGetSideData(avcodec.AV_PKT_DATA_SKIP_SAMPLES, nil)
-		if sd == nil {
-			return pkt.Duration()
+type demuxerRateEmulator struct {
+	bufferDuration time.Duration
+	c              *astikit.Chan
+	cancel         context.CancelFunc
+	ctx            context.Context
+	d              *pktDispatcher
+	eh             *astiencoder.EventHandler
+	m              *sync.Mutex // Locks ps
+	nextAt         time.Time
+	p              *pktPool
+	ps             map[*avcodec.Packet]bool
+	s              *avformat.Stream
+	sc             Context
+}
+
+func newDemuxerRateEmulator(bufferDuration time.Duration, d *pktDispatcher, eh *astiencoder.EventHandler, p *pktPool, s *avformat.Stream, sc Context) (e *demuxerRateEmulator) {
+	e = &demuxerRateEmulator{
+		bufferDuration: bufferDuration,
+		c:              astikit.NewChan(astikit.ChanOptions{}),
+		d:              d,
+		eh:             eh,
+		m:              &sync.Mutex{},
+		p:              p,
+		ps:             make(map[*avcodec.Packet]bool),
+		s:              s,
+		sc:             sc,
+	}
+	if e.bufferDuration <= 0 {
+		e.bufferDuration = time.Second
+	}
+	return
+}
+
+func (e *demuxerRateEmulator) start(ctx context.Context) {
+	// Create context
+	e.ctx, e.cancel = context.WithCancel(ctx)
+
+	// Start chan
+	e.c.Start(e.ctx)
+
+	// Unref remaining pkts
+	e.m.Lock()
+	for pkt := range e.ps {
+		e.p.put(pkt)
+	}
+	e.ps = map[*avcodec.Packet]bool{}
+	e.m.Unlock()
+
+	// Reset chan
+	e.c.Reset()
+}
+
+func (e *demuxerRateEmulator) stop() {
+	// Cancel context
+	if e.cancel != nil {
+		e.cancel()
+		e.cancel = nil
+	}
+
+	// Make sure to stop chan
+	e.c.Stop()
+}
+
+func (e *demuxerRateEmulator) add(ctx context.Context, in *avcodec.Packet) {
+	// Copy pkt
+	pkt := e.p.get()
+	if ret := pkt.AvPacketRef(in); ret < 0 {
+		emitAvError(e, e.eh, ret, "AvPacketRef failed")
+		return
+	}
+
+	// Store pkt
+	e.m.Lock()
+	e.ps[pkt] = true
+	e.m.Unlock()
+
+	// Get pkt at
+	pktAt := e.nextAt
+	if pktAt.IsZero() {
+		pktAt = time.Now()
+	}
+
+	// Compute next at
+	e.nextAt = pktAt.Add(time.Duration(avutil.AvRescaleQ(pktDuration(pkt, e.sc), e.s.TimeBase(), nanosecondRational)))
+
+	// Add to chan
+	e.c.Add(func() {
+		// Make sure to clean pkt
+		defer func() {
+			// Put pkt
+			e.p.put(pkt)
+
+			// Unstore pkt
+			e.m.Lock()
+			delete(e.ps, pkt)
+			e.m.Unlock()
+		}()
+
+		// Sleep
+		if delta := time.Until(pktAt); delta > 0 {
+			astikit.Sleep(e.ctx, delta)
 		}
 
-		// Substract number of samples
-		skipStart, skipEnd := avutil.AV_RL32(sd, 0), avutil.AV_RL32(sd, 4)
-		return pkt.Duration() - avutil.AvRescaleQ(int64(float64(skipStart+skipEnd)/float64(ctx.SampleRate)*1e9), nanosecondRational, ctx.TimeBase)
-	default:
-		return pkt.Duration()
+		// Dispatch
+		e.d.dispatch(pkt, e.s)
+	})
+
+	// Too many pkts are buffered, demuxer needs to wait
+	if delta := time.Until(e.nextAt) - e.bufferDuration; delta > 0 {
+		// Sleep
+		astikit.Sleep(ctx, delta)
 	}
 }
