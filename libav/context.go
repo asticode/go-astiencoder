@@ -39,6 +39,10 @@ type Context struct {
 	Width             int
 }
 
+func (ctx Context) Descriptor() Descriptor {
+	return NewDescriptor(ctx.TimeBase)
+}
+
 func (ctx Context) String() string {
 	// Shared
 	var ss []string

@@ -40,23 +40,23 @@ func (r *pktRestamperWithOffset) restamp(pkt *avcodec.Packet, fn func(pkt *avcod
 	pkt.SetPts(dts + delta)
 }
 
-type pktRestamperStartFromZero struct {
+type PktRestamperStartFromZero struct {
 	*pktRestamperWithOffset
 }
 
 // NewPktRestamperStartFromZero creates a new pkt restamper that starts timestamps from 0
-func NewPktRestamperStartFromZero() PktRestamper {
-	return &pktRestamperStartFromZero{pktRestamperWithOffset: newPktRestamperWithOffset()}
+func NewPktRestamperStartFromZero() *PktRestamperStartFromZero {
+	return &PktRestamperStartFromZero{pktRestamperWithOffset: newPktRestamperWithOffset()}
 }
 
 // Restamp implements the Restamper interface
-func (r *pktRestamperStartFromZero) Restamp(pkt *avcodec.Packet) {
+func (r *PktRestamperStartFromZero) Restamp(pkt *avcodec.Packet) {
 	r.restamp(pkt, func(pkt *avcodec.Packet) int64 {
 		return -pkt.Dts()
 	})
 }
 
-type pktRestamperWithPktDuration struct {
+type PktRestamperWithPktDuration struct {
 	lastItem map[int]*pktRestamperWithPktDurationItem
 	m        *sync.Mutex
 }
@@ -68,15 +68,24 @@ type pktRestamperWithPktDurationItem struct {
 
 // NewPktRestamperWithPktDuration creates a new pkt restamper that starts timestamps from 0 and increments them
 // of the previous pkt.Duration()
-func NewPktRestamperWithPktDuration() PktRestamper {
-	return &pktRestamperWithPktDuration{
+func NewPktRestamperWithPktDuration() *PktRestamperWithPktDuration {
+	return &PktRestamperWithPktDuration{
 		lastItem: make(map[int]*pktRestamperWithPktDurationItem),
 		m:        &sync.Mutex{},
 	}
 }
 
+// Add adds delta to the last item duration of the specified stream index
+func (r *PktRestamperWithPktDuration) Add(delta int64, idx int) {
+	r.m.Lock()
+	defer r.m.Unlock()
+	if i, ok := r.lastItem[idx]; ok && i != nil {
+		i.duration += delta
+	}
+}
+
 // Restamp implements the FrameRestamper interface
-func (r *pktRestamperWithPktDuration) Restamp(pkt *avcodec.Packet) {
+func (r *PktRestamperWithPktDuration) Restamp(pkt *avcodec.Packet) {
 	// Get last item
 	r.m.Lock()
 	lastItem := r.lastItem[pkt.StreamIndex()]

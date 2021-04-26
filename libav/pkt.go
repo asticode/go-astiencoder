@@ -7,7 +7,6 @@ import (
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
 	"github.com/asticode/goav/avcodec"
-	"github.com/asticode/goav/avformat"
 	"github.com/asticode/goav/avutil"
 )
 
@@ -114,10 +113,10 @@ type PktCond interface {
 
 type pktCond struct {
 	PktHandler
-	i *avformat.Stream
+	i *Stream
 }
 
-func newPktCond(i *avformat.Stream, h PktHandler) *pktCond {
+func newPktCond(i *Stream, h PktHandler) *pktCond {
 	return &pktCond{
 		i:          i,
 		PktHandler: h,
@@ -127,13 +126,13 @@ func newPktCond(i *avformat.Stream, h PktHandler) *pktCond {
 // Metadata implements the NodeDescriptor interface
 func (c *pktCond) Metadata() astiencoder.NodeMetadata {
 	m := c.PktHandler.Metadata()
-	m.Name = fmt.Sprintf("%s_%d", c.PktHandler.Metadata().Name, c.i.Index())
+	m.Name = fmt.Sprintf("%s_%d", c.PktHandler.Metadata().Name, c.i.Index)
 	return m
 }
 
 // UsePkt implements the PktCond interface
 func (c *pktCond) UsePkt(pkt *avcodec.Packet) bool {
-	return pkt.StreamIndex() == c.i.Index()
+	return pkt.StreamIndex() == c.i.Index
 }
 
 type pktPool struct {

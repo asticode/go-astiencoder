@@ -73,7 +73,7 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 	r = &RateEnforcer{
 		adaptSlotsToIncomingFrames: o.AdaptSlotsToIncomingFrames,
 		c:                          astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		descriptor:                 NewDescriptor(o.OutputCtx.TimeBase),
+		descriptor:                 o.OutputCtx.Descriptor(),
 		eh:                         eh,
 		f:                          o.Filler,
 		m:                          &sync.Mutex{},

@@ -50,7 +50,7 @@ type openedOutput struct {
 
 type buildData struct {
 	c        *astikit.Closer
-	decoders map[*astilibav.Demuxer]map[*avformat.Stream]*astilibav.Decoder
+	decoders map[*astilibav.Demuxer]map[*astilibav.Stream]*astilibav.Decoder
 	eh       *astiencoder.EventHandler
 	inputs   map[string]openedInput
 	outputs  map[string]openedOutput
@@ -62,7 +62,7 @@ func newBuildData(w *astiencoder.Workflow, eh *astiencoder.EventHandler, c *asti
 	return &buildData{
 		c:        c,
 		eh:       eh,
-		decoders: make(map[*astilibav.Demuxer]map[*avformat.Stream]*astilibav.Decoder),
+		decoders: make(map[*astilibav.Demuxer]map[*astilibav.Stream]*astilibav.Decoder),
 		s:        s,
 		w:        w,
 	}
@@ -190,14 +190,14 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 	// Loop through inputs
 	for _, i := range ois {
 		// Loop through streams
-		for _, is := range i.o.d.CtxFormat().Streams() {
+		for _, is := range i.o.d.Streams() {
 			// Only process a specific PID
-			if i.c.PID != nil && is.Id() != *i.c.PID {
+			if i.c.PID != nil && is.ID != *i.c.PID {
 				continue
 			}
 
 			// Only process a specific media type
-			if t := avutil.MediaTypeFromString(i.c.MediaType); t > -1 && is.CodecParameters().CodecType() != avcodec.MediaType(t) {
+			if t := avutil.MediaTypeFromString(i.c.MediaType); t > -1 && is.CodecParameters.CodecType() != avcodec.MediaType(t) {
 				continue
 			}
 
@@ -211,7 +211,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 					// Clone stream
 					var os *avformat.Stream
 					if os, err = astilibav.CloneStream(is, o.o.m.CtxFormat()); err != nil {
-						err = fmt.Errorf("main: cloning stream 0x%x(%d) of %s failed: %w", is.Id(), is.Id(), i.c.Name, err)
+						err = fmt.Errorf("main: cloning stream 0x%x(%d) of %s failed: %w", is.ID, is.ID, i.c.Name, err)
 						return
 					}
 
@@ -227,7 +227,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 			// Create decoder
 			var d *astilibav.Decoder
 			if d, err = b.createDecoder(bd, i, is); err != nil {
-				err = fmt.Errorf("main: creating decoder for stream 0x%x(%d) of input %s failed: %w", is.Id(), is.Id(), i.c.Name, err)
+				err = fmt.Errorf("main: creating decoder for stream 0x%x(%d) of input %s failed: %w", is.ID, is.ID, i.c.Name, err)
 				return
 			}
 
@@ -237,14 +237,14 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 			// Create filterer
 			var f *astilibav.Filterer
 			if f, err = b.createFilterer(bd, outCtx, d); err != nil {
-				err = fmt.Errorf("main: creating filterer for stream 0x%x(%d) of input %s failed: %w", is.Id(), is.Id(), i.c.Name, err)
+				err = fmt.Errorf("main: creating filterer for stream 0x%x(%d) of input %s failed: %w", is.ID, is.ID, i.c.Name, err)
 				return
 			}
 
 			// Create encoder
 			var e *astilibav.Encoder
 			if e, err = astilibav.NewEncoder(astilibav.EncoderOptions{Ctx: outCtx}, bd.eh, bd.c, bd.s); err != nil {
-				err = fmt.Errorf("main: creating encoder for stream 0x%x(%d) of input %s failed: %w", is.Id(), is.Id(), i.c.Name, err)
+				err = fmt.Errorf("main: creating encoder for stream 0x%x(%d) of input %s failed: %w", is.ID, is.ID, i.c.Name, err)
 				return
 			}
 
@@ -275,7 +275,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 					// Add stream
 					var os *avformat.Stream
 					if os, err = e.AddStream(o.o.m.CtxFormat()); err != nil {
-						err = fmt.Errorf("main: adding stream for stream 0x%x(%d) of %s and output %s failed: %w", is.Id(), is.Id(), i.c.Name, o.c.Name, err)
+						err = fmt.Errorf("main: adding stream for stream 0x%x(%d) of %s and output %s failed: %w", is.ID, is.ID, i.c.Name, o.c.Name, err)
 						return
 					}
 
@@ -399,23 +399,23 @@ func (b *builder) operationOutputCtx(o JobOperation, inCtx astilibav.Context, oo
 	return
 }
 
-func (b *builder) createDecoder(bd *buildData, i operationInput, is *avformat.Stream) (d *astilibav.Decoder, err error) {
+func (b *builder) createDecoder(bd *buildData, i operationInput, is *astilibav.Stream) (d *astilibav.Decoder, err error) {
 	// Get decoder
 	var okD, okS bool
 	if _, okD = bd.decoders[i.o.d]; okD {
 		d, okS = bd.decoders[i.o.d][is]
 	} else {
-		bd.decoders[i.o.d] = make(map[*avformat.Stream]*astilibav.Decoder)
+		bd.decoders[i.o.d] = make(map[*astilibav.Stream]*astilibav.Decoder)
 	}
 
 	// Decoder doesn't exist
 	if !okD || !okS {
 		// Create decoder
 		if d, err = astilibav.NewDecoder(astilibav.DecoderOptions{
-			CodecParams: is.CodecParameters(),
-			OutputCtx:   astilibav.NewContextFromStream(is),
+			CodecParams: is.CodecParameters,
+			OutputCtx:   is.Ctx,
 		}, bd.eh, bd.c, bd.s); err != nil {
-			err = fmt.Errorf("main: creating decoder for stream 0x%x(%d) of %s failed: %w", is.Id(), is.Id(), i.c.Name, err)
+			err = fmt.Errorf("main: creating decoder for stream 0x%x(%d) of %s failed: %w", is.ID, is.ID, i.c.Name, err)
 			return
 		}
 

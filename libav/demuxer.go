@@ -3,6 +3,7 @@ package astilibav
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,10 +28,9 @@ type Demuxer struct {
 	eh                    *astiencoder.EventHandler
 	emulateRate           bool
 	interruptRet          *int
-	loop                  bool
+	l                     *demuxerLooper
 	p                     *pktPool
 	readFrameErrorHandler DemuxerReadFrameErrorHandler
-	restamper             PktRestamper
 	ss                    map[int]*demuxerStream
 	statIncomingRate      *astikit.CounterRateStat
 }
@@ -39,8 +39,18 @@ type DemuxerReadFrameErrorHandler func(d *Demuxer, ret int) (stop, handled bool)
 
 type demuxerStream struct {
 	ctx Context
+	d   Descriptor
 	e   *demuxerRateEmulator
 	s   *avformat.Stream
+}
+
+func (d *demuxerStream) stream() *Stream {
+	return &Stream{
+		CodecParameters: d.s.CodecParameters(),
+		Ctx:             d.ctx,
+		ID:              d.s.Id(),
+		Index:           d.s.Index(),
+	}
 }
 
 // DemuxerOptions represents demuxer options
@@ -79,7 +89,6 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	d = &Demuxer{
 		eh:                    eh,
 		emulateRate:           o.EmulateRate,
-		loop:                  o.Loop,
 		p:                     newPktPool(c),
 		readFrameErrorHandler: o.ReadFrameErrorHandler,
 		ss:                    make(map[int]*demuxerStream),
@@ -94,11 +103,6 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Add stats
 	d.addStats()
-
-	// If loop is enabled, we need to add a restamper
-	if d.loop {
-		d.restamper = NewPktRestamperWithPktDuration()
-	}
 
 	// Dict
 	var dict *avutil.Dictionary
@@ -171,19 +175,25 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		return
 	}
 
-	// Index streams
+	// Loop through streams
 	for _, s := range d.ctxFormat.Streams() {
-		// Create stream
+		// Create demuxer stream
 		ds := &demuxerStream{
 			ctx: NewContextFromStream(s),
 			s:   s,
 		}
+		ds.d = ds.ctx.Descriptor()
 
 		// Create rate emulator
-		ds.e = newDemuxerRateEmulator(o.EmulateRateBufferDuration, d.d, d.eh, d.p, s, ds.ctx)
+		ds.e = newDemuxerRateEmulator(o.EmulateRateBufferDuration, d.d, d.eh, d.p, ds)
 
-		// Store
+		// Store stream
 		d.ss[s.Index()] = ds
+	}
+
+	// Create looper
+	if o.Loop {
+		d.l = newDemuxerLooper(d.ss)
 	}
 	return
 }
@@ -205,9 +215,22 @@ func (d *Demuxer) addStats() {
 	d.BaseNode.AddStats(ss...)
 }
 
-// CtxFormat returns the format ctx
-func (d *Demuxer) CtxFormat() *avformat.Context {
-	return d.ctxFormat
+// Streams returns the streams ordered by index
+func (d *Demuxer) Streams() (ss []*Stream) {
+	// Get indexes
+	var idxs []int
+	for idx := range d.ss {
+		idxs = append(idxs, idx)
+	}
+
+	// Sort indexes
+	sort.Ints(idxs)
+
+	// Loop through indexes
+	for _, idx := range idxs {
+		ss = append(ss, d.ss[idx].stream())
+	}
+	return
 }
 
 // Connect implements the PktHandlerConnector interface
@@ -229,7 +252,7 @@ func (d *Demuxer) Disconnect(h PktHandler) {
 }
 
 // ConnectForStream connects the demuxer to a PktHandler for a specific stream
-func (d *Demuxer) ConnectForStream(h PktHandler, i *avformat.Stream) {
+func (d *Demuxer) ConnectForStream(h PktHandler, i *Stream) {
 	// Add handler
 	d.d.addHandler(newPktCond(i, h))
 
@@ -238,7 +261,7 @@ func (d *Demuxer) ConnectForStream(h PktHandler, i *avformat.Stream) {
 }
 
 // DisconnectForStream disconnects the demuxer from a PktHandler for a specific stream
-func (d *Demuxer) DisconnectForStream(h PktHandler, i *avformat.Stream) {
+func (d *Demuxer) DisconnectForStream(h PktHandler, i *Stream) {
 	// Delete handler
 	d.d.delHandler(newPktCond(i, h))
 
@@ -294,6 +317,11 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 		// Wait for rate emulators
 		wg.Wait()
+
+		// Reset looper
+		if d.l != nil {
+			d.l.reset()
+		}
 	})
 }
 
@@ -304,7 +332,24 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 
 	// Read frame
 	if ret := d.ctxFormat.AvReadFrame(pkt); ret < 0 {
-		if d.loop && ret == avutil.AVERROR_EOF {
+		if d.l != nil && ret == avutil.AVERROR_EOF {
+			// Let the looper know we're looping
+			d.l.looping(func(delta int64, idx int) {
+				// Not emulating rate
+				if !d.emulateRate {
+					return
+				}
+
+				// Get stream
+				s, ok := d.ss[idx]
+				if !ok {
+					return
+				}
+
+				// Add duration to rate emulator
+				s.e.add(delta)
+			})
+
 			// Seek to start
 			if ret = d.ctxFormat.AvSeekFrame(-1, d.ctxFormat.StartTime(), avformat.AVSEEK_FLAG_BACKWARD); ret < 0 {
 				emitAvError(d, d.eh, ret, "ctxFormat.AvSeekFrame on %s failed", d.ctxFormat.Filename())
@@ -337,20 +382,115 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 		return
 	}
 
-	// Restamp
-	if d.restamper != nil {
-		d.restamper.Restamp(pkt)
+	// Handle loop
+	if d.l != nil {
+		d.l.handlePkt(pkt)
 	}
 
 	// Emulate rate
 	if d.emulateRate {
-		// Add to rate emulator
-		s.e.add(ctx, pkt)
+		// Handle rate emulation
+		s.e.handlePkt(ctx, pkt)
 	} else {
 		// Dispatch pkt
-		d.d.dispatch(pkt, s.s)
+		d.d.dispatch(pkt, s.d)
 	}
 	return
+}
+
+type demuxerLooper struct {
+	r  *PktRestamperWithPktDuration
+	ss map[int]*demuxerLooperStream // Indexed by stream index
+}
+
+type demuxerLooperStream struct {
+	delta    time.Duration
+	duration time.Duration
+	s        *demuxerStream
+}
+
+func newDemuxerLooperStream(s *demuxerStream) *demuxerLooperStream {
+	return &demuxerLooperStream{s: s}
+}
+
+func newDemuxerLooper(ss map[int]*demuxerStream) (l *demuxerLooper) {
+	// Create looper
+	l = &demuxerLooper{
+		r:  NewPktRestamperWithPktDuration(),
+		ss: make(map[int]*demuxerLooperStream),
+	}
+
+	// Loop through streams
+	for idx, s := range ss {
+		l.ss[idx] = newDemuxerLooperStream(s)
+	}
+	return
+}
+
+func (l *demuxerLooper) reset() {
+	for _, s := range l.ss {
+		s.delta = 0
+		s.duration = 0
+	}
+}
+
+func (l *demuxerLooper) handlePkt(pkt *avcodec.Packet) {
+	// Get stream
+	s, ok := l.ss[pkt.StreamIndex()]
+	if !ok {
+		return
+	}
+
+	// Increment duration
+	s.duration += time.Duration(avutil.AvRescaleQ(pkt.Duration(), s.s.ctx.TimeBase, nanosecondRational))
+
+	// Restamp
+	l.r.Restamp(pkt)
+}
+
+func (l *demuxerLooper) looping(fn func(delta int64, idx int)) {
+	// Get max duration
+	var maxDuration time.Duration
+	for _, s := range l.ss {
+		if s.duration > maxDuration {
+			maxDuration = s.duration
+		}
+	}
+
+	// Loop through streams
+	for idx, s := range l.ss {
+		// Get delta duration
+		exactDeltaDuration := maxDuration - s.duration + s.delta
+
+		// Reset duration
+		s.duration = 0
+
+		// No delta
+		if exactDeltaDuration <= 0 {
+			continue
+		}
+
+		// Get delta expressed in stream timebase
+		roundedDeltaInt := avutil.AvRescaleQ(exactDeltaDuration.Nanoseconds(), nanosecondRational, s.s.ctx.TimeBase)
+
+		// AvRescaleQ rounds to the nearest int, we need to make sure it's rounded to the nearest smaller int
+		roundedDeltaDuration := time.Duration(avutil.AvRescaleQ(roundedDeltaInt, s.s.ctx.TimeBase, nanosecondRational))
+		if roundedDeltaDuration > exactDeltaDuration {
+			roundedDeltaInt--
+		}
+
+		// Use delta
+		if roundedDeltaInt > 0 {
+			// Add delta to restamper
+			l.r.Add(roundedDeltaInt, idx)
+
+			// Custom
+			fn(roundedDeltaInt, idx)
+		}
+
+		// Update delta
+		s.delta = exactDeltaDuration - time.Duration(avutil.AvRescaleQ(roundedDeltaInt, s.s.ctx.TimeBase, nanosecondRational))
+	}
 }
 
 type demuxerRateEmulator struct {
@@ -364,11 +504,10 @@ type demuxerRateEmulator struct {
 	nextAt         time.Time
 	p              *pktPool
 	ps             map[*avcodec.Packet]bool
-	s              *avformat.Stream
-	sc             Context
+	s              *demuxerStream
 }
 
-func newDemuxerRateEmulator(bufferDuration time.Duration, d *pktDispatcher, eh *astiencoder.EventHandler, p *pktPool, s *avformat.Stream, sc Context) (e *demuxerRateEmulator) {
+func newDemuxerRateEmulator(bufferDuration time.Duration, d *pktDispatcher, eh *astiencoder.EventHandler, p *pktPool, s *demuxerStream) (e *demuxerRateEmulator) {
 	e = &demuxerRateEmulator{
 		bufferDuration: bufferDuration,
 		c:              astikit.NewChan(astikit.ChanOptions{}),
@@ -378,7 +517,6 @@ func newDemuxerRateEmulator(bufferDuration time.Duration, d *pktDispatcher, eh *
 		p:              p,
 		ps:             make(map[*avcodec.Packet]bool),
 		s:              s,
-		sc:             sc,
 	}
 	if e.bufferDuration <= 0 {
 		e.bufferDuration = time.Second
@@ -416,7 +554,7 @@ func (e *demuxerRateEmulator) stop() {
 	e.c.Stop()
 }
 
-func (e *demuxerRateEmulator) add(ctx context.Context, in *avcodec.Packet) {
+func (e *demuxerRateEmulator) handlePkt(ctx context.Context, in *avcodec.Packet) {
 	// Copy pkt
 	pkt := e.p.get()
 	if ret := pkt.AvPacketRef(in); ret < 0 {
@@ -436,7 +574,7 @@ func (e *demuxerRateEmulator) add(ctx context.Context, in *avcodec.Packet) {
 	}
 
 	// Compute next at
-	e.nextAt = pktAt.Add(time.Duration(avutil.AvRescaleQ(pktDuration(pkt, e.sc), e.s.TimeBase(), nanosecondRational)))
+	e.nextAt = pktAt.Add(time.Duration(avutil.AvRescaleQ(pktDuration(pkt, e.s.ctx), e.s.ctx.TimeBase, nanosecondRational)))
 
 	// Add to chan
 	e.c.Add(func() {
@@ -457,7 +595,7 @@ func (e *demuxerRateEmulator) add(ctx context.Context, in *avcodec.Packet) {
 		}
 
 		// Dispatch
-		e.d.dispatch(pkt, e.s)
+		e.d.dispatch(pkt, e.s.d)
 	})
 
 	// Too many pkts are buffered, demuxer needs to wait
@@ -465,4 +603,9 @@ func (e *demuxerRateEmulator) add(ctx context.Context, in *avcodec.Packet) {
 		// Sleep
 		astikit.Sleep(ctx, delta)
 	}
+}
+
+func (e *demuxerRateEmulator) add(delta int64) {
+	// Compute next at
+	e.nextAt = e.nextAt.Add(time.Duration(avutil.AvRescaleQ(delta, e.s.ctx.TimeBase, nanosecondRational)))
 }
