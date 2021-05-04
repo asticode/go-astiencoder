@@ -21,6 +21,7 @@ type RateEnforcer struct {
 	adaptSlotsToIncomingFrames bool
 	buf                        []*rateEnforcerItem
 	c                          *astikit.Chan
+	cl                         *astikit.Closer
 	d                          *frameDispatcher
 	descriptor                 Descriptor
 	eh                         *astiencoder.EventHandler
@@ -73,12 +74,12 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 	r = &RateEnforcer{
 		adaptSlotsToIncomingFrames: o.AdaptSlotsToIncomingFrames,
 		c:                          astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		cl:                         c.NewChild(),
 		descriptor:                 o.OutputCtx.Descriptor(),
 		eh:                         eh,
 		f:                          o.Filler,
 		m:                          &sync.Mutex{},
 		outputCtx:                  o.OutputCtx,
-		p:                          newFramePool(c),
 		period:                     time.Duration(float64(1e9) / o.OutputCtx.FrameRate.ToDouble()),
 		restamper:                  o.Restamper,
 		slots:                      []*rateEnforcerSlot{nil},
@@ -92,6 +93,9 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 	// Create base node
 	r.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, r, astiencoder.EventTypeToNodeEventName)
 
+	// Create frame pool
+	r.p = newFramePool(r.cl)
+
 	// Create frame dispatcher
 	r.d = newFrameDispatcher(r, eh, r.p)
 
@@ -103,6 +107,11 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 	// Add stats
 	r.addStats()
 	return
+}
+
+// Close closes the rate enforcer properly
+func (r *RateEnforcer) Close() error {
+	return r.cl.Close()
 }
 
 func (r *RateEnforcer) addStats() {
@@ -202,76 +211,79 @@ func (r *RateEnforcer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) 
 
 // HandleFrame implements the FrameHandler interface
 func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
-	// Increment incoming rate
-	r.statIncomingRate.Add(1)
-
-	// Copy frame
-	f := r.p.get()
-	if ret := avutil.AvFrameRef(f, p.Frame); ret < 0 {
-		emitAvError(r, r.eh, ret, "avutil.AvFrameRef failed")
-		return
-	}
-
-	// Restamp
-	f.SetPts(avutil.AvRescaleQ(f.Pts(), p.Descriptor.TimeBase(), r.outputCtx.TimeBase))
-
-	// Add to chan
-	r.c.Add(func() {
-		// Handle pause
-		defer r.HandlePause()
-
-		// Make sure to close frame
-		defer r.p.put(f)
-
-		// Increment processed rate
-		r.statProcessedRate.Add(1)
-
-		// Lock
-		r.m.Lock()
-		defer r.m.Unlock()
-
-		// Get last slot
-		l := r.slots[len(r.slots)-1]
-
-		// We update the last slot if:
-		//   - it's empty
-		//   - its node is different from the desired node AND the payload's node is the desired
-		//   node. That way, if the desired node doesn't dispatch frames for some time, we fallback to the previous
-		//   node instead of the previous item
-		//   - it's in the past compared to current frame and developer wants to adapt slots to incoming frames
-		if c1, c2 := l == nil || (r.n != l.n && r.n == p.Node), l != nil && l.n == p.Node && l.ptsMax < f.Pts(); c1 || c2 {
-			// Update last slot
-			if c1 || (c2 && r.adaptSlotsToIncomingFrames) {
-				r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(f)
-			}
-
-			// Emit event
-			if c1 {
-				r.eh.Emit(astiencoder.Event{
-					Name:    EventNameRateEnforcerSwitchedIn,
-					Payload: p.Node,
-					Target:  r,
-				})
-			}
-		}
-
-		// Create item
-		i := newRateEnforcerItem(nil, p.Node)
+	// Everything executed outside the main loop should be protected from the closer
+	r.cl.Do(func() {
+		// Increment incoming rate
+		r.statIncomingRate.Add(1)
 
 		// Copy frame
-		i.f = r.p.get()
-		if ret := avutil.AvFrameRef(i.f, f); ret < 0 {
+		f := r.p.get()
+		if ret := avutil.AvFrameRef(f, p.Frame); ret < 0 {
 			emitAvError(r, r.eh, ret, "avutil.AvFrameRef failed")
 			return
 		}
 
-		// Append item
-		r.buf = append(r.buf, i)
+		// Restamp
+		f.SetPts(avutil.AvRescaleQ(f.Pts(), p.Descriptor.TimeBase(), r.outputCtx.TimeBase))
 
-		// Process delay stat
-		if l != nil && l.n == i.n {
-			r.statDelayAvg.Add(float64(time.Duration(avutil.AvRescaleQ(l.ptsMax-i.f.Pts(), r.outputCtx.TimeBase, nanosecondRational))))
-		}
+		// Add to chan
+		r.c.Add(func() {
+			// Handle pause
+			defer r.HandlePause()
+
+			// Make sure to close frame
+			defer r.p.put(f)
+
+			// Increment processed rate
+			r.statProcessedRate.Add(1)
+
+			// Lock
+			r.m.Lock()
+			defer r.m.Unlock()
+
+			// Get last slot
+			l := r.slots[len(r.slots)-1]
+
+			// We update the last slot if:
+			//   - it's empty
+			//   - its node is different from the desired node AND the payload's node is the desired
+			//   node. That way, if the desired node doesn't dispatch frames for some time, we fallback to the previous
+			//   node instead of the previous item
+			//   - it's in the past compared to current frame and developer wants to adapt slots to incoming frames
+			if c1, c2 := l == nil || (r.n != l.n && r.n == p.Node), l != nil && l.n == p.Node && l.ptsMax < f.Pts(); c1 || c2 {
+				// Update last slot
+				if c1 || (c2 && r.adaptSlotsToIncomingFrames) {
+					r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(f)
+				}
+
+				// Emit event
+				if c1 {
+					r.eh.Emit(astiencoder.Event{
+						Name:    EventNameRateEnforcerSwitchedIn,
+						Payload: p.Node,
+						Target:  r,
+					})
+				}
+			}
+
+			// Create item
+			i := newRateEnforcerItem(nil, p.Node)
+
+			// Copy frame
+			i.f = r.p.get()
+			if ret := avutil.AvFrameRef(i.f, f); ret < 0 {
+				emitAvError(r, r.eh, ret, "avutil.AvFrameRef failed")
+				return
+			}
+
+			// Append item
+			r.buf = append(r.buf, i)
+
+			// Process delay stat
+			if l != nil && l.n == i.n {
+				r.statDelayAvg.Add(float64(time.Duration(avutil.AvRescaleQ(l.ptsMax-i.f.Pts(), r.outputCtx.TimeBase, nanosecondRational))))
+			}
+		})
 	})
 }
 

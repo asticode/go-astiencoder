@@ -23,6 +23,7 @@ var (
 // Demuxer represents an object capable of demuxing packets out of an input
 type Demuxer struct {
 	*astiencoder.BaseNode
+	cl                    *astikit.Closer
 	ctxFormat             *avformat.Context
 	d                     *pktDispatcher
 	eh                    *astiencoder.EventHandler
@@ -87,9 +88,9 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Create demuxer
 	d = &Demuxer{
+		cl:                    c.NewChild(),
 		eh:                    eh,
 		emulateRate:           o.EmulateRate,
-		p:                     newPktPool(c),
 		readFrameErrorHandler: o.ReadFrameErrorHandler,
 		ss:                    make(map[int]*demuxerStream),
 		statIncomingRate:      astikit.NewCounterRateStat(),
@@ -97,6 +98,9 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Create base node
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, d, astiencoder.EventTypeToNodeEventName)
+
+	// Create pkt pool
+	d.p = newPktPool(d.cl)
 
 	// Create pkt dispatcher
 	d.d = newPktDispatcher(d, eh, d.p)
@@ -152,7 +156,7 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	d.ctxFormat = ctxFormat
 
 	// Make sure the input is properly closed
-	c.Add(func() error {
+	d.cl.Add(func() error {
 		avformat.AvformatCloseInput(d.ctxFormat)
 		return nil
 	})
@@ -196,6 +200,11 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		d.l = newDemuxerLooper(d.ss)
 	}
 	return
+}
+
+// Close closes the demuxer properly
+func (d *Demuxer) Close() error {
+	return d.cl.Close()
 }
 
 func (d *Demuxer) addStats() {

@@ -58,7 +58,6 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
 		cl:                c.NewChild(),
 		eh:                eh,
-		g:                 avfilter.AvfilterGraphAlloc(),
 		outputCtx:         o.OutputCtx,
 		restamper:         o.Restamper,
 		statIncomingRate:  astikit.NewCounterRateStat(),
@@ -90,6 +89,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	}
 
 	// Create graph
+	f.g = avfilter.AvfilterGraphAlloc()
 	f.cl.Add(func() error {
 		f.g.AvfilterGraphFree()
 		return nil
@@ -200,6 +200,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	return
 }
 
+// Close closes the filterer properly
 func (f *Filterer) Close() error {
 	return f.cl.Close()
 }
@@ -301,49 +302,52 @@ func (f *Filterer) tickFunc(nextAt *time.Time, desc Descriptor) (stop bool) {
 
 // HandleFrame implements the FrameHandler interface
 func (f *Filterer) HandleFrame(p FrameHandlerPayload) {
-	// Increment incoming rate
-	f.statIncomingRate.Add(1)
+	// Everything executed outside the main loop should be protected from the closer
+	f.cl.Do(func() {
+		// Increment incoming rate
+		f.statIncomingRate.Add(1)
 
-	// Copy frame
-	fm := f.p.get()
-	if ret := avutil.AvFrameRef(fm, p.Frame); ret < 0 {
-		emitAvError(f, f.eh, ret, "avutil.AvFrameRef failed")
-		return
-	}
-
-	// Add to chan
-	f.c.Add(func() {
-		// Handle pause
-		defer f.HandlePause()
-
-		// Make sure to close frame
-		defer f.p.put(fm)
-
-		// Increment processed rate
-		f.statProcessedRate.Add(1)
-
-		// Retrieve buffer ctxs
-		bufferSrcCtxs, ok := f.bufferSrcCtxs[p.Node]
-		if !ok {
+		// Copy frame
+		fm := f.p.get()
+		if ret := avutil.AvFrameRef(fm, p.Frame); ret < 0 {
+			emitAvError(f, f.eh, ret, "avutil.AvFrameRef failed")
 			return
 		}
 
-		// Loop through buffer ctxs
-		for _, bufferSrcCtx := range bufferSrcCtxs {
-			// Push frame in graph
-			if ret := f.g.AvBuffersrcAddFrameFlags(bufferSrcCtx, fm, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
-				emitAvError(f, f.eh, ret, "f.g.AvBuffersrcAddFrameFlags failed")
-				return
-			}
-		}
+		// Add to chan
+		f.c.Add(func() {
+			// Handle pause
+			defer f.HandlePause()
 
-		// Loop
-		for {
-			// Pull filtered frame
-			if stop := f.pullFilteredFrame(p.Descriptor); stop {
+			// Make sure to close frame
+			defer f.p.put(fm)
+
+			// Increment processed rate
+			f.statProcessedRate.Add(1)
+
+			// Retrieve buffer ctxs
+			bufferSrcCtxs, ok := f.bufferSrcCtxs[p.Node]
+			if !ok {
 				return
 			}
-		}
+
+			// Loop through buffer ctxs
+			for _, bufferSrcCtx := range bufferSrcCtxs {
+				// Push frame in graph
+				if ret := f.g.AvBuffersrcAddFrameFlags(bufferSrcCtx, fm, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
+					emitAvError(f, f.eh, ret, "f.g.AvBuffersrcAddFrameFlags failed")
+					return
+				}
+			}
+
+			// Loop
+			for {
+				// Pull filtered frame
+				if stop := f.pullFilteredFrame(p.Descriptor); stop {
+					return
+				}
+			}
+		})
 	})
 }
 
@@ -373,11 +377,15 @@ func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 
 // SendCommand sends a command to the filterer
 func (f *Filterer) SendCommand(target, cmd, arg string, flags int) (err error) {
-	var res string
-	if ret := f.g.AvfilterGraphSendCommand(target, cmd, arg, res, 255, flags); ret < 0 {
-		err = fmt.Errorf("astilibav: f.g.AvfilterGraphSendCommand for target %s, cmd %s, arg %s and flag %d failed with res %s: %w", target, cmd, arg, flags, res, NewAvError(ret))
-		return
-	}
+	// Everything executed outside the main loop should be protected from the closer
+	f.cl.Do(func() {
+		// Send command
+		var res string
+		if ret := f.g.AvfilterGraphSendCommand(target, cmd, arg, res, 255, flags); ret < 0 {
+			err = fmt.Errorf("astilibav: f.g.AvfilterGraphSendCommand for target %s, cmd %s, arg %s and flag %d failed with res %s: %w", target, cmd, arg, flags, res, NewAvError(ret))
+			return
+		}
+	})
 	return
 }
 

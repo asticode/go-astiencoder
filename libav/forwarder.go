@@ -16,6 +16,7 @@ var countForwarder uint64
 type Forwarder struct {
 	*astiencoder.BaseNode
 	c                 *astikit.Chan
+	cl                *astikit.Closer
 	d                 *frameDispatcher
 	eh                *astiencoder.EventHandler
 	outputCtx         Context
@@ -41,9 +42,9 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 	// Create forwarder
 	f = &Forwarder{
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		cl:                c.NewChild(),
 		eh:                eh,
 		outputCtx:         o.OutputCtx,
-		p:                 newFramePool(c),
 		restamper:         o.Restamper,
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
@@ -52,12 +53,20 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 	// Create base node
 	f.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, f, astiencoder.EventTypeToNodeEventName)
 
+	// Create frame pool
+	f.p = newFramePool(f.cl)
+
 	// Create frame dispatcher
 	f.d = newFrameDispatcher(f, eh, f.p)
 
 	// Add stats
 	f.addStats()
 	return
+}
+
+// Close closes the forwarder properly
+func (f *Forwarder) Close() error {
+	return f.cl.Close()
 }
 
 func (f *Forwarder) addStats() {
@@ -125,33 +134,36 @@ func (f *Forwarder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 // HandleFrame implements the FrameHandler interface
 func (f *Forwarder) HandleFrame(p FrameHandlerPayload) {
-	// Increment incoming rate
-	f.statIncomingRate.Add(1)
+	// Everything executed outside the main loop should be protected from the closer
+	f.cl.Do(func() {
+		// Increment incoming rate
+		f.statIncomingRate.Add(1)
 
-	// Copy frame
-	fm := f.p.get()
-	if ret := avutil.AvFrameRef(fm, p.Frame); ret < 0 {
-		emitAvError(f, f.eh, ret, "avutil.AvFrameRef failed")
-		return
-	}
-
-	// Add to chan
-	f.c.Add(func() {
-		// Handle pause
-		defer f.HandlePause()
-
-		// Make sure to close frame
-		defer f.p.put(fm)
-
-		// Increment processed rate
-		f.statProcessedRate.Add(1)
-
-		// Restamp
-		if f.restamper != nil {
-			f.restamper.Restamp(fm)
+		// Copy frame
+		fm := f.p.get()
+		if ret := avutil.AvFrameRef(fm, p.Frame); ret < 0 {
+			emitAvError(f, f.eh, ret, "avutil.AvFrameRef failed")
+			return
 		}
 
-		// Dispatch frame
-		f.d.dispatch(fm, p.Descriptor)
+		// Add to chan
+		f.c.Add(func() {
+			// Handle pause
+			defer f.HandlePause()
+
+			// Make sure to close frame
+			defer f.p.put(fm)
+
+			// Increment processed rate
+			f.statProcessedRate.Add(1)
+
+			// Restamp
+			if f.restamper != nil {
+				f.restamper.Restamp(fm)
+			}
+
+			// Dispatch frame
+			f.d.dispatch(fm, p.Descriptor)
+		})
 	})
 }

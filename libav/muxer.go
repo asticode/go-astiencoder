@@ -47,10 +47,9 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 	// Create muxer
 	m = &Muxer{
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		cl:                c,
+		cl:                c.NewChild(),
 		eh:                eh,
 		o:                 &sync.Once{},
-		p:                 newPktPool(c),
 		restamper:         o.Restamper,
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statOutgoingRate:  astikit.NewCounterRateStat(),
@@ -59,6 +58,9 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 
 	// Create base node
 	m.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, m, astiencoder.EventTypeToNodeEventName)
+
+	// Create pkt pool
+	m.p = newPktPool(m.cl)
 
 	// Add stats
 	m.addStats()
@@ -73,7 +75,7 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 	m.ctxFormat = ctxFormat
 
 	// Make sure the format ctx is properly closed
-	c.Add(func() error {
+	m.cl.Add(func() error {
 		m.ctxFormat.AvformatFreeContext()
 		return nil
 	})
@@ -91,7 +93,7 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 		m.ctxFormat.SetPb(ctxAvIO)
 
 		// Make sure the avio ctx is properly closed
-		c.Add(func() error {
+		m.cl.Add(func() error {
 			if ret := avformat.AvIOClosep(&ctxAvIO); ret < 0 {
 				return fmt.Errorf("astilibav: avformat.AvIOClosep on %+v failed: %w", o, NewAvError(ret))
 			}
@@ -99,6 +101,11 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 		})
 	}
 	return
+}
+
+// Close closes the muxer properly
+func (m *Muxer) Close() error {
+	return m.cl.Close()
 }
 
 func (m *Muxer) addStats() {
@@ -186,45 +193,48 @@ func (m *Muxer) NewPktHandler(o *avformat.Stream) *MuxerPktHandler {
 
 // HandlePkt implements the PktHandler interface
 func (h *MuxerPktHandler) HandlePkt(p PktHandlerPayload) {
-	// Increment incoming rate
-	h.statIncomingRate.Add(1)
+	// Everything executed outside the main loop should be protected from the closer
+	h.cl.Do(func() {
+		// Increment incoming rate
+		h.statIncomingRate.Add(1)
 
-	// Copy pkt
-	pkt := h.p.get()
-	if ret := pkt.AvPacketRef(p.Pkt); ret < 0 {
-		emitAvError(h, h.eh, ret, "AvPacketRef failed")
-		return
-	}
-
-	// Add to chan
-	h.c.Add(func() {
-		// Handle pause
-		defer h.HandlePause()
-
-		// Make sure to close pkt
-		defer h.p.put(pkt)
-
-		// Increment processed rate
-		h.statProcessedRate.Add(1)
-
-		// Rescale timestamps
-		pkt.AvPacketRescaleTs(p.Descriptor.TimeBase(), h.o.TimeBase())
-
-		// Set stream index
-		pkt.SetStreamIndex(h.o.Index())
-
-		// Increment outgoing rate
-		h.statOutgoingRate.Add(float64(pkt.Size() * 8))
-
-		// Restamp
-		if h.restamper != nil {
-			h.restamper.Restamp(pkt)
-		}
-
-		// Write frame
-		if ret := h.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(pkt))); ret < 0 {
-			emitAvError(h, h.eh, ret, "h.ctxFormat.AvInterleavedWriteFrame failed")
+		// Copy pkt
+		pkt := h.p.get()
+		if ret := pkt.AvPacketRef(p.Pkt); ret < 0 {
+			emitAvError(h, h.eh, ret, "AvPacketRef failed")
 			return
 		}
+
+		// Add to chan
+		h.c.Add(func() {
+			// Handle pause
+			defer h.HandlePause()
+
+			// Make sure to close pkt
+			defer h.p.put(pkt)
+
+			// Increment processed rate
+			h.statProcessedRate.Add(1)
+
+			// Rescale timestamps
+			pkt.AvPacketRescaleTs(p.Descriptor.TimeBase(), h.o.TimeBase())
+
+			// Set stream index
+			pkt.SetStreamIndex(h.o.Index())
+
+			// Increment outgoing rate
+			h.statOutgoingRate.Add(float64(pkt.Size() * 8))
+
+			// Restamp
+			if h.restamper != nil {
+				h.restamper.Restamp(pkt)
+			}
+
+			// Write frame
+			if ret := h.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(pkt))); ret < 0 {
+				emitAvError(h, h.eh, ret, "h.ctxFormat.AvInterleavedWriteFrame failed")
+				return
+			}
+		})
 	})
 }

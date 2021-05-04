@@ -17,6 +17,7 @@ var countDecoder uint64
 type Decoder struct {
 	*astiencoder.BaseNode
 	c                 *astikit.Chan
+	cl                *astikit.Closer
 	ctxCodec          *avcodec.Context
 	d                 *frameDispatcher
 	eh                *astiencoder.EventHandler
@@ -43,16 +44,19 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	// Create decoder
 	d = &Decoder{
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		cl:                c.NewChild(),
 		eh:                eh,
 		outputCtx:         o.OutputCtx,
-		fp:                newFramePool(c),
-		pp:                newPktPool(c),
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 
 	// Create base node
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, d, astiencoder.EventTypeToNodeEventName)
+
+	// Create pools
+	d.fp = newFramePool(d.cl)
+	d.pp = newPktPool(d.cl)
 
 	// Create frame dispatcher
 	d.d = newFrameDispatcher(d, eh, d.fp)
@@ -86,13 +90,18 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	}
 
 	// Make sure the codec is closed
-	c.Add(func() error {
+	d.cl.Add(func() error {
 		if ret := d.ctxCodec.AvcodecClose(); ret < 0 {
 			emitAvError(nil, eh, ret, "d.ctxCodec.AvcodecClose failed")
 		}
 		return nil
 	})
 	return
+}
+
+// Close closes the decoder properly
+func (d *Decoder) Close() error {
+	return d.cl.Close()
 }
 
 func (d *Decoder) addStats() {
@@ -160,40 +169,43 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 // HandlePkt implements the PktHandler interface
 func (d *Decoder) HandlePkt(p PktHandlerPayload) {
-	// Increment incoming rate
-	d.statIncomingRate.Add(1)
+	// Everything executed outside the main loop should be protected from the closer
+	d.cl.Do(func() {
+		// Increment incoming rate
+		d.statIncomingRate.Add(1)
 
-	// Copy pkt
-	pkt := d.pp.get()
-	if ret := pkt.AvPacketRef(p.Pkt); ret < 0 {
-		emitAvError(d, d.eh, ret, "AvPacketRef failed")
-		return
-	}
-
-	// Add to chan
-	d.c.Add(func() {
-		// Handle pause
-		defer d.HandlePause()
-
-		// Make sure to close pkt
-		defer d.pp.put(pkt)
-
-		// Increment processed rate
-		d.statProcessedRate.Add(1)
-
-		// Send pkt to decoder
-		if ret := avcodec.AvcodecSendPacket(d.ctxCodec, pkt); ret < 0 {
-			emitAvError(d, d.eh, ret, "avcodec.AvcodecSendPacket failed")
+		// Copy pkt
+		pkt := d.pp.get()
+		if ret := pkt.AvPacketRef(p.Pkt); ret < 0 {
+			emitAvError(d, d.eh, ret, "AvPacketRef failed")
 			return
 		}
 
-		// Loop
-		for {
-			// Receive frame
-			if stop := d.receiveFrame(p.Descriptor); stop {
+		// Add to chan
+		d.c.Add(func() {
+			// Handle pause
+			defer d.HandlePause()
+
+			// Make sure to close pkt
+			defer d.pp.put(pkt)
+
+			// Increment processed rate
+			d.statProcessedRate.Add(1)
+
+			// Send pkt to decoder
+			if ret := avcodec.AvcodecSendPacket(d.ctxCodec, pkt); ret < 0 {
+				emitAvError(d, d.eh, ret, "avcodec.AvcodecSendPacket failed")
 				return
 			}
-		}
+
+			// Loop
+			for {
+				// Receive frame
+				if stop := d.receiveFrame(p.Descriptor); stop {
+					return
+				}
+			}
+		})
 	})
 }
 

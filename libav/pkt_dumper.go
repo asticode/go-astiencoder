@@ -21,6 +21,7 @@ var countPktDumper uint64
 type PktDumper struct {
 	*astiencoder.BaseNode
 	c                 *astikit.Chan
+	cl                *astikit.Closer
 	count             uint32
 	eh                *astiencoder.EventHandler
 	o                 PktDumperOptions
@@ -52,15 +53,18 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.C
 	// Create pkt dumper
 	d = &PktDumper{
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		cl:                c.NewChild(),
 		eh:                eh,
 		o:                 o,
-		p:                 newPktPool(c),
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 
 	// Create base node
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, d, astiencoder.EventTypeToNodeEventName)
+
+	// Create pkt pool
+	d.p = newPktPool(d.cl)
 
 	// Add stats
 	d.addStats()
@@ -73,6 +77,11 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.C
 		}
 	}
 	return
+}
+
+// Close closes the pkt dumper properly
+func (d *PktDumper) Close() error {
+	return d.cl.Close()
 }
 
 func (d *PktDumper) addStats() {
@@ -116,58 +125,61 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 
 // HandlePkt implements the PktHandler interface
 func (d *PktDumper) HandlePkt(p PktHandlerPayload) {
-	// Increment incoming rate
-	d.statIncomingRate.Add(1)
+	// Everything executed outside the main loop should be protected from the closer
+	d.cl.Do(func() {
+		// Increment incoming rate
+		d.statIncomingRate.Add(1)
 
-	// Copy pkt
-	pkt := d.p.get()
-	if ret := pkt.AvPacketRef(p.Pkt); ret < 0 {
-		emitAvError(d, d.eh, ret, "AvPacketRef failed")
-		return
-	}
-
-	// Add to chan
-	d.c.Add(func() {
-		// Handle pause
-		defer d.HandlePause()
-
-		// Make sure to close pkt
-		defer d.p.put(pkt)
-
-		// Increment processed rate
-		d.statProcessedRate.Add(1)
-
-		// Get pattern
-		var args PktDumperHandlerArgs
-		if d.t != nil {
-			// Increment count
-			c := atomic.AddUint32(&d.count, 1)
-
-			// Create data
-			data := make(map[string]interface{})
-			if d.o.Data != nil {
-				data = d.o.Data
-			}
-			data["count"] = c
-			data["pts"] = pkt.Pts()
-			data["stream_idx"] = pkt.StreamIndex()
-
-			// Execute template
-			buf := &bytes.Buffer{}
-			if err := d.t.Execute(buf, data); err != nil {
-				d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: executing template %s with data %+v failed: %w", d.o.Pattern, d.o.Data, err)))
-				return
-			}
-
-			// Add to args
-			args.Pattern = buf.String()
-		}
-
-		// Dump
-		if err := d.o.Handler(pkt, args); err != nil {
-			d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: pkt dump func with args %+v failed: %w", args, err)))
+		// Copy pkt
+		pkt := d.p.get()
+		if ret := pkt.AvPacketRef(p.Pkt); ret < 0 {
+			emitAvError(d, d.eh, ret, "AvPacketRef failed")
 			return
 		}
+
+		// Add to chan
+		d.c.Add(func() {
+			// Handle pause
+			defer d.HandlePause()
+
+			// Make sure to close pkt
+			defer d.p.put(pkt)
+
+			// Increment processed rate
+			d.statProcessedRate.Add(1)
+
+			// Get pattern
+			var args PktDumperHandlerArgs
+			if d.t != nil {
+				// Increment count
+				c := atomic.AddUint32(&d.count, 1)
+
+				// Create data
+				data := make(map[string]interface{})
+				if d.o.Data != nil {
+					data = d.o.Data
+				}
+				data["count"] = c
+				data["pts"] = pkt.Pts()
+				data["stream_idx"] = pkt.StreamIndex()
+
+				// Execute template
+				buf := &bytes.Buffer{}
+				if err := d.t.Execute(buf, data); err != nil {
+					d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: executing template %s with data %+v failed: %w", d.o.Pattern, d.o.Data, err)))
+					return
+				}
+
+				// Add to args
+				args.Pattern = buf.String()
+			}
+
+			// Dump
+			if err := d.o.Handler(pkt, args); err != nil {
+				d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: pkt dump func with args %+v failed: %w", args, err)))
+				return
+			}
+		})
 	})
 }
 
