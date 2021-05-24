@@ -3,6 +3,7 @@ package astilibav
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
@@ -171,19 +172,70 @@ func (p *pktPool) put(pkt *avcodec.Packet) {
 	p.p = append(p.p, pkt)
 }
 
-func pktDuration(pkt *avcodec.Packet, ctx Context) int64 {
-	switch ctx.CodecType {
+type pktDurationer struct {
+	ctx              Context
+	previousDTS      *int64
+	previousDuration int64
+	previousSkipped  int64
+	skippedRemainder time.Duration
+}
+
+func newPktDurationer(ctx Context) *pktDurationer {
+	return &pktDurationer{
+		ctx: ctx,
+	}
+}
+
+func (pd *pktDurationer) handlePkt(pkt *avcodec.Packet) (previousDuration int64) {
+	// Make sure to update previous attributes
+	defer func() {
+		if pkt != nil {
+			pd.previousDTS = astikit.Int64Ptr(pkt.Dts())
+			pd.previousDuration = pkt.Duration()
+			pd.previousSkipped = pd.skipped(pkt)
+		}
+	}()
+
+	// No previous DTS
+	if pd.previousDTS == nil {
+		return
+	}
+
+	// Get duration
+	// Use DTS delta since we can't trust pkt.Duration()
+	return pkt.Dts() - *pd.previousDTS - pd.previousSkipped
+}
+
+func (pd *pktDurationer) flush() (lastDuration int64) {
+	lastDuration = pd.previousDuration - pd.previousSkipped
+	pd.previousDTS = nil
+	pd.previousDuration = 0
+	pd.previousSkipped = 0
+	return
+}
+
+func (pd *pktDurationer) skipped(pkt *avcodec.Packet) (i int64) {
+	// Switch on codec type
+	var d time.Duration
+	switch pd.ctx.CodecType {
 	case avutil.AVMEDIA_TYPE_AUDIO:
 		// Get skip samples side data
 		sd := pkt.AvPacketGetSideData(avcodec.AV_PKT_DATA_SKIP_SAMPLES, nil)
 		if sd == nil {
-			return pkt.Duration()
+			return
 		}
 
-		// Substract number of samples
+		// Get skipped duration
 		skipStart, skipEnd := avutil.AV_RL32(sd, 0), avutil.AV_RL32(sd, 4)
-		return pkt.Duration() - avutil.AvRescaleQ(int64(float64(skipStart+skipEnd)/float64(ctx.SampleRate)*1e9), nanosecondRational, ctx.TimeBase)
+		d = time.Duration(float64(skipStart+skipEnd) / float64(pd.ctx.SampleRate) * 1e9)
 	default:
-		return pkt.Duration()
+		return
 	}
+
+	// Add remainder
+	d += pd.skippedRemainder
+
+	// Convert duration to timebase
+	i, pd.skippedRemainder = durationToTimeBase(d, pd.ctx.TimeBase)
+	return
 }
