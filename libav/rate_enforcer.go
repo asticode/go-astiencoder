@@ -463,22 +463,6 @@ func (r *RateEnforcer) distribute() {
 	}
 }
 
-func (r *RateEnforcer) debug() (o string) {
-	o = "\nSlots:\n"
-	for _, s := range r.slots {
-		if s != nil {
-			o += fmt.Sprintf("min: %d - max: %d - full: %v\n", s.ptsMin, s.ptsMax, s.i != nil)
-		}
-	}
-	o += "\nBuffer:\n"
-	for idx, i := range r.buf {
-		if i != nil && i.f != nil {
-			o += fmt.Sprintf("%d: %d\n", idx, i.f.Pts())
-		}
-	}
-	return
-}
-
 func (r *RateEnforcer) current() (i *rateEnforcerItem, filled bool) {
 	if r.slots[0] != nil && r.slots[0].i != nil {
 		// Get item
