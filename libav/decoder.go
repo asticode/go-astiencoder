@@ -183,28 +183,31 @@ func (d *Decoder) HandlePkt(p PktHandlerPayload) {
 
 		// Add to chan
 		d.c.Add(func() {
-			// Handle pause
-			defer d.HandlePause()
+			// Everything executed outside the main loop should be protected from the closer
+			d.cl.Do(func() {
+				// Handle pause
+				defer d.HandlePause()
 
-			// Make sure to close pkt
-			defer d.pp.put(pkt)
+				// Make sure to close pkt
+				defer d.pp.put(pkt)
 
-			// Increment processed rate
-			d.statProcessedRate.Add(1)
+				// Increment processed rate
+				d.statProcessedRate.Add(1)
 
-			// Send pkt to decoder
-			if ret := avcodec.AvcodecSendPacket(d.ctxCodec, pkt); ret < 0 {
-				emitAvError(d, d.eh, ret, "avcodec.AvcodecSendPacket failed")
-				return
-			}
-
-			// Loop
-			for {
-				// Receive frame
-				if stop := d.receiveFrame(p.Descriptor); stop {
+				// Send pkt to decoder
+				if ret := avcodec.AvcodecSendPacket(d.ctxCodec, pkt); ret < 0 {
+					emitAvError(d, d.eh, ret, "avcodec.AvcodecSendPacket failed")
 					return
 				}
-			}
+
+				// Loop
+				for {
+					// Receive frame
+					if stop := d.receiveFrame(p.Descriptor); stop {
+						return
+					}
+				}
+			})
 		})
 	})
 }

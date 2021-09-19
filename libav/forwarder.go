@@ -148,22 +148,25 @@ func (f *Forwarder) HandleFrame(p FrameHandlerPayload) {
 
 		// Add to chan
 		f.c.Add(func() {
-			// Handle pause
-			defer f.HandlePause()
+			// Everything executed outside the main loop should be protected from the closer
+			f.cl.Do(func() {
+				// Handle pause
+				defer f.HandlePause()
 
-			// Make sure to close frame
-			defer f.p.put(fm)
+				// Make sure to close frame
+				defer f.p.put(fm)
 
-			// Increment processed rate
-			f.statProcessedRate.Add(1)
+				// Increment processed rate
+				f.statProcessedRate.Add(1)
 
-			// Restamp
-			if f.restamper != nil {
-				f.restamper.Restamp(fm)
-			}
+				// Restamp
+				if f.restamper != nil {
+					f.restamper.Restamp(fm)
+				}
 
-			// Dispatch frame
-			f.d.dispatch(fm, p.Descriptor)
+				// Dispatch frame
+				f.d.dispatch(fm, p.Descriptor)
+			})
 		})
 	})
 }

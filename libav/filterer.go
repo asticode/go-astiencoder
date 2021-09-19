@@ -316,37 +316,40 @@ func (f *Filterer) HandleFrame(p FrameHandlerPayload) {
 
 		// Add to chan
 		f.c.Add(func() {
-			// Handle pause
-			defer f.HandlePause()
+			// Everything executed outside the main loop should be protected from the closer
+			f.cl.Do(func() {
+				// Handle pause
+				defer f.HandlePause()
 
-			// Make sure to close frame
-			defer f.p.put(fm)
+				// Make sure to close frame
+				defer f.p.put(fm)
 
-			// Increment processed rate
-			f.statProcessedRate.Add(1)
+				// Increment processed rate
+				f.statProcessedRate.Add(1)
 
-			// Retrieve buffer ctxs
-			bufferSrcCtxs, ok := f.bufferSrcCtxs[p.Node]
-			if !ok {
-				return
-			}
-
-			// Loop through buffer ctxs
-			for _, bufferSrcCtx := range bufferSrcCtxs {
-				// Push frame in graph
-				if ret := f.g.AvBuffersrcAddFrameFlags(bufferSrcCtx, fm, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
-					emitAvError(f, f.eh, ret, "f.g.AvBuffersrcAddFrameFlags failed")
+				// Retrieve buffer ctxs
+				bufferSrcCtxs, ok := f.bufferSrcCtxs[p.Node]
+				if !ok {
 					return
 				}
-			}
 
-			// Loop
-			for {
-				// Pull filtered frame
-				if stop := f.pullFilteredFrame(p.Descriptor); stop {
-					return
+				// Loop through buffer ctxs
+				for _, bufferSrcCtx := range bufferSrcCtxs {
+					// Push frame in graph
+					if ret := f.g.AvBuffersrcAddFrameFlags(bufferSrcCtx, fm, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
+						emitAvError(f, f.eh, ret, "f.g.AvBuffersrcAddFrameFlags failed")
+						return
+					}
 				}
-			}
+
+				// Loop
+				for {
+					// Pull filtered frame
+					if stop := f.pullFilteredFrame(p.Descriptor); stop {
+						return
+					}
+				}
+			})
 		})
 	})
 }

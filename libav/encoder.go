@@ -238,17 +238,20 @@ func (e *Encoder) HandleFrame(p FrameHandlerPayload) {
 
 		// Add to chan
 		e.c.Add(func() {
-			// Handle pause
-			defer e.HandlePause()
+			// Everything executed outside the main loop should be protected from the closer
+			e.cl.Do(func() {
+				// Handle pause
+				defer e.HandlePause()
 
-			// Make sure to close frame
-			defer e.fp.put(f)
+				// Make sure to close frame
+				defer e.fp.put(f)
 
-			// Increment processed rate
-			e.statProcessedRate.Add(1)
+				// Increment processed rate
+				e.statProcessedRate.Add(1)
 
-			// Encode
-			e.encode(f, p.Descriptor)
+				// Encode
+				e.encode(f, p.Descriptor)
+			})
 		})
 	})
 }

@@ -207,34 +207,37 @@ func (h *MuxerPktHandler) HandlePkt(p PktHandlerPayload) {
 
 		// Add to chan
 		h.c.Add(func() {
-			// Handle pause
-			defer h.HandlePause()
+			// Everything executed outside the main loop should be protected from the closer
+			h.cl.Do(func() {
+				// Handle pause
+				defer h.HandlePause()
 
-			// Make sure to close pkt
-			defer h.p.put(pkt)
+				// Make sure to close pkt
+				defer h.p.put(pkt)
 
-			// Increment processed rate
-			h.statProcessedRate.Add(1)
+				// Increment processed rate
+				h.statProcessedRate.Add(1)
 
-			// Rescale timestamps
-			pkt.AvPacketRescaleTs(p.Descriptor.TimeBase(), h.o.TimeBase())
+				// Rescale timestamps
+				pkt.AvPacketRescaleTs(p.Descriptor.TimeBase(), h.o.TimeBase())
 
-			// Set stream index
-			pkt.SetStreamIndex(h.o.Index())
+				// Set stream index
+				pkt.SetStreamIndex(h.o.Index())
 
-			// Increment outgoing rate
-			h.statOutgoingRate.Add(float64(pkt.Size() * 8))
+				// Increment outgoing rate
+				h.statOutgoingRate.Add(float64(pkt.Size() * 8))
 
-			// Restamp
-			if h.restamper != nil {
-				h.restamper.Restamp(pkt)
-			}
+				// Restamp
+				if h.restamper != nil {
+					h.restamper.Restamp(pkt)
+				}
 
-			// Write frame
-			if ret := h.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(pkt))); ret < 0 {
-				emitAvError(h, h.eh, ret, "h.ctxFormat.AvInterleavedWriteFrame failed")
-				return
-			}
+				// Write frame
+				if ret := h.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(pkt))); ret < 0 {
+					emitAvError(h, h.eh, ret, "h.ctxFormat.AvInterleavedWriteFrame failed")
+					return
+				}
+			})
 		})
 	})
 }

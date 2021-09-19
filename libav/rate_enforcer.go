@@ -228,61 +228,64 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 
 		// Add to chan
 		r.c.Add(func() {
-			// Handle pause
-			defer r.HandlePause()
+			// Everything executed outside the main loop should be protected from the closer
+			r.cl.Do(func() {
+				// Handle pause
+				defer r.HandlePause()
 
-			// Make sure to close frame
-			defer r.p.put(f)
+				// Make sure to close frame
+				defer r.p.put(f)
 
-			// Increment processed rate
-			r.statProcessedRate.Add(1)
+				// Increment processed rate
+				r.statProcessedRate.Add(1)
 
-			// Lock
-			r.m.Lock()
-			defer r.m.Unlock()
+				// Lock
+				r.m.Lock()
+				defer r.m.Unlock()
 
-			// Get last slot
-			l := r.slots[len(r.slots)-1]
+				// Get last slot
+				l := r.slots[len(r.slots)-1]
 
-			// We update the last slot if:
-			//   - it's empty
-			//   - its node is different from the desired node AND the payload's node is the desired
-			//   node. That way, if the desired node doesn't dispatch frames for some time, we fallback to the previous
-			//   node instead of the previous item
-			//   - it's in the past compared to current frame and developer wants to adapt slots to incoming frames
-			if c1, c2 := l == nil || (r.n != l.n && r.n == p.Node), l != nil && l.n == p.Node && l.ptsMax < f.Pts(); c1 || c2 {
-				// Update last slot
-				if c1 || (c2 && r.adaptSlotsToIncomingFrames) {
-					r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(f)
+				// We update the last slot if:
+				//   - it's empty
+				//   - its node is different from the desired node AND the payload's node is the desired
+				//   node. That way, if the desired node doesn't dispatch frames for some time, we fallback to the previous
+				//   node instead of the previous item
+				//   - it's in the past compared to current frame and developer wants to adapt slots to incoming frames
+				if c1, c2 := l == nil || (r.n != l.n && r.n == p.Node), l != nil && l.n == p.Node && l.ptsMax < f.Pts(); c1 || c2 {
+					// Update last slot
+					if c1 || (c2 && r.adaptSlotsToIncomingFrames) {
+						r.slots[len(r.slots)-1] = r.newRateEnforcerSlot(f)
+					}
+
+					// Emit event
+					if c1 {
+						r.eh.Emit(astiencoder.Event{
+							Name:    EventNameRateEnforcerSwitchedIn,
+							Payload: p.Node,
+							Target:  r,
+						})
+					}
 				}
 
-				// Emit event
-				if c1 {
-					r.eh.Emit(astiencoder.Event{
-						Name:    EventNameRateEnforcerSwitchedIn,
-						Payload: p.Node,
-						Target:  r,
-					})
+				// Create item
+				i := newRateEnforcerItem(nil, p.Node)
+
+				// Copy frame
+				i.f = r.p.get()
+				if ret := avutil.AvFrameRef(i.f, f); ret < 0 {
+					emitAvError(r, r.eh, ret, "avutil.AvFrameRef failed")
+					return
 				}
-			}
 
-			// Create item
-			i := newRateEnforcerItem(nil, p.Node)
+				// Append item
+				r.buf = append(r.buf, i)
 
-			// Copy frame
-			i.f = r.p.get()
-			if ret := avutil.AvFrameRef(i.f, f); ret < 0 {
-				emitAvError(r, r.eh, ret, "avutil.AvFrameRef failed")
-				return
-			}
-
-			// Append item
-			r.buf = append(r.buf, i)
-
-			// Process delay stat
-			if l != nil && l.n == i.n {
-				r.statDelayAvg.Add(float64(time.Duration(avutil.AvRescaleQ(l.ptsMax-i.f.Pts(), r.outputCtx.TimeBase, nanosecondRational))))
-			}
+				// Process delay stat
+				if l != nil && l.n == i.n {
+					r.statDelayAvg.Add(float64(time.Duration(avutil.AvRescaleQ(l.ptsMax-i.f.Pts(), r.outputCtx.TimeBase, nanosecondRational))))
+				}
+			})
 		})
 	})
 }

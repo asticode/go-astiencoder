@@ -139,46 +139,49 @@ func (d *PktDumper) HandlePkt(p PktHandlerPayload) {
 
 		// Add to chan
 		d.c.Add(func() {
-			// Handle pause
-			defer d.HandlePause()
+			// Everything executed outside the main loop should be protected from the closer
+			d.cl.Do(func() {
+				// Handle pause
+				defer d.HandlePause()
 
-			// Make sure to close pkt
-			defer d.p.put(pkt)
+				// Make sure to close pkt
+				defer d.p.put(pkt)
 
-			// Increment processed rate
-			d.statProcessedRate.Add(1)
+				// Increment processed rate
+				d.statProcessedRate.Add(1)
 
-			// Get pattern
-			var args PktDumperHandlerArgs
-			if d.t != nil {
-				// Increment count
-				c := atomic.AddUint32(&d.count, 1)
+				// Get pattern
+				var args PktDumperHandlerArgs
+				if d.t != nil {
+					// Increment count
+					c := atomic.AddUint32(&d.count, 1)
 
-				// Create data
-				data := make(map[string]interface{})
-				if d.o.Data != nil {
-					data = d.o.Data
+					// Create data
+					data := make(map[string]interface{})
+					if d.o.Data != nil {
+						data = d.o.Data
+					}
+					data["count"] = c
+					data["pts"] = pkt.Pts()
+					data["stream_idx"] = pkt.StreamIndex()
+
+					// Execute template
+					buf := &bytes.Buffer{}
+					if err := d.t.Execute(buf, data); err != nil {
+						d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: executing template %s with data %+v failed: %w", d.o.Pattern, d.o.Data, err)))
+						return
+					}
+
+					// Add to args
+					args.Pattern = buf.String()
 				}
-				data["count"] = c
-				data["pts"] = pkt.Pts()
-				data["stream_idx"] = pkt.StreamIndex()
 
-				// Execute template
-				buf := &bytes.Buffer{}
-				if err := d.t.Execute(buf, data); err != nil {
-					d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: executing template %s with data %+v failed: %w", d.o.Pattern, d.o.Data, err)))
+				// Dump
+				if err := d.o.Handler(pkt, args); err != nil {
+					d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: pkt dump func with args %+v failed: %w", args, err)))
 					return
 				}
-
-				// Add to args
-				args.Pattern = buf.String()
-			}
-
-			// Dump
-			if err := d.o.Handler(pkt, args); err != nil {
-				d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: pkt dump func with args %+v failed: %w", args, err)))
-				return
-			}
+			})
 		})
 	})
 }
