@@ -31,6 +31,7 @@ type Decoder struct {
 // DecoderOptions represents decoder options
 type DecoderOptions struct {
 	CodecParams *avcodec.CodecParameters
+	Name        string
 	Node        astiencoder.NodeOptions
 	OutputCtx   Context
 }
@@ -66,9 +67,16 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Find decoder
 	var cdc *avcodec.Codec
-	if cdc = avcodec.AvcodecFindDecoder(o.CodecParams.CodecId()); cdc == nil {
-		err = fmt.Errorf("astilibav: no decoder found for codec id %+v", o.CodecParams.CodecId())
-		return
+	if o.Name != "" {
+		if cdc = avcodec.AvcodecFindDecoderByName(o.Name); cdc == nil {
+			err = fmt.Errorf("astilibav: no decoder found for name %s", o.Name)
+			return
+		}
+	} else {
+		if cdc = avcodec.AvcodecFindDecoder(o.CodecParams.CodecId()); cdc == nil {
+			err = fmt.Errorf("astilibav: no decoder found for codec id %+v", o.CodecParams.CodecId())
+			return
+		}
 	}
 
 	// Alloc context
