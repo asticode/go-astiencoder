@@ -22,6 +22,7 @@ type Context struct {
 	GlobalHeader bool
 	Index        int
 	ThreadCount  *int
+	ThreadType   *int
 	TimeBase     avutil.Rational
 
 	// Audio

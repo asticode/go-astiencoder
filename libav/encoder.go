@@ -100,6 +100,9 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	if o.Ctx.ThreadCount != nil {
 		e.ctxCodec.SetThreadCount(*o.Ctx.ThreadCount)
 	}
+	if o.Ctx.ThreadType != nil {
+		e.ctxCodec.SetThreadType(*o.Ctx.ThreadType)
+	}
 
 	// Set media type-specific context parameters
 	switch o.Ctx.CodecType {
