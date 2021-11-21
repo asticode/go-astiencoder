@@ -18,7 +18,7 @@ func addWorkflow(name string, j Job, e *encoder) (w *astiencoder.Workflow, err e
 	c := astikit.NewCloser()
 
 	// Create workflow
-	w = astiencoder.NewWorkflow(e.w.Context(), name, e.eh, e.w.NewTask, c)
+	w = astiencoder.NewWorkflow(e.w.Context(), name, e.eh, e.w.NewTask, c, e.s)
 
 	// Build workflow
 	b := newBuilder()

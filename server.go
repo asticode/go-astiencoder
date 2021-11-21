@@ -223,6 +223,7 @@ func newServerStats(e Event) (ss []ServerStat) {
 type ServerStat struct {
 	Description string      `json:"description"`
 	Label       string      `json:"label"`
+	Name        string      `json:"name"`
 	Target      string      `json:"target"`
 	Unit        string      `json:"unit"`
 	Value       interface{} `json:"value"`
@@ -232,6 +233,7 @@ func newServerStat(e EventStat) (s ServerStat) {
 	s = ServerStat{
 		Description: e.Description,
 		Label:       e.Label,
+		Name:        e.Name,
 		Unit:        e.Unit,
 		Value:       e.Value,
 	}

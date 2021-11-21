@@ -3,9 +3,16 @@ package astiencoder
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/asticode/go-astikit"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
+)
+
+const (
+	StatNamePSUtil = "astiencoder.ps.util"
 )
 
 // EventStat represents a stat event
@@ -101,4 +108,58 @@ func (s *Stater) handle(stats []astikit.StatValue) {
 		Name:    EventNameStats,
 		Payload: ss,
 	})
+}
+
+type statPSUtil struct {
+	started uint32
+}
+
+func newStatPSUtil() *statPSUtil {
+	return &statPSUtil{}
+}
+
+func (s *statPSUtil) Start() {
+	atomic.SwapUint32(&s.started, 1)
+}
+
+func (s *statPSUtil) Stop() {
+	atomic.SwapUint32(&s.started, 0)
+}
+
+type statPSUtilValue struct {
+	CPU    statPSUtilValueCPU    `json:"cpu"`
+	Memory statPSUtilValueMemory `json:"memory"`
+}
+
+type statPSUtilValueCPU struct {
+	Global     float64   `json:"global"`
+	Individual []float64 `json:"individual"`
+}
+
+type statPSUtilValueMemory struct {
+	Total uint64 `json:"total"`
+	Used  uint64 `json:"used"`
+}
+
+func (s *statPSUtil) Value(delta time.Duration) interface{} {
+	// Check started
+	if atomic.LoadUint32(&s.started) == 0 {
+		return nil
+	}
+
+	// Get value
+	var v statPSUtilValue
+	if vs, err := cpu.Percent(0, false); err == nil && len(vs) > 0 {
+		v.CPU.Global = vs[0]
+	}
+	if vs, err := cpu.Percent(0, true); err == nil {
+		v.CPU.Individual = vs
+	}
+	if vv, err := mem.VirtualMemory(); err == nil {
+		v.Memory = statPSUtilValueMemory{
+			Total: vv.Total,
+			Used:  vv.Used,
+		}
+	}
+	return v
 }

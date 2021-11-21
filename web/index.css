@@ -22,17 +22,22 @@ header {
     background-color: #333333;
     border-bottom: solid 1px #000000;
     color: #ffffff;
+    display: flex;
     height: auto;
     padding: 10px;
     width: 100%;
 }
 
-header #top {
+header #left {
+    width: 74%
+}
+
+header #left #top {
     display: flex;
     flex-direction: row;
 }
 
-header #search {
+header #left #search {
     border: none;
     border-radius: 5px;
     font-family: Roboto;
@@ -41,14 +46,14 @@ header #search {
     width: 300px;
 }
 
-header #top i {
+header #left #top i {
     cursor: pointer;
     font-size: 20px;
     margin-left: 10px;
     padding: 4px;
 }
 
-header #tags > div {
+header #left #tags > div {
     background-color: #555555;
     border: solid 1px #777777;
     border-radius: 5px;
@@ -58,19 +63,19 @@ header #tags > div {
     margin: 10px 10px 0 0;
 }
 
-header #tags > div:last-child {
+header #left #tags > div:last-child {
     margin-right: 0;
 }
 
-header #tags > div:first-child {
+header #left #tags > div:first-child {
     cursor: pointer;
 }
 
-header #tags .action:hover span {
+header #left #tags .action:hover span {
     text-decoration: underline;
 }
 
-header #tags .fa {
+header #left #tags .fa {
     cursor: pointer;
     margin-top: auto;
     margin-bottom: auto;
@@ -78,16 +83,33 @@ header #tags .fa {
     vertical-align: middle;
 }
 
-header #tags .fa.active, header #tags .fa:hover {
+header #left #tags .fa.active, header #tags .fa:hover {
     opacity: 1;
 }
 
-header #tags > div > .fa:first-child {
+header #left #tags > div > .fa:first-child {
     margin-right: 8px;
 }
 
-header #tags > div > .fa:last-child {
+header #left #tags > div > .fa:last-child {
     margin-left: 8px;
+}
+
+header #right {
+    padding-left: 10px;
+    width: 26%;
+}
+
+header #right > div {
+    display: grid;
+}
+
+header #right #top {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+header #right #cpus {
+    grid-template-columns: repeat(4, 1fr);
 }
 
 section {

@@ -19,7 +19,8 @@ type Workflow struct {
 }
 
 // NewWorkflow creates a new workflow
-func NewWorkflow(ctx context.Context, name string, eh *EventHandler, tf CreateTaskFunc, c *astikit.Closer) (w *Workflow) {
+func NewWorkflow(ctx context.Context, name string, eh *EventHandler, tf CreateTaskFunc, c *astikit.Closer, s *Stater) (w *Workflow) {
+	// Create workflow
 	w = &Workflow{
 		c:    c,
 		ctx:  ctx,
@@ -27,12 +28,26 @@ func NewWorkflow(ctx context.Context, name string, eh *EventHandler, tf CreateTa
 		name: name,
 		tf:   tf,
 	}
+
+	// Create base node
 	w.bn = NewBaseNode(NodeOptions{Metadata: NodeMetadata{
 		Description: "root",
 		Label:       "root",
 		Name:        "root",
-	}}, eh, nil, w, EventTypeToWorkflowEventName)
+	}}, eh, s, w, EventTypeToWorkflowEventName)
+
+	// Add stats
+	w.addStats()
 	return
+}
+
+func (w *Workflow) addStats() {
+	w.bn.AddStats([]astikit.StatOptions{{
+		Handler: newStatPSUtil(),
+		Metadata: &astikit.StatMetadata{
+			Name: StatNamePSUtil,
+		},
+	}}...)
 }
 
 // Name returns the workflow name

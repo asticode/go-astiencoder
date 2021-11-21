@@ -37,6 +37,9 @@ var astiencoder = {
                     return
                 }
 
+                // Create workflow
+                this.workflow = {name: data.workflow.name}
+
                 // Loop through nodes
                 data.workflow.nodes.forEach(function(item) {
                     // Apply changes
@@ -359,6 +362,9 @@ var astiencoder = {
             // Get init
             var n = this.recording.parse(lines[0])
             lines.shift()
+
+            // Create workflow
+            this.workflow = {name: n.payload.name}
 
             // Loop through nodes
             n.payload.nodes.forEach(function(item) {
@@ -1118,6 +1124,25 @@ var astiencoder = {
         }
     },
     apply (name, payload) {
+        if (this.workflow.name === name) this.applyToWorkflow(name, payload)
+        else this.applyToNode(name, payload)
+    },
+    applyToWorkflow (name, payload) {
+        // Stat
+        if (payload.stat) {
+            // Ps util
+            if (payload.stat.name === 'astiencoder.ps.util') {
+                document.getElementById("memory-global").innerText = (payload.stat.value.memory.used/Math.pow(1024, 3)).toFixed(2) + '/' + (payload.stat.value.memory.total/Math.pow(1024, 3)).toFixed(2) + ' GB'
+                document.getElementById("cpu-global").innerText = payload.stat.value.cpu.global.toFixed(2) + '%'
+                var e = document.getElementById("cpus")
+                e.innerHTML = ""
+                for (var idx = 0; idx < payload.stat.value.cpu.individual.length; idx++) {
+                    e.innerHTML += "<div>#" + (idx + 1) + ": "+ payload.stat.value.cpu.individual[idx].toFixed(2) + "%</div>"
+                }
+            }
+        }
+    },
+    applyToNode (name, payload) {
         // Add node
         // If node already exists, it will do nothing
         this.nodes[name] = payload

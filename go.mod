@@ -9,5 +9,6 @@ require (
 	github.com/asticode/goav v1.4.0
 	github.com/gorilla/websocket v1.4.1
 	github.com/julienschmidt/httprouter v1.3.0
-	github.com/stretchr/testify v1.4.0
+	github.com/shirou/gopsutil/v3 v3.21.10
+	github.com/stretchr/testify v1.7.0
 )

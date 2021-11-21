@@ -8,16 +8,25 @@
 </head>
 <body>
     <header>
-        <div id="top">
-            <input id="search" type="text" placeholder="Search" oninput="astiencoder.onSearch(event)" autocomplete="off">
-            <i class="fa fa-search-minus" onclick="astiencoder.zoomOut()"></i>
-            <i class="fa fa-expand-arrows-alt" onclick="astiencoder.zoomAuto()"></i>
-            <i class="fa fa-search-plus" onclick="astiencoder.zoomIn()"></i>
-        </div>
-        <div id="tags">
-            <div class="action" onclick="astiencoder.onResetAllTags()">
-                <span>Reset all</span>
+        <div id="left">
+            <div id="top">
+                <input id="search" type="text" placeholder="Search" oninput="astiencoder.onSearch(event)" autocomplete="off">
+                <i class="fa fa-search-minus" onclick="astiencoder.zoomOut()"></i>
+                <i class="fa fa-expand-arrows-alt" onclick="astiencoder.zoomAuto()"></i>
+                <i class="fa fa-search-plus" onclick="astiencoder.zoomIn()"></i>
             </div>
+            <div id="tags">
+                <div class="action" onclick="astiencoder.onResetAllTags()">
+                    <span>Reset all</span>
+                </div>
+            </div>            
+        </div>
+        <div id="right">
+            <div id="top">
+                <div>CPU: <span id="cpu-global"></span></div>
+                <div>Memory: <span id="memory-global"></span></div>
+            </div>
+            <div id="cpus"></div>
         </div>
     </header>
     <section>
