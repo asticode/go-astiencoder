@@ -37,8 +37,8 @@ var astiencoder = {
                     return
                 }
 
-                // Create workflow
-                this.workflow = {name: data.workflow.name}
+                // Update workflow name
+                this.workflow.name = data.workflow.name
 
                 // Loop through nodes
                 data.workflow.nodes.forEach(function(item) {
@@ -97,40 +97,19 @@ var astiencoder = {
                     break
                 case 'astiencoder.stats':    
                     // Create rollback
-                    var rollback = {}
-                    
-                    // Get name
-                    rollback.name = name
+                    var rollback = {
+                        name: name,
+                        payload: []
+                    }
     
-                    // Loop through nodes
-                    rollback.payload = []
+                    // Add rollbacks
+                    this.addStatsRollback(this.workflow.name, this.workflow.stats, rollbacks, rollback)
                     for (var nn in this.nodes) {
-                        // Get node
-                        const n = this.nodes[nn]
-
-                        // No stats
-                        if (Object.keys(n.stats).length === 0) {
-                            // Append rollback
-                            rollbacks.push({
-                                name: 'astiencoder.rollback.stats.remove',
-                                payload: nn
-                            })
-                            continue
-                        }
-
-                        // Loop through stats
-                        for (var stat in n.stats) {
-                            var s = {}
-                            for (var k in n.stats[stat]) {
-                                s[k] = n.stats[stat][k]
-                            }
-                            s.target = nn
-                            rollback.payload.push(s)
-                        }
+                        this.addStatsRollback(nn, this.nodes[nn].stats, rollbacks, rollback)
                     }
 
                     // Append rollback
-                    rollbacks.push(rollback)
+                    if (rollback.payload.length > 0) rollbacks.push(rollback)
                     break
             }
         }
@@ -169,6 +148,27 @@ var astiencoder = {
         }
         return rollbacks
     },
+    addStatsRollback (name, stats, rollbacks, rollback) {
+        // No stats
+        if (Object.keys(stats).length === 0) {
+            // Append rollback
+            rollbacks.push({
+                name: 'astiencoder.rollback.stats.remove',
+                payload: name
+            })
+            return
+        }
+
+        // Loop through stats
+        for (var stat in stats) {
+            var s = {}
+            for (var k in stats[stat]) {
+                s[k] = stats[stat][k]
+            }
+            s.target = name
+            rollback.payload.push(s)
+        }
+    },
     onKeyDown (event) {
         // Keys don't exist
         if (!this.keys) this.keys = {}
@@ -205,6 +205,52 @@ var astiencoder = {
             return true
         }
         return false
+    },
+
+    /* workflow */
+    workflow: {
+        name: '',
+        stats: new Proxy({}, {
+            deleteProperty: function(obj, prop) {
+                // Stat doesn't exists
+                if (typeof obj[prop] === 'undefined') return
+
+                // Switch on prop
+                switch (prop) {
+                    case 'astiencoder.host.usage':
+                        document.getElementById("memory-global").innerText = ''
+                        document.getElementById("cpu-global").innerText = ''
+                        document.getElementById("cpus").innerText = ''
+                        break
+                }
+
+                // Delete prop
+                delete(obj[prop])
+            },
+            set: function(obj, prop, value) {
+                // Nothing changed
+                if (typeof obj[prop] !== 'undefined' && obj[prop] === value) return
+    
+                // Switch on prop
+                switch (prop) {
+                    case 'astiencoder.host.usage':
+                        if (value.value.memory.used && value.value.memory.total) document.getElementById("memory-global").innerText = (value.value.memory.used/Math.pow(1024, 3)).toFixed(2) + '/' + (value.value.memory.total/Math.pow(1024, 3)).toFixed(2) + ' GB'
+                        if (value.value.cpu.global) document.getElementById("cpu-global").innerText = value.value.cpu.global.toFixed(2) + '%'
+                        if (value.value.cpu.individual) {
+                            var e = document.getElementById("cpus")
+                            e.innerHTML = ""
+                            for (var idx = 0; idx < value.value.cpu.individual.length; idx++) {
+                                e.innerHTML += "<div>#" + (idx + 1) + ": "+ value.value.cpu.individual[idx].toFixed(2) + "%</div>"
+                            }
+                        }
+                        break
+                }
+    
+                // Store value
+                obj[prop] = value
+                return true
+            }
+        })
     },
 
     /* recording */
@@ -246,13 +292,14 @@ var astiencoder = {
                         delete astiencoder.nodes[item.payload]
                         break
                     case 'astiencoder.rollback.stats.remove':
-                        // Get node
-                        const n = astiencoder.nodes[item.payload]
-                        if (!n) break
+                        // Get item
+                        var i = astiencoder.nodes[item.payload]
+                        if (item.payload === astiencoder.workflow.name) i = astiencoder.workflow
+                        if (!i) break
 
                         // Loop through stats
-                        for (var stat in n.stats) {
-                            delete n.stats[stat]
+                        for (var stat in i.stats) {
+                            delete i.stats[stat]
                         }
                         break
                     default:
@@ -363,8 +410,8 @@ var astiencoder = {
             var n = this.recording.parse(lines[0])
             lines.shift()
 
-            // Create workflow
-            this.workflow = {name: n.payload.name}
+            // Update workflow name
+            this.workflow.name = n.payload.name
 
             // Loop through nodes
             n.payload.nodes.forEach(function(item) {
@@ -1124,22 +1171,13 @@ var astiencoder = {
         }
     },
     apply (name, payload) {
-        if (this.workflow.name === name) this.applyToWorkflow(name, payload)
+        if (this.workflow.name === name) this.applyToWorkflow(payload)
         else this.applyToNode(name, payload)
     },
-    applyToWorkflow (name, payload) {
+    applyToWorkflow (payload) {
         // Stat
         if (payload.stat) {
-            // Ps util
-            if (payload.stat.name === 'astiencoder.ps.util') {
-                document.getElementById("memory-global").innerText = (payload.stat.value.memory.used/Math.pow(1024, 3)).toFixed(2) + '/' + (payload.stat.value.memory.total/Math.pow(1024, 3)).toFixed(2) + ' GB'
-                document.getElementById("cpu-global").innerText = payload.stat.value.cpu.global.toFixed(2) + '%'
-                var e = document.getElementById("cpus")
-                e.innerHTML = ""
-                for (var idx = 0; idx < payload.stat.value.cpu.individual.length; idx++) {
-                    e.innerHTML += "<div>#" + (idx + 1) + ": "+ payload.stat.value.cpu.individual[idx].toFixed(2) + "%</div>"
-                }
-            }
+            this.workflow.stats[payload.stat.name] = payload.stat
         }
     },
     applyToNode (name, payload) {

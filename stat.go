@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	StatNamePSUtil = "astiencoder.ps.util"
+	StatNameHostUsage = "astiencoder.host.usage"
 )
 
 // EventStat represents a stat event
@@ -110,6 +110,21 @@ func (s *Stater) handle(stats []astikit.StatValue) {
 	})
 }
 
+type statHostUsage struct {
+	CPU    statHostUsageCPU    `json:"cpu"`
+	Memory statHostUsageMemory `json:"memory"`
+}
+
+type statHostUsageCPU struct {
+	Global     float64   `json:"global"`
+	Individual []float64 `json:"individual"`
+}
+
+type statHostUsageMemory struct {
+	Total uint64 `json:"total"`
+	Used  uint64 `json:"used"`
+}
+
 type statPSUtil struct {
 	started uint32
 }
@@ -126,40 +141,25 @@ func (s *statPSUtil) Stop() {
 	atomic.SwapUint32(&s.started, 0)
 }
 
-type statPSUtilValue struct {
-	CPU    statPSUtilValueCPU    `json:"cpu"`
-	Memory statPSUtilValueMemory `json:"memory"`
-}
-
-type statPSUtilValueCPU struct {
-	Global     float64   `json:"global"`
-	Individual []float64 `json:"individual"`
-}
-
-type statPSUtilValueMemory struct {
-	Total uint64 `json:"total"`
-	Used  uint64 `json:"used"`
-}
-
 func (s *statPSUtil) Value(delta time.Duration) interface{} {
 	// Check started
 	if atomic.LoadUint32(&s.started) == 0 {
 		return nil
 	}
 
-	// Get value
-	var v statPSUtilValue
+	// Get CPU
+	var v statHostUsage
 	if vs, err := cpu.Percent(0, false); err == nil && len(vs) > 0 {
 		v.CPU.Global = vs[0]
 	}
 	if vs, err := cpu.Percent(0, true); err == nil {
 		v.CPU.Individual = vs
 	}
+
+	// Get memory
 	if vv, err := mem.VirtualMemory(); err == nil {
-		v.Memory = statPSUtilValueMemory{
-			Total: vv.Total,
-			Used:  vv.Used,
-		}
+		v.Memory.Total = vv.Total
+		v.Memory.Used = vv.Used
 	}
 	return v
 }

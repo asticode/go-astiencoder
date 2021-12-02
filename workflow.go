@@ -45,7 +45,7 @@ func (w *Workflow) addStats() {
 	w.bn.AddStats([]astikit.StatOptions{{
 		Handler: newStatPSUtil(),
 		Metadata: &astikit.StatMetadata{
-			Name: StatNamePSUtil,
+			Name: StatNameHostUsage,
 		},
 	}}...)
 }
