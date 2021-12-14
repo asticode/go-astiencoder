@@ -24,7 +24,6 @@ type Filterer struct {
 	bufferSinkCtx     *avfilter.Context
 	bufferSrcCtxs     map[astiencoder.Node][]*avfilter.Context
 	c                 *astikit.Chan
-	cl                *astikit.Closer
 	d                 *frameDispatcher
 	eh                *astiencoder.EventHandler
 	emulatePeriod     time.Duration
@@ -56,7 +55,6 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	f = &Filterer{
 		bufferSrcCtxs:     make(map[astiencoder.Node][]*avfilter.Context),
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		cl:                c.NewChild(),
 		eh:                eh,
 		outputCtx:         o.OutputCtx,
 		restamper:         o.Restamper,
@@ -65,10 +63,10 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	}
 
 	// Create base node
-	f.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, f, astiencoder.EventTypeToNodeEventName)
+	f.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, f, astiencoder.EventTypeToNodeEventName)
 
 	// Create frame pool
-	f.p = newFramePool(f.cl)
+	f.p = newFramePool(f)
 
 	// Create frame dispatcher
 	f.d = newFrameDispatcher(f, eh, f.p)
@@ -90,7 +88,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 
 	// Create graph
 	f.g = avfilter.AvfilterGraphAlloc()
-	f.cl.Add(func() error {
+	f.AddCloseFunc(func() error {
 		f.g.AvfilterGraphFree()
 		return nil
 	})
@@ -200,11 +198,6 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	return
 }
 
-// Close closes the filterer properly
-func (f *Filterer) Close() error {
-	return f.cl.Close()
-}
-
 func (f *Filterer) addStats() {
 	// Get stats
 	ss := f.c.Stats()
@@ -303,7 +296,7 @@ func (f *Filterer) tickFunc(nextAt *time.Time, desc Descriptor) (stop bool) {
 // HandleFrame implements the FrameHandler interface
 func (f *Filterer) HandleFrame(p FrameHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
-	f.cl.Do(func() {
+	f.DoWhenUnclosed(func() {
 		// Increment incoming rate
 		f.statIncomingRate.Add(1)
 
@@ -317,7 +310,7 @@ func (f *Filterer) HandleFrame(p FrameHandlerPayload) {
 		// Add to chan
 		f.c.Add(func() {
 			// Everything executed outside the main loop should be protected from the closer
-			f.cl.Do(func() {
+			f.DoWhenUnclosed(func() {
 				// Handle pause
 				defer f.HandlePause()
 
@@ -381,7 +374,7 @@ func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 // SendCommand sends a command to the filterer
 func (f *Filterer) SendCommand(target, cmd, arg string, flags int) (err error) {
 	// Everything executed outside the main loop should be protected from the closer
-	f.cl.Do(func() {
+	f.DoWhenUnclosed(func() {
 		// Send command
 		var res string
 		if ret := f.g.AvfilterGraphSendCommand(target, cmd, arg, res, 255, flags); ret < 0 {

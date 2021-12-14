@@ -11,15 +11,18 @@ import (
 // Default event names
 var (
 	EventNameError             = "astiencoder.error"
+	EventNameNodeClosed        = "astiencoder.node.closed"
 	EventNameNodeContinued     = "astiencoder.node.continued"
 	EventNameNodePaused        = "astiencoder.node.paused"
 	EventNameNodeStarted       = "astiencoder.node.started"
 	EventNameNodeStopped       = "astiencoder.node.stopped"
 	EventNameStats             = "astiencoder.stats"
+	EventNameWorkflowClosed    = "astiencoder.workflow.closed"
 	EventNameWorkflowContinued = "astiencoder.workflow.continued"
 	EventNameWorkflowPaused    = "astiencoder.workflow.paused"
 	EventNameWorkflowStarted   = "astiencoder.workflow.started"
 	EventNameWorkflowStopped   = "astiencoder.workflow.stopped"
+	EventTypeClosed            = "closed"
 	EventTypeContinued         = "continued"
 	EventTypePaused            = "paused"
 	EventTypeStarted           = "started"
@@ -186,6 +189,10 @@ func LoggerEventHandlerAdapter(i astikit.StdLogger, h *EventHandler) {
 	})
 
 	// Node
+	h.AddForEventName(EventNameNodeClosed, func(e Event) bool {
+		l.Debugf("astiencoder: node %s (%s) is closed", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
+		return false
+	})
 	h.AddForEventName(EventNameNodePaused, func(e Event) bool {
 		l.Debugf("astiencoder: node %s (%s) is paused", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false
@@ -216,6 +223,8 @@ type EventTypeTransformer func(eventType string) string
 // EventTypeToNodeEventName is the node EventTypeTransformer
 func EventTypeToNodeEventName(eventType string) string {
 	switch eventType {
+	case EventTypeClosed:
+		return EventNameNodeClosed
 	case EventTypeContinued:
 		return EventNameNodeContinued
 	case EventTypePaused:
@@ -232,6 +241,8 @@ func EventTypeToNodeEventName(eventType string) string {
 // EventTypeToWorkflowEventName is the workflow EventTypeTransformer
 func EventTypeToWorkflowEventName(eventType string) string {
 	switch eventType {
+	case EventTypeClosed:
+		return EventNameWorkflowClosed
 	case EventTypeContinued:
 		return EventNameWorkflowContinued
 	case EventTypePaused:

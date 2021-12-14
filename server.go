@@ -119,7 +119,7 @@ func serverEventHandlerAdapter(eh *EventHandler, fn func(name string, payload in
 		switch e.Name {
 		case EventNameError:
 			p = astikit.ErrorCause(e.Payload.(error))
-		case EventNameNodeContinued, EventNameNodePaused, EventNameNodeStopped:
+		case EventNameNodeClosed, EventNameNodeContinued, EventNameNodePaused, EventNameNodeStopped:
 			p = e.Target.(Node).Metadata().Name
 		case EventNameNodeStarted:
 			p = newServerNode(e.Target.(Node))
@@ -181,6 +181,7 @@ func discoverServerNode(n Node, ns map[string]ServerNode) {
 
 type ServerNode struct {
 	Children    []string `json:"children"`
+	Closed      bool     `json:"closed"`
 	Description string   `json:"description"`
 	Label       string   `json:"label"`
 	Name        string   `json:"name"`
@@ -193,6 +194,7 @@ func newServerNode(n Node) (s ServerNode) {
 	// Create node
 	s = ServerNode{
 		Children:    []string{},
+		Closed:      n.IsClosed(),
 		Description: n.Metadata().Description,
 		Label:       n.Metadata().Label,
 		Name:        n.Metadata().Name,

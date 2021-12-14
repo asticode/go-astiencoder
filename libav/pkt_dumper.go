@@ -21,7 +21,6 @@ var countPktDumper uint64
 type PktDumper struct {
 	*astiencoder.BaseNode
 	c                 *astikit.Chan
-	cl                *astikit.Closer
 	count             uint32
 	eh                *astiencoder.EventHandler
 	o                 PktDumperOptions
@@ -53,7 +52,6 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.C
 	// Create pkt dumper
 	d = &PktDumper{
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		cl:                c.NewChild(),
 		eh:                eh,
 		o:                 o,
 		statIncomingRate:  astikit.NewCounterRateStat(),
@@ -61,10 +59,10 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.C
 	}
 
 	// Create base node
-	d.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, d, astiencoder.EventTypeToNodeEventName)
+	d.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, d, astiencoder.EventTypeToNodeEventName)
 
 	// Create pkt pool
-	d.p = newPktPool(d.cl)
+	d.p = newPktPool(d)
 
 	// Add stats
 	d.addStats()
@@ -77,11 +75,6 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.C
 		}
 	}
 	return
-}
-
-// Close closes the pkt dumper properly
-func (d *PktDumper) Close() error {
-	return d.cl.Close()
 }
 
 func (d *PktDumper) addStats() {
@@ -126,7 +119,7 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 // HandlePkt implements the PktHandler interface
 func (d *PktDumper) HandlePkt(p PktHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
-	d.cl.Do(func() {
+	d.DoWhenUnclosed(func() {
 		// Increment incoming rate
 		d.statIncomingRate.Add(1)
 
@@ -140,7 +133,7 @@ func (d *PktDumper) HandlePkt(p PktHandlerPayload) {
 		// Add to chan
 		d.c.Add(func() {
 			// Everything executed outside the main loop should be protected from the closer
-			d.cl.Do(func() {
+			d.DoWhenUnclosed(func() {
 				// Handle pause
 				defer d.HandlePause()
 

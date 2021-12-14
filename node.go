@@ -10,6 +10,7 @@ import (
 
 // Node represents a node
 type Node interface {
+	Closer
 	NodeChild
 	NodeDescriptor
 	NodeParent
@@ -90,6 +91,13 @@ const (
 	StatusStopped = "stopped"
 )
 
+type Closer interface {
+	AddCloseFunc(astikit.CloseFunc)
+	Close() error
+	DoWhenUnclosed(func())
+	IsClosed() bool
+}
+
 // Starter represents an object that can start/pause/continue/stop
 type Starter interface {
 	Continue()
@@ -119,6 +127,7 @@ type NodeOptions struct {
 
 // BaseNode represents a base node
 type BaseNode struct {
+	c               *astikit.Closer
 	cancel          context.CancelFunc
 	cancelPause     context.CancelFunc
 	children        map[string]Node
@@ -140,8 +149,10 @@ type BaseNode struct {
 }
 
 // NewBaseNode creates a new base node
-func NewBaseNode(o NodeOptions, eh *EventHandler, s *Stater, target interface{}, et EventTypeTransformer) *BaseNode {
-	return &BaseNode{
+func NewBaseNode(o NodeOptions, c *astikit.Closer, eh *EventHandler, s *Stater, target interface{}, et EventTypeTransformer) (n *BaseNode) {
+	// Create node
+	n = &BaseNode{
+		c:               c.NewChild(),
 		children:        make(map[string]Node),
 		childrenStarted: make(map[string]bool),
 		m:               &sync.Mutex{},
@@ -156,6 +167,31 @@ func NewBaseNode(o NodeOptions, eh *EventHandler, s *Stater, target interface{},
 		status:          StatusStopped,
 		target:          target,
 	}
+
+	// Set closer callback
+	n.c.OnClosed(func(err error) {
+		eh.Emit(Event{
+			Name:   et(EventTypeClosed),
+			Target: target,
+		})
+	})
+	return
+}
+
+func (n *BaseNode) AddCloseFunc(fn astikit.CloseFunc) {
+	n.c.Add(fn)
+}
+
+func (n *BaseNode) Close() error {
+	return n.c.Close()
+}
+
+func (n *BaseNode) IsClosed() bool {
+	return n.c.IsClosed()
+}
+
+func (n *BaseNode) DoWhenUnclosed(fn func()) {
+	n.c.Do(fn)
 }
 
 // Context returns the node context

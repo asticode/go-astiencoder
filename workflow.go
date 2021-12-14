@@ -10,7 +10,6 @@ import (
 // Workflow represents a workflow
 type Workflow struct {
 	bn   *BaseNode
-	c    *astikit.Closer
 	ctx  context.Context
 	eh   *EventHandler
 	name string
@@ -22,7 +21,6 @@ type Workflow struct {
 func NewWorkflow(ctx context.Context, name string, eh *EventHandler, tf CreateTaskFunc, c *astikit.Closer, s *Stater) (w *Workflow) {
 	// Create workflow
 	w = &Workflow{
-		c:    c,
 		ctx:  ctx,
 		eh:   eh,
 		name: name,
@@ -34,7 +32,7 @@ func NewWorkflow(ctx context.Context, name string, eh *EventHandler, tf CreateTa
 		Description: "root",
 		Label:       "root",
 		Name:        "root",
-	}}, eh, s, w, EventTypeToWorkflowEventName)
+	}}, c, eh, s, w, EventTypeToWorkflowEventName)
 
 	// Add stats
 	w.addStats()
@@ -159,7 +157,7 @@ func (w *Workflow) start(ns []Node, o WorkflowStartOptions) {
 		t.Wait()
 
 		// Close
-		if err := w.c.Close(); err != nil {
+		if err := w.bn.Close(); err != nil {
 			w.eh.Emit(EventError(w, fmt.Errorf("astiencoder: closing workflow %s failed: %w", w.name, err)))
 		}
 	})

@@ -16,7 +16,6 @@ var countForwarder uint64
 type Forwarder struct {
 	*astiencoder.BaseNode
 	c                 *astikit.Chan
-	cl                *astikit.Closer
 	d                 *frameDispatcher
 	eh                *astiencoder.EventHandler
 	outputCtx         Context
@@ -42,7 +41,6 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 	// Create forwarder
 	f = &Forwarder{
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		cl:                c.NewChild(),
 		eh:                eh,
 		outputCtx:         o.OutputCtx,
 		restamper:         o.Restamper,
@@ -51,10 +49,10 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 	}
 
 	// Create base node
-	f.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, f, astiencoder.EventTypeToNodeEventName)
+	f.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, f, astiencoder.EventTypeToNodeEventName)
 
 	// Create frame pool
-	f.p = newFramePool(f.cl)
+	f.p = newFramePool(f)
 
 	// Create frame dispatcher
 	f.d = newFrameDispatcher(f, eh, f.p)
@@ -62,11 +60,6 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 	// Add stats
 	f.addStats()
 	return
-}
-
-// Close closes the forwarder properly
-func (f *Forwarder) Close() error {
-	return f.cl.Close()
 }
 
 func (f *Forwarder) addStats() {
@@ -135,7 +128,7 @@ func (f *Forwarder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 // HandleFrame implements the FrameHandler interface
 func (f *Forwarder) HandleFrame(p FrameHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
-	f.cl.Do(func() {
+	f.DoWhenUnclosed(func() {
 		// Increment incoming rate
 		f.statIncomingRate.Add(1)
 
@@ -149,7 +142,7 @@ func (f *Forwarder) HandleFrame(p FrameHandlerPayload) {
 		// Add to chan
 		f.c.Add(func() {
 			// Everything executed outside the main loop should be protected from the closer
-			f.cl.Do(func() {
+			f.DoWhenUnclosed(func() {
 				// Handle pause
 				defer f.HandlePause()
 

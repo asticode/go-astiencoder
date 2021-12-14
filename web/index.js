@@ -59,6 +59,18 @@ var astiencoder = {
         var rollbacks = [], n = false
         if (recording) {
             switch (name) {
+                case 'astiencoder.node.closed':
+                    // Get node
+                    n = this.nodes[payload]
+                    if (!n) break
+
+                    // Append rollback
+                    // "closed" event can be sent several time for the same node
+                    if (!n.closed)  rollbacks.push({
+                        name: 'astiencoder.rollback.node.unclose',
+                        payload: payload
+                    })
+                    break
                 case 'astiencoder.node.continued':
                 case 'astiencoder.node.paused':
                 case 'astiencoder.node.stopped':
@@ -116,6 +128,13 @@ var astiencoder = {
 
         // Apply
         switch (name) {
+            case 'astiencoder.node.closed':
+                // Apply
+                this.apply(payload, {closed: true})
+
+                // Refresh nodes position
+                if (!recording) this.refreshNodesPosition()
+                break
             case 'astiencoder.node.continued':
                 this.apply(payload, {status: 'running'})
                 break
@@ -287,6 +306,15 @@ var astiencoder = {
             var rollbacks = []
             list.items.forEach(function(item) {
                 switch (item.name) {
+                    case 'astiencoder.rollback.node.unclose':
+                        // Get item
+                        var i = astiencoder.nodes[item.payload]
+                        if (item.payload === astiencoder.workflow.name) i = astiencoder.workflow
+                        if (!i) break
+
+                        // Unclose
+                        i.closed = false
+                        break
                     case 'astiencoder.rollback.node.remove':
                         // Delete
                         delete astiencoder.nodes[item.payload]
@@ -441,6 +469,9 @@ var astiencoder = {
                 // Get indexed key
                 var k = ''
                 switch (n.name) {
+                    case 'astiencoder.node.closed':
+                        k = 'closed | ' + n.payload
+                        break
                     case 'astiencoder.node.continued':
                     case 'astiencoder.node.paused':
                     case 'astiencoder.node.stopped':
@@ -845,6 +876,16 @@ var astiencoder = {
                     // Switch on prop
                     var refreshTags = false
                     switch (prop) {
+                        case 'closed':
+                            if (obj[prop] !== value) {
+                                // Update tags
+                                delete(n.tags[prop])
+                                if (value) n.tags[prop] = true
+
+                                // Make sure to refresh tags
+                                refreshTags = true
+                            }
+                            break
                         case 'label':
                             _l.innerText = value
                             break
@@ -1196,6 +1237,9 @@ var astiencoder = {
                 if (c) c.parents[name] = true
             }.bind(this))
         }
+
+        // Closed
+        if (typeof payload.closed !== 'undefined') this.nodes[name].closed = payload.closed
 
         // Description
         if (payload.description) this.nodes[name].description = payload.description

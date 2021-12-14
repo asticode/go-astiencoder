@@ -21,7 +21,6 @@ type RateEnforcer struct {
 	adaptSlotsToIncomingFrames bool
 	buf                        []*rateEnforcerItem
 	c                          *astikit.Chan
-	cl                         *astikit.Closer
 	d                          *frameDispatcher
 	descriptor                 Descriptor
 	eh                         *astiencoder.EventHandler
@@ -74,7 +73,6 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 	r = &RateEnforcer{
 		adaptSlotsToIncomingFrames: o.AdaptSlotsToIncomingFrames,
 		c:                          astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		cl:                         c.NewChild(),
 		descriptor:                 o.OutputCtx.Descriptor(),
 		eh:                         eh,
 		f:                          o.Filler,
@@ -91,10 +89,10 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 	}
 
 	// Create base node
-	r.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, r, astiencoder.EventTypeToNodeEventName)
+	r.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, r, astiencoder.EventTypeToNodeEventName)
 
 	// Create frame pool
-	r.p = newFramePool(r.cl)
+	r.p = newFramePool(r)
 
 	// Create frame dispatcher
 	r.d = newFrameDispatcher(r, eh, r.p)
@@ -107,11 +105,6 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 	// Add stats
 	r.addStats()
 	return
-}
-
-// Close closes the rate enforcer properly
-func (r *RateEnforcer) Close() error {
-	return r.cl.Close()
 }
 
 func (r *RateEnforcer) addStats() {
@@ -212,7 +205,7 @@ func (r *RateEnforcer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) 
 // HandleFrame implements the FrameHandler interface
 func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
-	r.cl.Do(func() {
+	r.DoWhenUnclosed(func() {
 		// Increment incoming rate
 		r.statIncomingRate.Add(1)
 
@@ -229,7 +222,7 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 		// Add to chan
 		r.c.Add(func() {
 			// Everything executed outside the main loop should be protected from the closer
-			r.cl.Do(func() {
+			r.DoWhenUnclosed(func() {
 				// Handle pause
 				defer r.HandlePause()
 

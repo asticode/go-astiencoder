@@ -137,12 +137,12 @@ func (c *pktCond) UsePkt(pkt *avcodec.Packet) bool {
 }
 
 type pktPool struct {
-	c *astikit.Closer
+	c astiencoder.Closer
 	m *sync.Mutex
 	p []*avcodec.Packet
 }
 
-func newPktPool(c *astikit.Closer) *pktPool {
+func newPktPool(c astiencoder.Closer) *pktPool {
 	return &pktPool{
 		c: c,
 		m: &sync.Mutex{},
@@ -154,7 +154,7 @@ func (p *pktPool) get() (pkt *avcodec.Packet) {
 	defer p.m.Unlock()
 	if len(p.p) == 0 {
 		pkt = avcodec.AvPacketAlloc()
-		p.c.Add(func() error {
+		p.c.AddCloseFunc(func() error {
 			avcodec.AvPacketFree(pkt)
 			return nil
 		})

@@ -19,7 +19,6 @@ var countEncoder uint64
 type Encoder struct {
 	*astiencoder.BaseNode
 	c                  *astikit.Chan
-	cl                 *astikit.Closer
 	ctxCodec           *avcodec.Context
 	d                  *pktDispatcher
 	eh                 *astiencoder.EventHandler
@@ -45,18 +44,17 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	// Create encoder
 	e = &Encoder{
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		cl:                c.NewChild(),
 		eh:                eh,
 		statIncomingRate:  astikit.NewCounterRateStat(),
 		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 
 	// Create base node
-	e.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, e, astiencoder.EventTypeToNodeEventName)
+	e.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, e, astiencoder.EventTypeToNodeEventName)
 
 	// Create pools
-	e.fp = newFramePool(e.cl)
-	e.pp = newPktPool(e.cl)
+	e.fp = newFramePool(e)
+	e.pp = newPktPool(e)
 
 	// Create pkt dispatcher
 	e.d = newPktDispatcher(e, eh, e.pp)
@@ -146,18 +144,13 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	}
 
 	// Make sure the codec is closed
-	e.cl.Add(func() error {
+	e.AddCloseFunc(func() error {
 		if ret := e.ctxCodec.AvcodecClose(); ret < 0 {
 			emitAvError(nil, eh, ret, "d.e.ctxCodec.AvcodecClose failed")
 		}
 		return nil
 	})
 	return
-}
-
-// Close closes the encoder properly
-func (e *Encoder) Close() error {
-	return e.cl.Close()
 }
 
 func (e *Encoder) addStats() {
@@ -228,7 +221,7 @@ func (e *Encoder) flush() {
 // HandleFrame implements the FrameHandler interface
 func (e *Encoder) HandleFrame(p FrameHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
-	e.cl.Do(func() {
+	e.DoWhenUnclosed(func() {
 		// Increment incoming rate
 		e.statIncomingRate.Add(1)
 
@@ -242,7 +235,7 @@ func (e *Encoder) HandleFrame(p FrameHandlerPayload) {
 		// Add to chan
 		e.c.Add(func() {
 			// Everything executed outside the main loop should be protected from the closer
-			e.cl.Do(func() {
+			e.DoWhenUnclosed(func() {
 				// Handle pause
 				defer e.HandlePause()
 

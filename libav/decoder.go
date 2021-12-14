@@ -17,7 +17,6 @@ var countDecoder uint64
 type Decoder struct {
 	*astiencoder.BaseNode
 	c                 *astikit.Chan
-	cl                *astikit.Closer
 	ctxCodec          *avcodec.Context
 	d                 *frameDispatcher
 	eh                *astiencoder.EventHandler
@@ -45,7 +44,6 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	// Create decoder
 	d = &Decoder{
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		cl:                c.NewChild(),
 		eh:                eh,
 		outputCtx:         o.OutputCtx,
 		statIncomingRate:  astikit.NewCounterRateStat(),
@@ -53,11 +51,11 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	}
 
 	// Create base node
-	d.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, d, astiencoder.EventTypeToNodeEventName)
+	d.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, d, astiencoder.EventTypeToNodeEventName)
 
 	// Create pools
-	d.fp = newFramePool(d.cl)
-	d.pp = newPktPool(d.cl)
+	d.fp = newFramePool(d)
+	d.pp = newPktPool(d)
 
 	// Create frame dispatcher
 	d.d = newFrameDispatcher(d, eh, d.fp)
@@ -98,18 +96,13 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	}
 
 	// Make sure the codec is closed
-	d.cl.Add(func() error {
+	d.AddCloseFunc(func() error {
 		if ret := d.ctxCodec.AvcodecClose(); ret < 0 {
 			emitAvError(nil, eh, ret, "d.ctxCodec.AvcodecClose failed")
 		}
 		return nil
 	})
 	return
-}
-
-// Close closes the decoder properly
-func (d *Decoder) Close() error {
-	return d.cl.Close()
 }
 
 func (d *Decoder) addStats() {
@@ -178,7 +171,7 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 // HandlePkt implements the PktHandler interface
 func (d *Decoder) HandlePkt(p PktHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
-	d.cl.Do(func() {
+	d.DoWhenUnclosed(func() {
 		// Increment incoming rate
 		d.statIncomingRate.Add(1)
 
@@ -192,7 +185,7 @@ func (d *Decoder) HandlePkt(p PktHandlerPayload) {
 		// Add to chan
 		d.c.Add(func() {
 			// Everything executed outside the main loop should be protected from the closer
-			d.cl.Do(func() {
+			d.DoWhenUnclosed(func() {
 				// Handle pause
 				defer d.HandlePause()
 

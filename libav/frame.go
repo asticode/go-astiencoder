@@ -102,12 +102,12 @@ func (d *frameDispatcher) stats() []astikit.StatOptions {
 }
 
 type framePool struct {
-	c *astikit.Closer
+	c astiencoder.Closer
 	m *sync.Mutex
 	p []*avutil.Frame
 }
 
-func newFramePool(c *astikit.Closer) *framePool {
+func newFramePool(c astiencoder.Closer) *framePool {
 	return &framePool{
 		c: c,
 		m: &sync.Mutex{},
@@ -119,7 +119,7 @@ func (p *framePool) get() (f *avutil.Frame) {
 	defer p.m.Unlock()
 	if len(p.p) == 0 {
 		f = avutil.AvFrameAlloc()
-		p.c.Add(func() error {
+		p.c.AddCloseFunc(func() error {
 			avutil.AvFrameFree(f)
 			return nil
 		})

@@ -18,7 +18,6 @@ var countMuxer uint64
 type Muxer struct {
 	*astiencoder.BaseNode
 	c                 *astikit.Chan
-	cl                *astikit.Closer
 	ctxFormat         *avformat.Context
 	eh                *astiencoder.EventHandler
 	o                 *sync.Once
@@ -47,7 +46,6 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 	// Create muxer
 	m = &Muxer{
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		cl:                c.NewChild(),
 		eh:                eh,
 		o:                 &sync.Once{},
 		restamper:         o.Restamper,
@@ -57,10 +55,10 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 	}
 
 	// Create base node
-	m.BaseNode = astiencoder.NewBaseNode(o.Node, eh, s, m, astiencoder.EventTypeToNodeEventName)
+	m.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, m, astiencoder.EventTypeToNodeEventName)
 
 	// Create pkt pool
-	m.p = newPktPool(m.cl)
+	m.p = newPktPool(m)
 
 	// Add stats
 	m.addStats()
@@ -75,7 +73,7 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 	m.ctxFormat = ctxFormat
 
 	// Make sure the format ctx is properly closed
-	m.cl.Add(func() error {
+	m.AddCloseFunc(func() error {
 		m.ctxFormat.AvformatFreeContext()
 		return nil
 	})
@@ -93,7 +91,7 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 		m.ctxFormat.SetPb(ctxAvIO)
 
 		// Make sure the avio ctx is properly closed
-		m.cl.Add(func() error {
+		m.AddCloseFunc(func() error {
 			if ret := avformat.AvIOClosep(&ctxAvIO); ret < 0 {
 				return fmt.Errorf("astilibav: avformat.AvIOClosep on %+v failed: %w", o, NewAvError(ret))
 			}
@@ -101,11 +99,6 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 		})
 	}
 	return
-}
-
-// Close closes the muxer properly
-func (m *Muxer) Close() error {
-	return m.cl.Close()
 }
 
 func (m *Muxer) addStats() {
@@ -162,7 +155,7 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		}
 
 		// Write trailer once everything is done
-		m.cl.Add(func() error {
+		m.AddCloseFunc(func() error {
 			if ret := m.ctxFormat.AvWriteTrailer(); ret < 0 {
 				return fmt.Errorf("m.ctxFormat.AvWriteTrailer on %s failed: %w", m.ctxFormat.Filename(), NewAvError(ret))
 			}
@@ -194,7 +187,7 @@ func (m *Muxer) NewPktHandler(o *avformat.Stream) *MuxerPktHandler {
 // HandlePkt implements the PktHandler interface
 func (h *MuxerPktHandler) HandlePkt(p PktHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
-	h.cl.Do(func() {
+	h.DoWhenUnclosed(func() {
 		// Increment incoming rate
 		h.statIncomingRate.Add(1)
 
@@ -208,7 +201,7 @@ func (h *MuxerPktHandler) HandlePkt(p PktHandlerPayload) {
 		// Add to chan
 		h.c.Add(func() {
 			// Everything executed outside the main loop should be protected from the closer
-			h.cl.Do(func() {
+			h.DoWhenUnclosed(func() {
 				// Handle pause
 				defer h.HandlePause()
 
