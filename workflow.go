@@ -53,21 +53,28 @@ func (w *Workflow) Name() string {
 	return w.name
 }
 
-func (w *Workflow) nodes() (ns []Node) {
-	for _, n := range w.indexedNodes() {
+func (w *Workflow) nodes(gs ...WorkflowStartGroup) (ns []Node) {
+	for _, n := range w.indexedNodes(gs...) {
 		ns = append(ns, n)
 	}
 	return
 }
 
-func (w *Workflow) indexedNodes() (ns map[string]Node) {
-	ns = make(map[string]Node)
-	w.indexedNodesFunc(ns, w.bn.Children())
+func (w *Workflow) indexedNodes(gs ...WorkflowStartGroup) (m map[string]Node) {
+	m = make(map[string]Node)
+	ns := w.bn.Children()
+	for _, g := range gs {
+		ns = append(ns, g.Nodes...)
+	}
+	w.indexedNodesFunc(m, ns)
 	return
 }
 
 func (w *Workflow) indexedNodesFunc(ns map[string]Node, children []Node) {
 	for _, n := range children {
+		if _, ok := ns[n.Metadata().Name]; ok {
+			continue
+		}
 		ns[n.Metadata().Name] = n
 		w.indexedNodesFunc(ns, n.Children())
 	}
@@ -107,7 +114,7 @@ func (w *Workflow) Start() {
 
 // StartWithOptions starts the workflow with options
 func (w *Workflow) StartWithOptions(o WorkflowStartOptions) {
-	w.start(w.nodes(), o)
+	w.start(w.nodes(o.Groups...), o)
 }
 
 type workflowStartGroup struct {
