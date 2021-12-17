@@ -29,6 +29,7 @@ type Demuxer struct {
 	emulateRate           bool
 	interruptRet          *int
 	l                     *demuxerLooper
+	loop                  uint32
 	p                     *pktPool
 	readFrameErrorHandler DemuxerReadFrameErrorHandler
 	ss                    map[int]*demuxerStream
@@ -97,6 +98,11 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Create base node
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, d, astiencoder.EventTypeToNodeEventName)
+
+	// Update loop
+	if o.Loop {
+		d.loop = 1
+	}
 
 	// Create pkt pool
 	d.p = newPktPool(d)
@@ -198,9 +204,7 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	}
 
 	// Create looper
-	if o.Loop {
-		d.l = newDemuxerLooper(d.ss)
-	}
+	d.l = newDemuxerLooper(d.ss)
 	return
 }
 
@@ -219,6 +223,14 @@ func (d *Demuxer) addStats() {
 
 	// Add stats
 	d.BaseNode.AddStats(ss...)
+}
+
+func (d *Demuxer) SetLoop(loop bool) {
+	var v uint32
+	if loop {
+		v = 1
+	}
+	atomic.StoreUint32(&d.loop, v)
 }
 
 // Streams returns the streams ordered by index
@@ -325,9 +337,7 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 		wg.Wait()
 
 		// Reset looper
-		if d.l != nil {
-			d.l.reset()
-		}
+		d.l.reset()
 	})
 }
 
@@ -338,7 +348,7 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 
 	// Read frame
 	if ret := d.ctxFormat.AvReadFrame(pkt); ret < 0 {
-		if d.l != nil && ret == avutil.AVERROR_EOF {
+		if atomic.LoadUint32(&d.loop) > 0 && ret == avutil.AVERROR_EOF {
 			// Let the looper know we're looping
 			d.l.looping()
 
@@ -348,6 +358,14 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 				stop = true
 			}
 		} else {
+			// Let the rate emulators know we've reached EOF
+			if d.emulateRate && ret == avutil.AVERROR_EOF {
+				// Loop through streams
+				for _, s := range d.ss {
+					s.e.eof()
+				}
+			}
+
 			// Custom error handler
 			if d.readFrameErrorHandler != nil {
 				var handled bool
@@ -378,9 +396,7 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	previousDuration := s.pd.handlePkt(pkt)
 
 	// Handle loop
-	if d.l != nil {
-		d.l.handlePkt(pkt, &previousDuration)
-	}
+	d.l.handlePkt(pkt, &previousDuration)
 
 	// Emulate rate
 	if d.emulateRate {
@@ -620,4 +636,8 @@ func (e *demuxerRateEmulator) handlePkt(ctx context.Context, in *avcodec.Packet,
 		// Sleep
 		astikit.Sleep(ctx, delta)
 	}
+}
+
+func (e *demuxerRateEmulator) eof() {
+	e.c.Add(func() { e.stop() })
 }
