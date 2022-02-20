@@ -5,17 +5,15 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
 	astilibav "github.com/asticode/go-astiencoder/libav"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avcodec"
-	"github.com/asticode/goav/avformat"
-	"github.com/asticode/goav/avutil"
 )
 
-func addWorkflow(name string, j Job, e *encoder) (w *astiencoder.Workflow, err error) {
+func addWorkflow(name string, j Job, e *encoder) (w *astiencoder.Workflow, c *astikit.Closer, err error) {
 	// Create closer
-	c := astikit.NewCloser()
+	c = astikit.NewCloser()
 
 	// Create workflow
 	w = astiencoder.NewWorkflow(e.w.Context(), name, e.eh, e.w.NewTask, c, e.s)
@@ -120,7 +118,7 @@ func (b *builder) openInputs(j Job, bd *buildData) (is map[string]openedInput, e
 		// Create demuxer
 		var d *astilibav.Demuxer
 		if d, err = astilibav.NewDemuxer(astilibav.DemuxerOptions{
-			Dict:        astilibav.NewDefaultDict(cfg.Dict),
+			Dictionary:  astilibav.NewDefaultDictionary(cfg.Dict),
 			EmulateRate: cfg.EmulateRate,
 			URL:         cfg.URL,
 		}, bd.eh, bd.c, bd.s); err != nil {
@@ -197,7 +195,7 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 			}
 
 			// Only process a specific media type
-			if t := avutil.MediaTypeFromString(i.c.MediaType); t > -1 && is.CodecParameters.CodecType() != avcodec.MediaType(t) {
+			if i.c.MediaType != nil && is.Ctx.MediaType != i.c.MediaType.MediaType() {
 				continue
 			}
 
@@ -209,8 +207,8 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 				// Loop through outputs
 				for _, o := range oos {
 					// Clone stream
-					var os *avformat.Stream
-					if os, err = astilibav.CloneStream(is, o.o.m.CtxFormat()); err != nil {
+					var os *astiav.Stream
+					if os, err = astilibav.CloneStream(is, o.o.m.FormatContext()); err != nil {
 						err = fmt.Errorf("main: cloning stream 0x%x(%d) of %s failed: %w", is.ID, is.ID, i.c.Name, err)
 						return
 					}
@@ -273,8 +271,8 @@ func (b *builder) addOperationToWorkflow(name string, o JobOperation, bd *buildD
 					}
 				default:
 					// Add stream
-					var os *avformat.Stream
-					if os, err = e.AddStream(o.o.m.CtxFormat()); err != nil {
+					var os *astiav.Stream
+					if os, err = e.AddStream(o.o.m.FormatContext()); err != nil {
 						err = fmt.Errorf("main: adding stream for stream 0x%x(%d) of %s and output %s failed: %w", is.ID, is.ID, i.c.Name, o.c.Name, err)
 						return
 					}
@@ -347,21 +345,19 @@ func (b *builder) operationOutputCtx(o JobOperation, inCtx astilibav.Context, oo
 
 	// Set frame rate
 	if o.FrameRate != nil {
-		outCtx.FrameRate = avutil.NewRational(o.FrameRate.Num(), o.FrameRate.Den())
+		outCtx.FrameRate = astiav.NewRational(o.FrameRate.Num(), o.FrameRate.Den())
 	}
 
 	// Set time base
 	if o.TimeBase != nil {
-		outCtx.TimeBase = avutil.NewRational(o.TimeBase.Num(), o.TimeBase.Den())
+		outCtx.TimeBase = astiav.NewRational(o.TimeBase.Num(), o.TimeBase.Den())
 	} else {
-		outCtx.TimeBase = avutil.NewRational(outCtx.FrameRate.Den(), outCtx.FrameRate.Num())
+		outCtx.TimeBase = astiav.NewRational(outCtx.FrameRate.Den(), outCtx.FrameRate.Num())
 	}
 
 	// Set pixel format
-	if len(o.PixelFormat) > 0 {
-		outCtx.PixelFormat = avutil.PixelFormatFromString(o.PixelFormat)
-	} else if o.Codec == "mjpeg" {
-		outCtx.PixelFormat = avutil.AV_PIX_FMT_YUVJ420P
+	if o.Codec == "mjpeg" {
+		outCtx.PixelFormat = astiav.PixelFormatYuvj420P
 	}
 
 	// Set height
@@ -388,13 +384,13 @@ func (b *builder) operationOutputCtx(o JobOperation, inCtx astilibav.Context, oo
 	outCtx.ThreadCount = o.ThreadCount
 
 	// Set dict
-	outCtx.Dict = astilibav.NewDefaultDict(o.Dict)
+	outCtx.Dictionary = astilibav.NewDefaultDictionary(o.Dict)
 
 	// TODO Add audio options
 
 	// Set global header
 	if oos[0].o.m != nil {
-		outCtx.GlobalHeader = oos[0].o.m.CtxFormat().Oformat().Flags()&avformat.AVFMT_GLOBALHEADER > 0
+		outCtx.GlobalHeader = oos[0].o.m.FormatContext().OutputFormat().Flags().Has(astiav.IOFormatFlagGlobalheader)
 	}
 	return
 }
@@ -412,8 +408,8 @@ func (b *builder) createDecoder(bd *buildData, i operationInput, is *astilibav.S
 	if !okD || !okS {
 		// Create decoder
 		if d, err = astilibav.NewDecoder(astilibav.DecoderOptions{
-			CodecParams: is.CodecParameters,
-			OutputCtx:   is.Ctx,
+			CodecParameters: is.CodecParameters,
+			OutputCtx:       is.Ctx,
 		}, bd.eh, bd.c, bd.s); err != nil {
 			err = fmt.Errorf("main: creating decoder for stream 0x%x(%d) of %s failed: %w", is.ID, is.ID, i.c.Name, err)
 			return
@@ -436,8 +432,8 @@ func (b *builder) createFilterer(bd *buildData, outCtx astilibav.Context, n asti
 	inCtx := n.(astilibav.OutputContexter).OutputCtx()
 
 	// Switch on media type
-	switch inCtx.CodecType {
-	case avutil.AVMEDIA_TYPE_VIDEO:
+	switch inCtx.MediaType {
+	case astiav.MediaTypeVideo:
 		// Frame rate
 		// TODO Use select if inFramerate > outFramerate
 		if inCtx.FrameRate.Den() > 0 && outCtx.FrameRate.Den() > 0 && inCtx.FrameRate.Num()/inCtx.FrameRate.Den() != outCtx.FrameRate.Num()/outCtx.FrameRate.Den() {

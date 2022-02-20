@@ -1,22 +1,22 @@
 package astilibav
 
 import (
-	"github.com/asticode/goav/avutil"
+	"github.com/asticode/go-astiav"
 )
 
 // Descriptor is an object that can describe a set of parameters
 type Descriptor interface {
-	TimeBase() avutil.Rational
+	TimeBase() astiav.Rational
 }
 
-func NewDescriptor(timeBase avutil.Rational) Descriptor {
+func NewDescriptor(timeBase astiav.Rational) Descriptor {
 	return descriptor{timeBase: timeBase}
 }
 
 type descriptor struct {
-	timeBase avutil.Rational
+	timeBase astiav.Rational
 }
 
-func (d descriptor) TimeBase() avutil.Rational {
+func (d descriptor) TimeBase() astiav.Rational {
 	return d.timeBase
 }

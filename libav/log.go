@@ -4,20 +4,20 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avutil"
 )
 
 type EventLog struct {
-	Level  int
+	Level  astiav.LogLevel
 	Msg    string
 	Parent string
 }
 
 // TODO Process parent and update event's target
 func HandleLogs(eh *astiencoder.EventHandler) {
-	avutil.AvLogSetCallback(func(level int, msg, parent string) {
+	astiav.SetLogCallback(func(level astiav.LogLevel, msg, parent string) {
 		// Emit event
 		eh.Emit(astiencoder.Event{
 			Name: EventNameLog,
@@ -64,18 +64,18 @@ func loggerEventHandlerCallback(o LoggerEventHandlerAdapterOptions, l astikit.Co
 
 			// Add level
 			switch v.Level {
-			case avutil.AV_LOG_DEBUG, avutil.AV_LOG_VERBOSE:
+			case astiav.LogLevelDebug, astiav.LogLevelVerbose:
 				l.Debug(msg)
-			case avutil.AV_LOG_INFO:
+			case astiav.LogLevelInfo:
 				l.Info(msg)
-			case avutil.AV_LOG_ERROR, avutil.AV_LOG_FATAL, avutil.AV_LOG_PANIC:
-				if v.Level == avutil.AV_LOG_FATAL {
+			case astiav.LogLevelError, astiav.LogLevelFatal, astiav.LogLevelPanic:
+				if v.Level == astiav.LogLevelFatal {
 					msg = "FATAL! " + msg
-				} else if v.Level == avutil.AV_LOG_PANIC {
+				} else if v.Level == astiav.LogLevelPanic {
 					msg = "PANIC! " + msg
 				}
 				l.Error(msg)
-			case avutil.AV_LOG_WARNING:
+			case astiav.LogLevelWarning:
 				l.Warn(msg)
 			}
 		}

@@ -3,9 +3,9 @@ package astilibav
 import (
 	"sync"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avutil"
 )
 
 // FrameHandler represents a node that can handle a frame
@@ -23,7 +23,7 @@ type FrameHandlerConnector interface {
 // FrameHandlerPayload represents a FrameHandler payload
 type FrameHandlerPayload struct {
 	Descriptor Descriptor
-	Frame      *avutil.Frame
+	Frame      *astiav.Frame
 	Node       astiencoder.Node
 }
 
@@ -59,7 +59,7 @@ func (d *frameDispatcher) delHandler(h FrameHandler) {
 	delete(d.hs, h.Metadata().Name)
 }
 
-func (d *frameDispatcher) dispatch(f *avutil.Frame, descriptor Descriptor) {
+func (d *frameDispatcher) dispatch(f *astiav.Frame, descriptor Descriptor) {
 	// Increment outgoing rate
 	d.statOutgoingRate.Add(1)
 
@@ -104,7 +104,7 @@ func (d *frameDispatcher) stats() []astikit.StatOptions {
 type framePool struct {
 	c astiencoder.Closer
 	m *sync.Mutex
-	p []*avutil.Frame
+	p []*astiav.Frame
 }
 
 func newFramePool(c astiencoder.Closer) *framePool {
@@ -114,15 +114,12 @@ func newFramePool(c astiencoder.Closer) *framePool {
 	}
 }
 
-func (p *framePool) get() (f *avutil.Frame) {
+func (p *framePool) get() (f *astiav.Frame) {
 	p.m.Lock()
 	defer p.m.Unlock()
 	if len(p.p) == 0 {
-		f = avutil.AvFrameAlloc()
-		p.c.AddCloseFunc(func() error {
-			avutil.AvFrameFree(f)
-			return nil
-		})
+		f = astiav.AllocFrame()
+		p.c.AddClose(f.Free)
 		return
 	}
 	f = p.p[0]
@@ -130,9 +127,9 @@ func (p *framePool) get() (f *avutil.Frame) {
 	return
 }
 
-func (p *framePool) put(f *avutil.Frame) {
+func (p *framePool) put(f *astiav.Frame) {
 	p.m.Lock()
 	defer p.m.Unlock()
-	avutil.AvFrameUnref(f)
+	f.Unref()
 	p.p = append(p.p, f)
 }

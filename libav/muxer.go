@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"unsafe"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avformat"
 )
 
 var countMuxer uint64
@@ -18,7 +17,7 @@ var countMuxer uint64
 type Muxer struct {
 	*astiencoder.BaseNode
 	c                 *astikit.Chan
-	ctxFormat         *avformat.Context
+	formatContext     *astiav.FormatContext
 	eh                *astiencoder.EventHandler
 	o                 *sync.Once
 	p                 *pktPool
@@ -30,7 +29,7 @@ type Muxer struct {
 
 // MuxerOptions represents muxer options
 type MuxerOptions struct {
-	Format     *avformat.OutputFormat
+	Format     *astiav.OutputFormat
 	FormatName string
 	Node       astiencoder.NodeOptions
 	Restamper  PktRestamper
@@ -64,39 +63,35 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 	m.addStats()
 
 	// Alloc format context
-	// We need to create an intermediate variable to avoid "cgo argument has Go pointer to Go pointer" errors
-	var ctxFormat *avformat.Context
-	if ret := avformat.AvformatAllocOutputContext2(&ctxFormat, o.Format, o.FormatName, o.URL); ret < 0 {
-		err = fmt.Errorf("astilibav: avformat.AvformatAllocOutputContext2 on %+v failed: %w", o, NewAvError(ret))
+	if m.formatContext, err = astiav.AllocOutputFormatContext(o.Format, o.FormatName, o.URL); err != nil {
+		err = fmt.Errorf("astilibav: allocating output format context failed: %w", err)
 		return
 	}
-	m.ctxFormat = ctxFormat
 
-	// Make sure the format ctx is properly closed
-	m.AddCloseFunc(func() error {
-		m.ctxFormat.AvformatFreeContext()
-		return nil
-	})
+	// Make sure the format context is properly closed
+	m.AddClose(m.formatContext.Free)
 
-	// This is a file
-	if m.ctxFormat.Flags()&avformat.AVFMT_NOFILE == 0 {
+	// We need to use an io context if this is a file
+	if !m.formatContext.OutputFormat().Flags().Has(astiav.IOFormatFlagNofile) {
+		// Create io context
+		ioContext := astiav.NewIOContext()
+
 		// Open
-		var ctxAvIO *avformat.AvIOContext
-		if ret := avformat.AvIOOpen(&ctxAvIO, o.URL, avformat.AVIO_FLAG_WRITE); ret < 0 {
-			err = fmt.Errorf("astilibav: avformat.AvIOOpen on %+v failed: %w", o, NewAvError(ret))
+		if err = ioContext.Open(o.URL, astiav.NewIOContextFlags(astiav.IOContextFlagWrite)); err != nil {
+			err = fmt.Errorf("astilibav: opening io context failed: %w", err)
 			return
 		}
 
-		// Set pb
-		m.ctxFormat.SetPb(ctxAvIO)
-
-		// Make sure the avio ctx is properly closed
-		m.AddCloseFunc(func() error {
-			if ret := avformat.AvIOClosep(&ctxAvIO); ret < 0 {
-				return fmt.Errorf("astilibav: avformat.AvIOClosep on %+v failed: %w", o, NewAvError(ret))
+		// Make sure the io context is properly closed
+		m.AddCloseWithError(func() error {
+			if err := ioContext.Closep(); err != nil {
+				return fmt.Errorf("astilibav: closing io context failed: %w", err)
 			}
 			return nil
 		})
+
+		// Set pb
+		m.formatContext.SetPb(ioContext)
 	}
 	return
 }
@@ -138,26 +133,25 @@ func (m *Muxer) addStats() {
 	m.BaseNode.AddStats(ss...)
 }
 
-// CtxFormat returns the format ctx
-func (m *Muxer) CtxFormat() *avformat.Context {
-	return m.ctxFormat
+func (m *Muxer) FormatContext() *astiav.FormatContext {
+	return m.formatContext
 }
 
 // Start starts the muxer
 func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	m.BaseNode.Start(ctx, t, func(t *astikit.Task) {
 		// Make sure to write header once
-		var ret int
-		m.o.Do(func() { ret = m.ctxFormat.AvformatWriteHeader(nil) })
-		if ret < 0 {
-			emitAvError(m, m.eh, ret, "m.ctxFormat.AvformatWriteHeader on %s failed", m.ctxFormat.Filename())
+		var err error
+		m.o.Do(func() { err = m.formatContext.WriteHeader(nil) })
+		if err != nil {
+			emitError(m, m.eh, err, "writing header")
 			return
 		}
 
 		// Write trailer once everything is done
-		m.AddCloseFunc(func() error {
-			if ret := m.ctxFormat.AvWriteTrailer(); ret < 0 {
-				return fmt.Errorf("m.ctxFormat.AvWriteTrailer on %s failed: %w", m.ctxFormat.Filename(), NewAvError(ret))
+		m.AddCloseWithError(func() error {
+			if err := m.formatContext.WriteTrailer(); err != nil {
+				return fmt.Errorf("writing trailer failed: %w", err)
 			}
 			return nil
 		})
@@ -173,11 +167,11 @@ func (m *Muxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 // MuxerPktHandler is an object that can handle a pkt for the muxer
 type MuxerPktHandler struct {
 	*Muxer
-	o *avformat.Stream
+	o *astiav.Stream
 }
 
 // NewHandler creates
-func (m *Muxer) NewPktHandler(o *avformat.Stream) *MuxerPktHandler {
+func (m *Muxer) NewPktHandler(o *astiav.Stream) *MuxerPktHandler {
 	return &MuxerPktHandler{
 		Muxer: m,
 		o:     o,
@@ -193,8 +187,8 @@ func (h *MuxerPktHandler) HandlePkt(p PktHandlerPayload) {
 
 		// Copy pkt
 		pkt := h.p.get()
-		if ret := pkt.AvPacketRef(p.Pkt); ret < 0 {
-			emitAvError(h, h.eh, ret, "AvPacketRef failed")
+		if err := pkt.Ref(p.Pkt); err != nil {
+			emitError(h, h.eh, err, "refing packet")
 			return
 		}
 
@@ -212,7 +206,7 @@ func (h *MuxerPktHandler) HandlePkt(p PktHandlerPayload) {
 				h.statProcessedRate.Add(1)
 
 				// Rescale timestamps
-				pkt.AvPacketRescaleTs(p.Descriptor.TimeBase(), h.o.TimeBase())
+				pkt.RescaleTs(p.Descriptor.TimeBase(), h.o.TimeBase())
 
 				// Set stream index
 				pkt.SetStreamIndex(h.o.Index())
@@ -226,8 +220,8 @@ func (h *MuxerPktHandler) HandlePkt(p PktHandlerPayload) {
 				}
 
 				// Write frame
-				if ret := h.ctxFormat.AvInterleavedWriteFrame((*avformat.Packet)(unsafe.Pointer(pkt))); ret < 0 {
-					emitAvError(h, h.eh, ret, "h.ctxFormat.AvInterleavedWriteFrame failed")
+				if err := h.formatContext.WriteInterleavedFrame(pkt); err != nil {
+					emitError(h, h.eh, err, "writing interleaved frame")
 					return
 				}
 			})

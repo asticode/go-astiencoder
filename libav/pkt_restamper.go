@@ -3,12 +3,12 @@ package astilibav
 import (
 	"sync"
 
-	"github.com/asticode/goav/avcodec"
+	"github.com/asticode/go-astiav"
 )
 
 // PktRestamper represents an object capable of restamping packets
 type PktRestamper interface {
-	Restamp(pkt *avcodec.Packet)
+	Restamp(pkt *astiav.Packet)
 }
 
 type pktRestamperWithOffset struct {
@@ -23,7 +23,7 @@ func newPktRestamperWithOffset() *pktRestamperWithOffset {
 	}
 }
 
-func (r *pktRestamperWithOffset) restamp(pkt *avcodec.Packet, fn func(pkt *avcodec.Packet) int64) {
+func (r *pktRestamperWithOffset) restamp(pkt *astiav.Packet, fn func(pkt *astiav.Packet) int64) {
 	// Compute offset
 	r.m.Lock()
 	offset, ok := r.offsets[pkt.StreamIndex()]
@@ -50,8 +50,8 @@ func NewPktRestamperStartFromZero() *PktRestamperStartFromZero {
 }
 
 // Restamp implements the Restamper interface
-func (r *PktRestamperStartFromZero) Restamp(pkt *avcodec.Packet) {
-	r.restamp(pkt, func(pkt *avcodec.Packet) int64 {
+func (r *PktRestamperStartFromZero) Restamp(pkt *astiav.Packet) {
+	r.restamp(pkt, func(pkt *astiav.Packet) int64 {
 		return -pkt.Dts()
 	})
 }

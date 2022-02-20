@@ -1,22 +1,23 @@
 package astilibav
 
 import (
+	"fmt"
 	"time"
 
-	"github.com/asticode/goav/avutil"
+	"github.com/asticode/go-astiav"
+	"github.com/asticode/go-astiencoder"
 )
 
-func durationToTimeBase(d time.Duration, t avutil.Rational) (i int64, r time.Duration) {
+func durationToTimeBase(d time.Duration, t astiav.Rational) (i int64, r time.Duration) {
 	// Get duration expressed in stream timebase
-	i = avutil.AvRescaleQ(d.Nanoseconds(), nanosecondRational, t)
-
-	// AvRescaleQ rounds to the nearest int, we need to make sure it's rounded to the nearest smaller int
-	rd := time.Duration(avutil.AvRescaleQ(i, t, nanosecondRational))
-	if rd > d {
-		i--
-	}
+	// We need to make sure it's rounded to the nearest smaller int
+	i = astiav.RescaleQRnd(d.Nanoseconds(), nanosecondRational, t, astiav.RoundingDown)
 
 	// Update remainder
-	r = d - time.Duration(avutil.AvRescaleQ(i, t, nanosecondRational))
+	r = d - time.Duration(astiav.RescaleQ(i, t, nanosecondRational))
 	return
+}
+
+func emitError(target interface{}, eh *astiencoder.EventHandler, err error, format string, args ...interface{}) {
+	eh.Emit(astiencoder.EventError(target, fmt.Errorf("astilibav: "+format+" failed: %w", append(args, err)...)))
 }

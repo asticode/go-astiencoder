@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avutil"
 )
 
 var countRateEnforcer uint64
@@ -47,7 +47,7 @@ type rateEnforcerSlot struct {
 }
 
 type rateEnforcerItem struct {
-	f *avutil.Frame
+	f *astiav.Frame
 	n astiencoder.Node
 }
 
@@ -211,13 +211,13 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 
 		// Copy frame
 		f := r.p.get()
-		if ret := avutil.AvFrameRef(f, p.Frame); ret < 0 {
-			emitAvError(r, r.eh, ret, "avutil.AvFrameRef failed")
+		if err := f.Ref(p.Frame); err != nil {
+			emitError(r, r.eh, err, "refing frame")
 			return
 		}
 
 		// Restamp
-		f.SetPts(avutil.AvRescaleQ(f.Pts(), p.Descriptor.TimeBase(), r.outputCtx.TimeBase))
+		f.SetPts(astiav.RescaleQ(f.Pts(), p.Descriptor.TimeBase(), r.outputCtx.TimeBase))
 
 		// Add to chan
 		r.c.Add(func() {
@@ -266,8 +266,8 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 
 				// Copy frame
 				i.f = r.p.get()
-				if ret := avutil.AvFrameRef(i.f, f); ret < 0 {
-					emitAvError(r, r.eh, ret, "avutil.AvFrameRef failed")
+				if err := i.f.Ref(f); err != nil {
+					emitError(r, r.eh, err, "refing frame")
 					return
 				}
 
@@ -276,14 +276,14 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 
 				// Process delay stat
 				if l != nil && l.n == i.n {
-					r.statDelayAvg.Add(float64(time.Duration(avutil.AvRescaleQ(l.ptsMax-i.f.Pts(), r.outputCtx.TimeBase, nanosecondRational))))
+					r.statDelayAvg.Add(float64(time.Duration(astiav.RescaleQ(l.ptsMax-i.f.Pts(), r.outputCtx.TimeBase, nanosecondRational))))
 				}
 			})
 		})
 	})
 }
 
-func (r *RateEnforcer) newRateEnforcerSlot(f *avutil.Frame) *rateEnforcerSlot {
+func (r *RateEnforcer) newRateEnforcerSlot(f *astiav.Frame) *rateEnforcerSlot {
 	return &rateEnforcerSlot{
 		n:      r.n,
 		ptsMax: f.Pts() + int64(1/(r.outputCtx.TimeBase.ToDouble()*r.outputCtx.FrameRate.ToDouble())),
@@ -299,7 +299,7 @@ func (s *rateEnforcerSlot) next() *rateEnforcerSlot {
 	}
 }
 
-func newRateEnforcerItem(f *avutil.Frame, n astiencoder.Node) *rateEnforcerItem {
+func newRateEnforcerItem(f *astiav.Frame, n astiencoder.Node) *rateEnforcerItem {
 	return &rateEnforcerItem{
 		f: f,
 		n: n,
@@ -334,7 +334,7 @@ func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time, previous
 
 	// Sleep until next at
 	if delta := time.Until(*nextAt); delta > 0 {
-		astikit.Sleep(ctx, delta)
+		astikit.Sleep(ctx, delta) //nolint:errcheck
 	}
 
 	// Check context
@@ -479,13 +479,13 @@ func (r *RateEnforcer) current() (i *rateEnforcerItem, filled bool) {
 }
 
 type RateEnforcerFiller interface {
-	Fill() (*avutil.Frame, astiencoder.Node)
-	NoFill(*avutil.Frame, astiencoder.Node)
+	Fill() (*astiav.Frame, astiencoder.Node)
+	NoFill(*astiav.Frame, astiencoder.Node)
 }
 
 type previousRateEnforcerFiller struct {
 	eh     *astiencoder.EventHandler
-	f      *avutil.Frame
+	f      *astiav.Frame
 	n      astiencoder.Node
 	p      *framePool
 	target interface{}
@@ -499,11 +499,11 @@ func newPreviousRateEnforcerFiller(target interface{}, eh *astiencoder.EventHand
 	}
 }
 
-func (f *previousRateEnforcerFiller) Fill() (*avutil.Frame, astiencoder.Node) {
+func (f *previousRateEnforcerFiller) Fill() (*astiav.Frame, astiencoder.Node) {
 	return f.f, f.n
 }
 
-func (f *previousRateEnforcerFiller) NoFill(fm *avutil.Frame, n astiencoder.Node) {
+func (f *previousRateEnforcerFiller) NoFill(fm *astiav.Frame, n astiencoder.Node) {
 	// Store
 	f.n = n
 
@@ -511,34 +511,31 @@ func (f *previousRateEnforcerFiller) NoFill(fm *avutil.Frame, n astiencoder.Node
 	if f.f == nil {
 		f.f = f.p.get()
 	} else {
-		avutil.AvFrameUnref(f.f)
+		f.f.Unref()
 	}
 
 	// Copy frame
-	if ret := avutil.AvFrameRef(f.f, fm); ret < 0 {
-		emitAvError(f.target, f.eh, ret, "avutil.AvFrameRef failed")
+	if err := f.f.Ref(fm); err != nil {
+		emitError(f.target, f.eh, err, "refing frame")
 		f.p.put(f.f)
 		f.f = nil
 	}
 }
 
 type frameRateEnforcerFiller struct {
-	f *avutil.Frame
+	f *astiav.Frame
 }
 
-func NewFrameRateEnforcerFiller(fn func(fm *avutil.Frame) error, c *astikit.Closer) (f *frameRateEnforcerFiller, err error) {
+func NewFrameRateEnforcerFiller(fn func(fm *astiav.Frame) error, c *astikit.Closer) (f *frameRateEnforcerFiller, err error) {
 	// Alloc frame
-	fm := avutil.AvFrameAlloc()
+	fm := astiav.AllocFrame()
 
 	// Make sure to free frame
 	defer func(err *error) {
 		if *err != nil {
-			avutil.AvFrameFree(fm)
+			fm.Free()
 		} else {
-			c.Add(func() error {
-				avutil.AvFrameFree(fm)
-				return nil
-			})
+			c.Add(fm.Free)
 		}
 	}(&err)
 
@@ -557,8 +554,8 @@ func NewFrameRateEnforcerFiller(fn func(fm *avutil.Frame) error, c *astikit.Clos
 	return
 }
 
-func (f *frameRateEnforcerFiller) Fill() (*avutil.Frame, astiencoder.Node) {
+func (f *frameRateEnforcerFiller) Fill() (*astiav.Frame, astiencoder.Node) {
 	return f.f, nil
 }
 
-func (f *frameRateEnforcerFiller) NoFill(fm *avutil.Frame, n astiencoder.Node) {}
+func (f *frameRateEnforcerFiller) NoFill(fm *astiav.Frame, n astiencoder.Node) {}

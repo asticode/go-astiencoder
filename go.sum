@@ -2,13 +2,13 @@ github.com/BurntSushi/toml v0.3.1 h1:WXkYYl6Yr3qBf1K79EBnL4mak0OimBfB0XUf9Vl28OQ
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/StackExchange/wmi v1.2.1 h1:VIkavFPXSjcnS+O8yTq7NI32k0R5Aj+v39y29VYDOSA=
 github.com/StackExchange/wmi v1.2.1/go.mod h1:rcmrprowKIVzvc+NUiLncP2uuArMWLCbu9SBzvHz7e8=
+github.com/asticode/go-astiav v0.2.0 h1:Q0Ix/QtjGd/mhe4bsjKaiTKdTueMLU+foT8eEPVYalk=
+github.com/asticode/go-astiav v0.2.0/go.mod h1:phvUnSSlV91S/PELeLkDisYiRLOssxWOsj4oDrqM/54=
 github.com/asticode/go-astikit v0.1.0/go.mod h1:h4ly7idim1tNhaVkdVBeXQZEE3L0xblP7fCWbgwipF0=
-github.com/asticode/go-astikit v0.23.0 h1:7AJsmv4/jE/Pzl9RgQw9RgzWkpoIb53luPuQ5FC8CC4=
-github.com/asticode/go-astikit v0.23.0/go.mod h1:h4ly7idim1tNhaVkdVBeXQZEE3L0xblP7fCWbgwipF0=
+github.com/asticode/go-astikit v0.28.2 h1:c2shjqarbZwcQGQ7GPfchG2sSOL/7NHGbdgHTx43RH8=
+github.com/asticode/go-astikit v0.28.2/go.mod h1:h4ly7idim1tNhaVkdVBeXQZEE3L0xblP7fCWbgwipF0=
 github.com/asticode/go-astiws v1.5.0 h1:b4FQ/iNRjX3m96fuQL2fNsFvZraxR4TJXBU4ISTkyas=
 github.com/asticode/go-astiws v1.5.0/go.mod h1:xDs2lfL41R0sUXYniZv7SMFY2VedPpfeydCdpaewgik=
-github.com/asticode/goav v1.4.0 h1:L5z6EDskiz90AvrGodjXjXMhVHkHqVfZP+QBEJ6gbl0=
-github.com/asticode/goav v1.4.0/go.mod h1:PbMRIqgyIjrbfX/HUgO1Gn6YalnFDAevQrt8D8sQgvM=
 github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/go-ole/go-ole v1.2.5/go.mod h1:pprOEPIfldk/42T2oK7lQ4v4JSDwmV0As9GaiUsvbm0=

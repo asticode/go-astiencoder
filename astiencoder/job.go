@@ -1,6 +1,9 @@
 package main
 
-import "github.com/asticode/go-astikit"
+import (
+	"github.com/asticode/go-astiav"
+	"github.com/asticode/go-astikit"
+)
 
 // Job represents a job
 type Job struct {
@@ -39,7 +42,7 @@ const (
 // This can usually be compared to an encoding
 // Refrain from indicating all options in the dict and use other attributes instead
 type JobOperation struct {
-	BitRate *int `json:"bit_rate,omitempty"`
+	BitRate *int64 `json:"bit_rate,omitempty"`
 	// Possible values are "copy" and all libav codec names.
 	Codec string `json:"codec,omitempty"`
 	Dict  string `json:"dict,omitempty"`
@@ -49,20 +52,39 @@ type JobOperation struct {
 	Height      *int                 `json:"height,omitempty"`
 	Inputs      []JobOperationInput  `json:"inputs"`
 	Outputs     []JobOperationOutput `json:"outputs"`
-	PixelFormat string               `json:"pixel_format,omitempty"`
 	ThreadCount *int                 `json:"thread_count,omitempty"`
 	// Since frame rate is a per-operation value, time base is as well
 	TimeBase *astikit.Rational `json:"time_base,omitempty"`
 	Width    *int              `json:"width,omitempty"`
 }
 
+type JobMediaType astiav.MediaType
+
+func (t *JobMediaType) UnmarshalText(b []byte) error {
+	switch string(b) {
+	case "audio":
+		*t = JobMediaType(astiav.MediaTypeAudio)
+	case "subtitle":
+		*t = JobMediaType(astiav.MediaTypeSubtitle)
+	case "video":
+		*t = JobMediaType(astiav.MediaTypeVideo)
+	default:
+		*t = JobMediaType(astiav.MediaTypeUnknown)
+	}
+	return nil
+}
+
+func (t JobMediaType) MediaType() astiav.MediaType {
+	return astiav.MediaType(t)
+}
+
 // JobOperationInput represents a job operation input
 // TODO Add start, end and duration (use seek?)
 type JobOperationInput struct {
 	// Possible values are "audio", "subtitle" and "video"
-	MediaType string `json:"media_type,omitempty"`
-	Name      string `json:"name"`
-	PID       *int   `json:"pid,omitempty"`
+	MediaType *JobMediaType `json:"media_type,omitempty"`
+	Name      string        `json:"name"`
+	PID       *int          `json:"pid,omitempty"`
 }
 
 // JobOperationOutput represents a job operation output

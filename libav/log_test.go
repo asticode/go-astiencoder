@@ -6,9 +6,9 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avutil"
 )
 
 type mockedStdLogger struct{ ss []string }
@@ -37,10 +37,10 @@ func TestLog(t *testing.T) {
 			regexp.MustCompile(`[\w]+_pattern`),
 		},
 	}, astikit.AdaptStdLogger(l))
-	c(astiencoder.Event{Payload: EventLog{Level: avutil.AV_LOG_INFO, Msg: "test1"}})
-	c(astiencoder.Event{Payload: EventLog{Level: avutil.AV_LOG_INFO, Msg: "test2"}})
-	c(astiencoder.Event{Payload: EventLog{Level: avutil.AV_LOG_INFO, Msg: "test3"}})
-	c(astiencoder.Event{Payload: EventLog{Level: avutil.AV_LOG_INFO, Msg: "test_pattern"}})
+	c(astiencoder.Event{Payload: EventLog{Level: astiav.LogLevelInfo, Msg: "test1"}})
+	c(astiencoder.Event{Payload: EventLog{Level: astiav.LogLevelInfo, Msg: "test2"}})
+	c(astiencoder.Event{Payload: EventLog{Level: astiav.LogLevelInfo, Msg: "test3"}})
+	c(astiencoder.Event{Payload: EventLog{Level: astiav.LogLevelInfo, Msg: "test_pattern"}})
 	if e, g := []string{"astilibav: test1", "astilibav: test3"}, l.ss; !reflect.DeepEqual(e, g) {
 		t.Errorf("expected %+v, got %+v", e, g)
 	}

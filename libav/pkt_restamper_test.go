@@ -3,8 +3,9 @@ package astilibav
 import (
 	"testing"
 
-	"github.com/asticode/goav/avcodec"
+	"github.com/asticode/go-astiav"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type pktTest struct {
@@ -16,7 +17,9 @@ type pktTest struct {
 }
 
 func TestPktRestamperStartFromZero(t *testing.T) {
-	pkt := avcodec.Packet{}
+	pkt := astiav.AllocPacket()
+	require.NotNil(t, pkt)
+	defer pkt.Free()
 	r := NewPktRestamperStartFromZero()
 	for _, ft := range []pktTest{
 		{inputDts: 10, inputPts: 12, outputDts: 0, outputPts: 2, streamIdx: 1},
@@ -29,7 +32,7 @@ func TestPktRestamperStartFromZero(t *testing.T) {
 		pkt.SetDts(ft.inputDts)
 		pkt.SetPts(ft.inputPts)
 		pkt.SetStreamIndex(ft.streamIdx)
-		r.Restamp(&pkt)
+		r.Restamp(pkt)
 		assert.Equal(t, ft.outputDts, pkt.Dts())
 		assert.Equal(t, ft.outputPts, pkt.Pts())
 	}

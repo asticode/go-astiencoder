@@ -7,7 +7,6 @@ import (
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avutil"
 )
 
 var countForwarder uint64
@@ -134,8 +133,8 @@ func (f *Forwarder) HandleFrame(p FrameHandlerPayload) {
 
 		// Copy frame
 		fm := f.p.get()
-		if ret := avutil.AvFrameRef(fm, p.Frame); ret < 0 {
-			emitAvError(f, f.eh, ret, "avutil.AvFrameRef failed")
+		if err := fm.Ref(p.Frame); err != nil {
+			emitError(f, f.eh, err, "refing frame")
 			return
 		}
 

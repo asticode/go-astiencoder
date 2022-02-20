@@ -92,7 +92,8 @@ const (
 )
 
 type Closer interface {
-	AddCloseFunc(astikit.CloseFunc)
+	AddClose(astikit.CloseFunc)
+	AddCloseWithError(astikit.CloseFuncWithError)
 	Close() error
 	DoWhenUnclosed(func())
 	IsClosed() bool
@@ -178,8 +179,12 @@ func NewBaseNode(o NodeOptions, c *astikit.Closer, eh *EventHandler, s *Stater, 
 	return
 }
 
-func (n *BaseNode) AddCloseFunc(fn astikit.CloseFunc) {
+func (n *BaseNode) AddClose(fn astikit.CloseFunc) {
 	n.c.Add(fn)
+}
+
+func (n *BaseNode) AddCloseWithError(fn astikit.CloseFuncWithError) {
+	n.c.AddWithError(fn)
 }
 
 func (n *BaseNode) Close() error {

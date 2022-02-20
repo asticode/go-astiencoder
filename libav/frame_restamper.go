@@ -1,13 +1,13 @@
 package astilibav
 
 import (
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avutil"
 )
 
 // FrameRestamper represents an object capable of restamping frames
 type FrameRestamper interface {
-	Restamp(f *avutil.Frame)
+	Restamp(f *astiav.Frame)
 }
 
 type frameRestamperWithValue struct {
@@ -18,7 +18,7 @@ func newFrameRestamperWithValue() *frameRestamperWithValue {
 	return &frameRestamperWithValue{}
 }
 
-func (r *frameRestamperWithValue) restamp(f *avutil.Frame, fn func(v *int64) *int64) {
+func (r *frameRestamperWithValue) restamp(f *astiav.Frame, fn func(v *int64) *int64) {
 	// Compute new value
 	v := fn(r.lastValue)
 
@@ -45,7 +45,7 @@ func NewFrameRestamperWithFrameDuration(frameDuration int64) FrameRestamper {
 }
 
 // Restamp implements the FrameRestamper interface
-func (r *frameRestamperWithFrameDuration) Restamp(f *avutil.Frame) {
+func (r *frameRestamperWithFrameDuration) Restamp(f *astiav.Frame) {
 	r.restamp(f, func(v *int64) *int64 {
 		if v != nil {
 			return astikit.Int64Ptr(*v + r.frameDuration)
@@ -70,7 +70,7 @@ func NewFrameRestamperWithModulo(frameDuration int64) FrameRestamper {
 }
 
 // Restamp implements the FrameRestamper interface
-func (r *frameRestamperWithModulo) Restamp(f *avutil.Frame) {
+func (r *frameRestamperWithModulo) Restamp(f *astiav.Frame) {
 	r.restamp(f, func(v *int64) *int64 {
 		defer func() { r.lastRealValue = f.Pts() }()
 		if v != nil {

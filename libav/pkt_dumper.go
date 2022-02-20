@@ -8,11 +8,10 @@ import (
 	"os"
 	"sync/atomic"
 	"text/template"
-	"unsafe"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avcodec"
 )
 
 var countPktDumper uint64
@@ -33,7 +32,7 @@ type PktDumper struct {
 // PktDumperOptions represents pkt dumper options
 type PktDumperOptions struct {
 	Data    map[string]interface{}
-	Handler func(pkt *avcodec.Packet, args PktDumperHandlerArgs) error
+	Handler func(pkt *astiav.Packet, args PktDumperHandlerArgs) error
 	Node    astiencoder.NodeOptions
 	Pattern string
 }
@@ -125,8 +124,8 @@ func (d *PktDumper) HandlePkt(p PktHandlerPayload) {
 
 		// Copy pkt
 		pkt := d.p.get()
-		if ret := pkt.AvPacketRef(p.Pkt); ret < 0 {
-			emitAvError(d, d.eh, ret, "AvPacketRef failed")
+		if err := pkt.Ref(p.Pkt); err != nil {
+			emitError(d, d.eh, err, "refing packet")
 			return
 		}
 
@@ -180,7 +179,7 @@ func (d *PktDumper) HandlePkt(p PktHandlerPayload) {
 }
 
 // PktDumpFunc is a PktDumpFunc that dumps the packet to a file
-var PktDumpFile = func(pkt *avcodec.Packet, args PktDumperHandlerArgs) (err error) {
+var PktDumpFile = func(pkt *astiav.Packet, args PktDumperHandlerArgs) (err error) {
 	// Create file
 	var f *os.File
 	if f, err = os.Create(args.Pattern); err != nil {
@@ -190,7 +189,7 @@ var PktDumpFile = func(pkt *avcodec.Packet, args PktDumperHandlerArgs) (err erro
 	defer f.Close()
 
 	// Write to file
-	if _, err = f.Write(C.GoBytes(unsafe.Pointer(pkt.Data()), (C.int)(pkt.Size()))); err != nil {
+	if _, err = f.Write(pkt.Data()); err != nil {
 		err = fmt.Errorf("astilibav: writing to file %s failed: %w", args.Pattern, err)
 		return
 	}

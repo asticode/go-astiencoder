@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiencoder"
-	astilibav "github.com/asticode/go-astiencoder/libav"
 	"github.com/asticode/go-astikit"
 )
 
@@ -20,17 +19,10 @@ var (
 
 func main() {
 	// Parse flags
-	cmd := astikit.FlagCmd()
 	flag.Parse()
 
 	// Create logger
 	l := log.New(log.Writer(), log.Prefix(), log.Flags())
-
-	// Version
-	if cmd == "version" {
-		fmt.Print(astilibav.Version)
-		return
-	}
 
 	// Create configuration
 	c, err := newConfiguration()
@@ -79,9 +71,11 @@ func main() {
 
 		// Add workflow
 		var w *astiencoder.Workflow
-		if w, err = addWorkflow("default", j, e); err != nil {
+		var cl *astikit.Closer
+		if w, cl, err = addWorkflow("default", j, e); err != nil {
 			l.Fatal(fmt.Errorf("main: adding default workflow failed: %w", err))
 		}
+		defer cl.Close()
 
 		// Make sure the worker stops when the workflow is stopped
 		c.Encoder.Exec.StopWhenWorkflowsAreStopped = true

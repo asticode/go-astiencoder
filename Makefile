@@ -16,13 +16,10 @@ server-bind:
 test:
 	$(env) go test -cover -v ./...
 
-version:
-	$(env) go run ./astiencoder version
-
 install-ffmpeg:
 	mkdir -p tmp/src
 	git clone https://github.com/FFmpeg/FFmpeg tmp/src/ffmpeg
-	cd tmp/src/ffmpeg && git checkout n4.1.1
+	cd tmp/src/ffmpeg && git checkout n4.4.1
 	cd tmp/src/ffmpeg && ./configure --prefix=../.. $(configure)
 	cd tmp/src/ffmpeg && make
 	cd tmp/src/ffmpeg && make install

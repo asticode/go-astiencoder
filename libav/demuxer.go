@@ -2,31 +2,30 @@ package astilibav
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avcodec"
-	"github.com/asticode/goav/avformat"
-	"github.com/asticode/goav/avutil"
 )
 
 var (
 	countDemuxer       uint64
-	nanosecondRational = avutil.NewRational(1, 1e9)
+	nanosecondRational = astiav.NewRational(1, 1e9)
 )
 
 // Demuxer represents an object capable of demuxing packets out of an input
 type Demuxer struct {
 	*astiencoder.BaseNode
-	ctxFormat             *avformat.Context
 	d                     *pktDispatcher
 	eh                    *astiencoder.EventHandler
 	emulateRate           bool
+	formatContext         *astiav.FormatContext
 	interruptRet          *int
 	l                     *demuxerLooper
 	loop                  uint32
@@ -36,21 +35,21 @@ type Demuxer struct {
 	statIncomingRate      *astikit.CounterRateStat
 }
 
-type DemuxerReadFrameErrorHandler func(d *Demuxer, ret int) (stop, handled bool)
+type DemuxerReadFrameErrorHandler func(d *Demuxer, err error) (stop, handled bool)
 
 type demuxerStream struct {
 	ctx Context
 	d   Descriptor
 	e   *demuxerRateEmulator
 	pd  *pktDurationer
-	s   *avformat.Stream
+	s   *astiav.Stream
 }
 
 func (d *demuxerStream) stream() *Stream {
 	return &Stream{
 		CodecParameters: d.s.CodecParameters(),
 		Ctx:             d.ctx,
-		ID:              d.s.Id(),
+		ID:              d.s.ID(),
 		Index:           d.s.Index(),
 	}
 }
@@ -58,7 +57,7 @@ func (d *demuxerStream) stream() *Stream {
 // DemuxerOptions represents demuxer options
 type DemuxerOptions struct {
 	// String content of the demuxer as you would use in ffmpeg
-	Dict *Dict
+	Dictionary *Dictionary
 	// If true, the demuxer will sleep between packets for the exact duration of the packet
 	EmulateRate bool
 	// Max duration of continuous packets of the same stream the demuxer receives has to be
@@ -66,7 +65,7 @@ type DemuxerOptions struct {
 	// Defaults to 1s
 	EmulateRateBufferDuration time.Duration
 	// Exact input format
-	Format *avformat.InputFormat
+	Format *astiav.InputFormat
 	// If true, at the end of the input the demuxer will seek to its beginning and start over
 	// In this case the packets are restamped
 	Loop bool
@@ -113,24 +112,27 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	// Add stats
 	d.addStats()
 
-	// Dict
-	var dict *avutil.Dictionary
-	if o.Dict != nil {
+	// Dictionary
+	var dict *astiav.Dictionary
+	if o.Dictionary != nil {
 		// Parse dict
-		if err = o.Dict.Parse(&dict); err != nil {
+		if dict, err = o.Dictionary.parse(); err != nil {
 			err = fmt.Errorf("astilibav: parsing dict failed: %w", err)
 			return
 		}
 
-		// Make sure the dict is freed
-		defer avutil.AvDictFree(&dict)
+		// Make sure the dictionary is freed
+		defer dict.Free()
 	}
 
-	// Alloc ctx
-	ctxFormat := avformat.AvformatAllocContext()
+	// Alloc format context
+	d.formatContext = astiav.AllocFormatContext()
+
+	// Make sure the format context is properly freed
+	d.AddClose(d.formatContext.Free)
 
 	// Set interrupt callback
-	d.interruptRet = ctxFormat.SetInterruptCallback()
+	d.interruptRet = d.formatContext.SetInterruptCallback()
 
 	// Handle probe cancellation
 	if o.ProbeCtx != nil {
@@ -151,20 +153,13 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	}
 
 	// Open input
-	if ret := avformat.AvformatOpenInput(&ctxFormat, o.URL, o.Format, &dict); ret < 0 {
-		err = fmt.Errorf("astilibav: avformat.AvformatOpenInput on %+v failed: %w", o, NewAvError(ret))
+	if err = d.formatContext.OpenInput(o.URL, o.Format, dict); err != nil {
+		err = fmt.Errorf("astilibav: opening input failed: %w", err)
 		return
 	}
 
-	// Update ctx
-	// We need to create an intermediate variable to avoid "cgo argument has Go pointer to Go pointer" errors
-	d.ctxFormat = ctxFormat
-
 	// Make sure the input is properly closed
-	d.AddCloseFunc(func() error {
-		avformat.AvformatCloseInput(d.ctxFormat)
-		return nil
-	})
+	d.AddClose(d.formatContext.CloseInput)
 
 	// Check whether probe has been cancelled
 	if o.ProbeCtx != nil && o.ProbeCtx.Err() != nil {
@@ -172,9 +167,9 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		return
 	}
 
-	// Retrieve stream information
-	if ret := d.ctxFormat.AvformatFindStreamInfo(nil); ret < 0 {
-		err = fmt.Errorf("astilibav: ctxFormat.AvformatFindStreamInfo on %+v failed: %w", o, NewAvError(ret))
+	// Find stream information
+	if err = d.formatContext.FindStreamInfo(nil); err != nil {
+		err = fmt.Errorf("astilibav: finding stream info failed: %w", err)
 		return
 	}
 
@@ -185,7 +180,7 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	}
 
 	// Loop through streams
-	for _, s := range d.ctxFormat.Streams() {
+	for _, s := range d.formatContext.Streams() {
 		// Create demuxer stream
 		ds := &demuxerStream{
 			ctx: NewContextFromStream(s),
@@ -347,19 +342,19 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 	defer d.p.put(pkt)
 
 	// Read frame
-	if ret := d.ctxFormat.AvReadFrame(pkt); ret < 0 {
-		if atomic.LoadUint32(&d.loop) > 0 && ret == avutil.AVERROR_EOF {
+	if err := d.formatContext.ReadFrame(pkt); err != nil {
+		if atomic.LoadUint32(&d.loop) > 0 && errors.Is(err, astiav.ErrEof) {
 			// Let the looper know we're looping
 			d.l.looping()
 
 			// Seek to start
-			if ret = d.ctxFormat.AvSeekFrame(-1, d.ctxFormat.StartTime(), avformat.AVSEEK_FLAG_BACKWARD); ret < 0 {
-				emitAvError(d, d.eh, ret, "ctxFormat.AvSeekFrame on %s failed", d.ctxFormat.Filename())
+			if err = d.formatContext.SeekFrame(-1, d.formatContext.StartTime(), astiav.NewSeekFlags(astiav.SeekFlagBackward)); err != nil {
+				emitError(d, d.eh, err, "seeking to frame")
 				stop = true
 			}
 		} else {
 			// Let the rate emulators know we've reached EOF
-			if d.emulateRate && ret == avutil.AVERROR_EOF {
+			if d.emulateRate && errors.Is(err, astiav.ErrEof) {
 				// Loop through streams
 				for _, s := range d.ss {
 					s.e.eof()
@@ -369,14 +364,14 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 			// Custom error handler
 			if d.readFrameErrorHandler != nil {
 				var handled bool
-				if stop, handled = d.readFrameErrorHandler(d, ret); handled {
+				if stop, handled = d.readFrameErrorHandler(d, err); handled {
 					return
 				}
 			}
 
 			// Default error handling
-			if ret != avutil.AVERROR_EOF {
-				emitAvError(d, d.eh, ret, "ctxFormat.AvReadFrame on %s failed", d.ctxFormat.Filename())
+			if !errors.Is(err, astiav.ErrEof) {
+				emitError(d, d.eh, err, "reading frame")
 			}
 			stop = true
 		}
@@ -449,7 +444,7 @@ func (l *demuxerLooper) reset() {
 	}
 }
 
-func (l *demuxerLooper) handlePkt(pkt *avcodec.Packet, previousDuration *int64) {
+func (l *demuxerLooper) handlePkt(pkt *astiav.Packet, previousDuration *int64) {
 	// Get stream
 	s, ok := l.ss[pkt.StreamIndex()]
 	if !ok {
@@ -481,7 +476,7 @@ func (l *demuxerLooper) looping() {
 
 		// Update duration
 		s.duration += s.lastDuration
-		s.durationD = time.Duration(avutil.AvRescaleQ(s.duration, s.s.ctx.TimeBase, nanosecondRational))
+		s.durationD = time.Duration(astiav.RescaleQ(s.duration, s.s.ctx.TimeBase, nanosecondRational))
 
 		// Get max duration
 		if s.durationD > maxDuration {
@@ -526,7 +521,7 @@ type demuxerRateEmulator struct {
 	lastAt         time.Time
 	m              *sync.Mutex // Locks ps
 	p              *pktPool
-	ps             map[*avcodec.Packet]bool
+	ps             map[*astiav.Packet]bool
 	s              *demuxerStream
 }
 
@@ -538,7 +533,7 @@ func newDemuxerRateEmulator(bufferDuration time.Duration, d *pktDispatcher, eh *
 		eh:             eh,
 		m:              &sync.Mutex{},
 		p:              p,
-		ps:             make(map[*avcodec.Packet]bool),
+		ps:             make(map[*astiav.Packet]bool),
 		s:              s,
 	}
 	if e.bufferDuration <= 0 {
@@ -559,7 +554,7 @@ func (e *demuxerRateEmulator) start(ctx context.Context) {
 	for pkt := range e.ps {
 		e.p.put(pkt)
 	}
-	e.ps = map[*avcodec.Packet]bool{}
+	e.ps = map[*astiav.Packet]bool{}
 	e.m.Unlock()
 
 	// Reset chan
@@ -577,11 +572,11 @@ func (e *demuxerRateEmulator) stop() {
 	e.c.Stop()
 }
 
-func (e *demuxerRateEmulator) handlePkt(ctx context.Context, in *avcodec.Packet, previousDuration int64) {
+func (e *demuxerRateEmulator) handlePkt(ctx context.Context, in *astiav.Packet, previousDuration int64) {
 	// Copy pkt
 	pkt := e.p.get()
-	if ret := pkt.AvPacketRef(in); ret < 0 {
-		emitAvError(e, e.eh, ret, "AvPacketRef failed")
+	if err := pkt.Ref(in); err != nil {
+		emitError(e, e.eh, err, "refing packet")
 		return
 	}
 
@@ -598,7 +593,7 @@ func (e *demuxerRateEmulator) handlePkt(ctx context.Context, in *avcodec.Packet,
 
 	// Process previous duration
 	if previousDuration > 0 {
-		pktAt = pktAt.Add(time.Duration(avutil.AvRescaleQ(previousDuration, e.s.ctx.TimeBase, nanosecondRational)))
+		pktAt = pktAt.Add(time.Duration(astiav.RescaleQ(previousDuration, e.s.ctx.TimeBase, nanosecondRational)))
 	}
 
 	// Add to chan
@@ -616,7 +611,7 @@ func (e *demuxerRateEmulator) handlePkt(ctx context.Context, in *avcodec.Packet,
 
 		// Sleep
 		if delta := time.Until(pktAt); delta > 0 {
-			astikit.Sleep(e.ctx, delta)
+			astikit.Sleep(e.ctx, delta) //nolint:errcheck
 		}
 
 		// Check context error
@@ -634,7 +629,7 @@ func (e *demuxerRateEmulator) handlePkt(ctx context.Context, in *avcodec.Packet,
 	// Too many pkts are buffered, demuxer needs to wait
 	if delta := time.Until(e.lastAt) - e.bufferDuration; delta > 0 {
 		// Sleep
-		astikit.Sleep(ctx, delta)
+		astikit.Sleep(ctx, delta) //nolint:errcheck
 	}
 }
 

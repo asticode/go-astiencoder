@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/goav/avutil"
 )
 
 func init() {
-	avutil.AvLogSetLevel(avutil.AV_LOG_ERROR)
+	astiav.SetLogLevel(astiav.LogLevelError)
 }
 
 func testJob(t *testing.T, jobPath string, assertPaths func(j Job) map[string]string) {
@@ -45,7 +45,7 @@ func testJob(t *testing.T, jobPath string, assertPaths func(j Job) map[string]st
 	}
 
 	// Add workflow
-	w, err := addWorkflow("test", j, e)
+	w, _, err := addWorkflow("test", j, e)
 	if err != nil {
 		t.Error(err)
 		return

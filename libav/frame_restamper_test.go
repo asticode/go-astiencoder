@@ -3,8 +3,9 @@ package astilibav
 import (
 	"testing"
 
-	"github.com/asticode/goav/avutil"
+	"github.com/asticode/go-astiav"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type frameTest struct {
@@ -13,7 +14,9 @@ type frameTest struct {
 }
 
 func TestFrameRestamperWithFrameDuration(t *testing.T) {
-	f := avutil.Frame{}
+	f := astiav.AllocFrame()
+	require.NotNil(t, f)
+	defer f.Free()
 	r := NewFrameRestamperWithFrameDuration(10)
 	for _, ft := range []frameTest{
 		{input: 0, output: 0},
@@ -21,13 +24,15 @@ func TestFrameRestamperWithFrameDuration(t *testing.T) {
 		{input: 10, output: 20},
 	} {
 		f.SetPts(ft.input)
-		r.Restamp(&f)
+		r.Restamp(f)
 		assert.Equal(t, ft.output, f.Pts())
 	}
 }
 
 func TestFrameRestamperWithModulo(t *testing.T) {
-	f := avutil.Frame{}
+	f := astiav.AllocFrame()
+	require.NotNil(t, f)
+	defer f.Free()
 	r := NewFrameRestamperWithModulo(10)
 	for _, ft := range []frameTest{
 		{input: 0, output: 0},
@@ -46,7 +51,7 @@ func TestFrameRestamperWithModulo(t *testing.T) {
 		{input: 205, output: 200},
 	} {
 		f.SetPts(ft.input)
-		r.Restamp(&f)
+		r.Restamp(f)
 		assert.Equal(t, ft.output, f.Pts())
 	}
 }

@@ -5,15 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avcodec"
-	"github.com/asticode/goav/avfilter"
-	"github.com/asticode/goav/avutil"
 )
 
 var countFilterer uint64
@@ -21,13 +18,13 @@ var countFilterer uint64
 // Filterer represents an object capable of applying a filter to frames
 type Filterer struct {
 	*astiencoder.BaseNode
-	bufferSinkCtx     *avfilter.Context
-	bufferSrcCtxs     map[astiencoder.Node][]*avfilter.Context
+	buffersinkContext *astiav.FilterContext
+	buffersrcContexts map[astiencoder.Node][]*astiav.FilterContext
 	c                 *astikit.Chan
 	d                 *frameDispatcher
 	eh                *astiencoder.EventHandler
 	emulatePeriod     time.Duration
-	g                 *avfilter.Graph
+	g                 *astiav.FilterGraph
 	outputCtx         Context
 	p                 *framePool
 	restamper         FrameRestamper
@@ -38,7 +35,7 @@ type Filterer struct {
 // FiltererOptions represents filterer options
 type FiltererOptions struct {
 	Content     string
-	EmulateRate avutil.Rational
+	EmulateRate astiav.Rational
 	Inputs      map[string]astiencoder.Node
 	Node        astiencoder.NodeOptions
 	OutputCtx   Context
@@ -53,7 +50,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 
 	// Create filterer
 	f = &Filterer{
-		bufferSrcCtxs:     make(map[astiencoder.Node][]*avfilter.Context),
+		buffersrcContexts: make(map[astiencoder.Node][]*astiav.FilterContext),
 		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
 		eh:                eh,
 		outputCtx:         o.OutputCtx,
@@ -87,45 +84,54 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	}
 
 	// Create graph
-	f.g = avfilter.AvfilterGraphAlloc()
-	f.AddCloseFunc(func() error {
-		f.g.AvfilterGraphFree()
-		return nil
-	})
+	f.g = astiav.AllocFilterGraph()
+	f.AddClose(f.g.Free)
 
-	// Create buffer func and buffer sink
-	var bufferFunc func() *avfilter.Filter
-	var bufferSink *avfilter.Filter
-	switch o.OutputCtx.CodecType {
-	case avcodec.AVMEDIA_TYPE_AUDIO:
-		bufferFunc = func() *avfilter.Filter { return avfilter.AvfilterGetByName("abuffer") }
-		bufferSink = avfilter.AvfilterGetByName("abuffersink")
-	case avcodec.AVMEDIA_TYPE_VIDEO:
-		bufferFunc = func() *avfilter.Filter { return avfilter.AvfilterGetByName("buffer") }
-		bufferSink = avfilter.AvfilterGetByName("buffersink")
+	// Create buffersrc func and buffersink
+	var buffersrcFunc func() *astiav.Filter
+	var buffersink *astiav.Filter
+	switch o.OutputCtx.MediaType {
+	case astiav.MediaTypeAudio:
+		buffersrcFunc = func() *astiav.Filter { return astiav.FindFilterByName("abuffer") }
+		buffersink = astiav.FindFilterByName("abuffersink")
+	case astiav.MediaTypeVideo:
+		buffersrcFunc = func() *astiav.Filter { return astiav.FindFilterByName("buffer") }
+		buffersink = astiav.FindFilterByName("buffersink")
 	default:
-		err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", o.OutputCtx.CodecType)
+		err = fmt.Errorf("astilibav: media type %s is not handled by filterer", o.OutputCtx.MediaType)
 		return
 	}
 
-	// Create buffer sink ctx
-	// We need to create an intermediate variable to avoid "cgo argument has Go pointer to Go pointer" errors
-	var bufferSinkCtx *avfilter.Context
-	if ret := avfilter.AvfilterGraphCreateFilter(&bufferSinkCtx, bufferSink, "out", "", nil, f.g); ret < 0 {
-		err = fmt.Errorf("astilibav: avfilter.AvfilterGraphCreateFilter on empty args failed: %w", NewAvError(ret))
+	// No buffersink
+	if buffersink == nil {
+		err = errors.New("astilibav: buffersink is nil")
 		return
 	}
-	f.bufferSinkCtx = bufferSinkCtx
+
+	// Create buffersink context
+	if f.buffersinkContext, err = f.g.NewFilterContext(buffersink, "out", nil); err != nil {
+		err = fmt.Errorf("astilibav: creating buffersink context failed: %w", err)
+		return
+	}
+
+	// Make sure buffersink context is freed
+	f.AddClose(f.buffersinkContext.Free)
 
 	// Create inputs
-	inputs := avfilter.AvfilterInoutAlloc()
+	inputs := astiav.AllocFilterInOut()
+	f.AddClose(inputs.Free)
 	inputs.SetName("out")
-	inputs.SetFilterCtx(f.bufferSinkCtx)
+	inputs.SetFilterContext(f.buffersinkContext)
 	inputs.SetPadIdx(0)
 	inputs.SetNext(nil)
 
 	// Loop through options inputs
-	var previousOutput *avfilter.Input
+	var outputs *astiav.FilterInOut
+	defer func() {
+		if outputs != nil {
+			outputs.Free()
+		}
+	}()
 	for n, i := range o.Inputs {
 		// Get context
 		v, ok := i.(OutputContexter)
@@ -135,64 +141,77 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		}
 		ctx := v.OutputCtx()
 
-		// Create buffer
-		bufferSrc := bufferFunc()
+		// Create buffersrc
+		buffersrc := buffersrcFunc()
 
-		// Create filter in args
-		var args []string
-		switch ctx.CodecType {
-		case avcodec.AVMEDIA_TYPE_AUDIO:
-			args = []string{
-				"channel_layout=" + avutil.AvGetChannelLayoutString(ctx.Channels, ctx.ChannelLayout),
-				"sample_fmt=" + avutil.AvGetSampleFmtName(int(ctx.SampleFmt)),
-				"sample_rate=" + strconv.Itoa(ctx.SampleRate),
-				"time_base=" + ctx.TimeBase.String(),
+		// No buffersrc
+		if buffersrc == nil {
+			err = errors.New("astilibav: buffersrc is nil")
+			return
+		}
+
+		// Create args
+		var args astiav.FilterArgs
+		switch ctx.MediaType {
+		case astiav.MediaTypeAudio:
+			args = astiav.FilterArgs{
+				"sample_fmt":  ctx.SampleFormat.String(),
+				"sample_rate": strconv.Itoa(ctx.SampleRate),
+				"time_base":   ctx.TimeBase.String(),
 			}
-		case avcodec.AVMEDIA_TYPE_VIDEO:
-			args = []string{
-				"pix_fmt=" + strconv.Itoa(int(ctx.PixelFormat)),
-				"pixel_aspect=" + ctx.SampleAspectRatio.String(),
-				"time_base=" + ctx.TimeBase.String(),
-				"video_size=" + strconv.Itoa(ctx.Width) + "x" + strconv.Itoa(ctx.Height),
+			if ctx.Channels > 0 {
+				args["channel_layout"] = ctx.ChannelLayout.StringWithNbChannels(ctx.Channels)
+			} else {
+				args["channel_layout"] = ctx.ChannelLayout.String()
+			}
+		case astiav.MediaTypeVideo:
+			args = astiav.FilterArgs{
+				"pix_fmt":      strconv.Itoa(int(ctx.PixelFormat)),
+				"pixel_aspect": ctx.SampleAspectRatio.String(),
+				"time_base":    ctx.TimeBase.String(),
+				"video_size":   strconv.Itoa(ctx.Width) + "x" + strconv.Itoa(ctx.Height),
 			}
 			if ctx.FrameRate.Num() > 0 {
-				args = append(args, "frame_rate="+ctx.FrameRate.String())
+				args["frame_rate"] = ctx.FrameRate.String()
 			}
 		default:
-			err = fmt.Errorf("astilibav: codec type %v is not handled by filterer", ctx.CodecType)
+			err = fmt.Errorf("astilibav: media type %s is not handled by filterer", ctx.MediaType)
 			return
 		}
 
-		// Create ctx
-		var bufferSrcCtx *avfilter.Context
-		if ret := avfilter.AvfilterGraphCreateFilter(&bufferSrcCtx, bufferSrc, "in", strings.Join(args, ":"), nil, f.g); ret < 0 {
-			err = fmt.Errorf("astilibav: avfilter.AvfilterGraphCreateFilter on args %s failed: %w", args, NewAvError(ret))
+		// Create buffersrc ctx
+		var buffersrcCtx *astiav.FilterContext
+		if buffersrcCtx, err = f.g.NewFilterContext(buffersrc, "in", args); err != nil {
+			err = fmt.Errorf("astilibav: creating buffersrc context failed: %w", err)
 			return
 		}
+
+		// Make sure buffersrc context is freed
+		f.AddClose(buffersrcCtx.Free)
 
 		// Create outputs
-		outputs := avfilter.AvfilterInoutAlloc()
-		outputs.SetName(n)
-		outputs.SetFilterCtx(bufferSrcCtx)
-		outputs.SetPadIdx(0)
-		outputs.SetNext(previousOutput)
+		o := astiav.AllocFilterInOut()
+		o.SetName(n)
+		o.SetFilterContext(buffersrcCtx)
+		o.SetPadIdx(0)
+		o.SetNext(outputs)
 
 		// Store ctx
-		f.bufferSrcCtxs[i] = append(f.bufferSrcCtxs[i], bufferSrcCtx)
+		f.buffersrcContexts[i] = append(f.buffersrcContexts[i], buffersrcCtx)
 
-		// Set previous output
-		previousOutput = outputs
+		// Set outputs
+		outputs = o
 	}
 
-	// Parse content
-	if ret := f.g.AvfilterGraphParsePtr(o.Content, &inputs, &previousOutput, nil); ret < 0 {
-		err = fmt.Errorf("astilibav: g.AvfilterGraphParsePtr on content %s failed: %w", o.Content, NewAvError(ret))
+	// Parse filter
+	if err = f.g.Parse(o.Content, inputs, outputs); err != nil {
+		err = fmt.Errorf("astilibav: parsing filter failed: %w", err)
 		return
 	}
 
-	// Configure
-	if ret := f.g.AvfilterGraphConfig(nil); ret < 0 {
-		err = fmt.Errorf("astilibav: g.AvfilterGraphConfig failed: %w", NewAvError(ret))
+	// Configure filter
+	if err = f.g.Configure(); err != nil {
+		err = fmt.Errorf("astilibav: configuring filter failed: %w", err)
 		return
 	}
 	return
@@ -254,9 +273,9 @@ func (f *Filterer) Disconnect(h FrameHandler) {
 func (f *Filterer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	f.BaseNode.Start(ctx, t, func(t *astikit.Task) {
 		// In case there are no inputs, we emulate frames coming in
-		if len(f.bufferSrcCtxs) == 0 {
+		if len(f.buffersrcContexts) == 0 {
 			nextAt := time.Now()
-			desc := newFiltererDescriptor(f.bufferSinkCtx, nil)
+			desc := newFiltererDescriptor(f.buffersinkContext, nil)
 			for {
 				if stop := f.tickFunc(&nextAt, desc); stop {
 					break
@@ -279,7 +298,7 @@ func (f *Filterer) tickFunc(nextAt *time.Time, desc Descriptor) (stop bool) {
 
 	// Sleep until next at
 	if delta := time.Until(*nextAt); delta > 0 {
-		astikit.Sleep(f.Context(), delta)
+		astikit.Sleep(f.Context(), delta) //nolint:errcheck
 	}
 
 	// Check context
@@ -302,8 +321,8 @@ func (f *Filterer) HandleFrame(p FrameHandlerPayload) {
 
 		// Copy frame
 		fm := f.p.get()
-		if ret := avutil.AvFrameRef(fm, p.Frame); ret < 0 {
-			emitAvError(f, f.eh, ret, "avutil.AvFrameRef failed")
+		if err := fm.Ref(p.Frame); err != nil {
+			emitError(f, f.eh, err, "refing frame")
 			return
 		}
 
@@ -321,16 +340,16 @@ func (f *Filterer) HandleFrame(p FrameHandlerPayload) {
 				f.statProcessedRate.Add(1)
 
 				// Retrieve buffer ctxs
-				bufferSrcCtxs, ok := f.bufferSrcCtxs[p.Node]
+				buffersrcContexts, ok := f.buffersrcContexts[p.Node]
 				if !ok {
 					return
 				}
 
 				// Loop through buffer ctxs
-				for _, bufferSrcCtx := range bufferSrcCtxs {
-					// Push frame in graph
-					if ret := f.g.AvBuffersrcAddFrameFlags(bufferSrcCtx, fm, avfilter.AV_BUFFERSRC_FLAG_KEEP_REF); ret < 0 {
-						emitAvError(f, f.eh, ret, "f.g.AvBuffersrcAddFrameFlags failed")
+				for _, buffersrcContext := range buffersrcContexts {
+					// Add frame
+					if err := buffersrcContext.BuffersrcAddFrame(fm, astiav.NewBuffersrcFlags(astiav.BuffersrcFlagKeepRef)); err != nil {
+						emitError(f, f.eh, err, "adding frame to buffersrc")
 						return
 					}
 				}
@@ -353,9 +372,9 @@ func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 	defer f.p.put(fm)
 
 	// Pull filtered frame from graph
-	if ret := f.g.AvBuffersinkGetFrame(f.bufferSinkCtx, fm); ret < 0 {
-		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
-			emitAvError(f, f.eh, ret, "f.g.AvBuffersinkGetFrame failed")
+	if err := f.buffersinkContext.BuffersinkGetFrame(fm, astiav.NewBuffersinkFlags()); err != nil {
+		if !errors.Is(err, astiav.ErrEof) && !errors.Is(err, astiav.ErrEagain) {
+			emitError(f, f.eh, err, "getting frame from buffersink")
 		}
 		stop = true
 		return
@@ -367,18 +386,17 @@ func (f *Filterer) pullFilteredFrame(descriptor Descriptor) (stop bool) {
 	}
 
 	// Dispatch frame
-	f.d.dispatch(fm, newFiltererDescriptor(f.bufferSinkCtx, descriptor))
+	f.d.dispatch(fm, newFiltererDescriptor(f.buffersinkContext, descriptor))
 	return
 }
 
 // SendCommand sends a command to the filterer
-func (f *Filterer) SendCommand(target, cmd, arg string, flags int) (err error) {
+func (f *Filterer) SendCommand(target, cmd, args string, fs astiav.FilterCommandFlags) (resp string, err error) {
 	// Everything executed outside the main loop should be protected from the closer
 	f.DoWhenUnclosed(func() {
 		// Send command
-		var res string
-		if ret := f.g.AvfilterGraphSendCommand(target, cmd, arg, res, 255, flags); ret < 0 {
-			err = fmt.Errorf("astilibav: f.g.AvfilterGraphSendCommand for target %s, cmd %s, arg %s and flag %d failed with res %s: %w", target, cmd, arg, flags, res, NewAvError(ret))
+		if resp, err = f.g.SendCommand(target, cmd, args, fs); err != nil {
+			err = fmt.Errorf("astilibav: sending command to filter graph failed with response %s: %w", resp, err)
 			return
 		}
 	})
@@ -386,12 +404,12 @@ func (f *Filterer) SendCommand(target, cmd, arg string, flags int) (err error) {
 }
 
 type filtererDescriptor struct {
-	timeBase avutil.Rational
+	timeBase astiav.Rational
 }
 
-func newFiltererDescriptor(bufferSinkCtx *avfilter.Context, prev Descriptor) (d *filtererDescriptor) {
+func newFiltererDescriptor(buffersinkContext *astiav.FilterContext, prev Descriptor) (d *filtererDescriptor) {
 	d = &filtererDescriptor{}
-	if is := bufferSinkCtx.Inputs(); len(is) > 0 {
+	if is := buffersinkContext.Inputs(); len(is) > 0 {
 		d.timeBase = is[0].TimeBase()
 	} else {
 		d.timeBase = prev.TimeBase()
@@ -400,6 +418,6 @@ func newFiltererDescriptor(bufferSinkCtx *avfilter.Context, prev Descriptor) (d 
 }
 
 // TimeBase implements the Descriptor interface
-func (d *filtererDescriptor) TimeBase() avutil.Rational {
+func (d *filtererDescriptor) TimeBase() astiav.Rational {
 	return d.timeBase
 }

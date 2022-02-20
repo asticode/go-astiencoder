@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avcodec"
-	"github.com/asticode/goav/avformat"
-	"github.com/asticode/goav/avutil"
 )
 
 var countEncoder uint64
@@ -19,7 +17,7 @@ var countEncoder uint64
 type Encoder struct {
 	*astiencoder.BaseNode
 	c                  *astikit.Chan
-	ctxCodec           *avcodec.Context
+	codecCtx           *astiav.CodecContext
 	d                  *pktDispatcher
 	eh                 *astiencoder.EventHandler
 	fp                 *framePool
@@ -63,15 +61,15 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	e.addStats()
 
 	// Find encoder
-	var cdc *avcodec.Codec
+	var codec *astiav.Codec
 	if len(o.Ctx.CodecName) > 0 {
-		if cdc = avcodec.AvcodecFindEncoderByName(o.Ctx.CodecName); cdc == nil {
+		if codec = astiav.FindEncoderByName(o.Ctx.CodecName); codec == nil {
 			err = fmt.Errorf("astilibav: no encoder with name %s", o.Ctx.CodecName)
 			return
 		}
 	} else if o.Ctx.CodecID > 0 {
-		if cdc = avcodec.AvcodecFindEncoder(o.Ctx.CodecID); cdc == nil {
-			err = fmt.Errorf("astilibav: no encoder with id %+v", o.Ctx.CodecID)
+		if codec = astiav.FindEncoder(o.Ctx.CodecID); codec == nil {
+			err = fmt.Errorf("astilibav: no encoder with codec id %s", o.Ctx.CodecID)
 			return
 		}
 	} else {
@@ -79,77 +77,66 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		return
 	}
 
-	// Check whether the context is valid with the codec
-	if err = o.Ctx.validWithCodec(cdc); err != nil {
-		err = fmt.Errorf("astilibav: checking whether the context is valid with the codec failed: %w", err)
+	// Alloc codec context
+	if e.codecCtx = astiav.AllocCodecContext(codec); e.codecCtx == nil {
+		err = errors.New("astilibav: no codec context allocated")
 		return
 	}
 
-	// Alloc context
-	if e.ctxCodec = cdc.AvcodecAllocContext3(); e.ctxCodec == nil {
-		err = errors.New("astilibav: no context allocated")
-		return
-	}
+	// Make sure the codec context is freed
+	e.AddClose(e.codecCtx.Free)
 
 	// Set shared context parameters
 	if o.Ctx.GlobalHeader {
-		e.ctxCodec.SetFlags(e.ctxCodec.Flags() | avcodec.AV_CODEC_FLAG_GLOBAL_HEADER)
+		e.codecCtx.SetFlags(e.codecCtx.Flags().Add(astiav.CodecContextFlagGlobalHeader))
 	}
 	if o.Ctx.ThreadCount != nil {
-		e.ctxCodec.SetThreadCount(*o.Ctx.ThreadCount)
+		e.codecCtx.SetThreadCount(*o.Ctx.ThreadCount)
 	}
 	if o.Ctx.ThreadType != nil {
-		e.ctxCodec.SetThreadType(*o.Ctx.ThreadType)
+		e.codecCtx.SetThreadType(*o.Ctx.ThreadType)
 	}
 
 	// Set media type-specific context parameters
-	switch o.Ctx.CodecType {
-	case avutil.AVMEDIA_TYPE_AUDIO:
-		e.ctxCodec.SetBitRate(int64(o.Ctx.BitRate))
-		e.ctxCodec.SetChannelLayout(o.Ctx.ChannelLayout)
-		e.ctxCodec.SetChannels(o.Ctx.Channels)
-		e.ctxCodec.SetSampleFmt(o.Ctx.SampleFmt)
-		e.ctxCodec.SetSampleRate(o.Ctx.SampleRate)
-	case avutil.AVMEDIA_TYPE_VIDEO:
-		e.ctxCodec.SetBitRate(int64(o.Ctx.BitRate))
-		e.ctxCodec.SetFramerate(o.Ctx.FrameRate)
-		e.ctxCodec.SetGopSize(o.Ctx.GopSize)
-		e.ctxCodec.SetHeight(o.Ctx.Height)
-		e.ctxCodec.SetPixFmt(o.Ctx.PixelFormat)
-		e.ctxCodec.SetSampleAspectRatio(o.Ctx.SampleAspectRatio)
-		e.ctxCodec.SetTimeBase(o.Ctx.TimeBase)
-		e.ctxCodec.SetWidth(o.Ctx.Width)
+	switch o.Ctx.MediaType {
+	case astiav.MediaTypeAudio:
+		e.codecCtx.SetBitRate(int64(o.Ctx.BitRate))
+		e.codecCtx.SetChannelLayout(o.Ctx.ChannelLayout)
+		e.codecCtx.SetChannels(o.Ctx.Channels)
+		e.codecCtx.SetSampleFormat(o.Ctx.SampleFormat)
+		e.codecCtx.SetSampleRate(o.Ctx.SampleRate)
+	case astiav.MediaTypeVideo:
+		e.codecCtx.SetBitRate(int64(o.Ctx.BitRate))
+		e.codecCtx.SetFramerate(o.Ctx.FrameRate)
+		e.codecCtx.SetGopSize(o.Ctx.GopSize)
+		e.codecCtx.SetHeight(o.Ctx.Height)
+		e.codecCtx.SetPixelFormat(o.Ctx.PixelFormat)
+		e.codecCtx.SetSampleAspectRatio(o.Ctx.SampleAspectRatio)
+		e.codecCtx.SetTimeBase(o.Ctx.TimeBase)
+		e.codecCtx.SetWidth(o.Ctx.Width)
 	default:
-		err = fmt.Errorf("astilibav: encoder doesn't handle %v codec type", o.Ctx.CodecType)
+		err = fmt.Errorf("astilibav: encoder doesn't handle %s media type", o.Ctx.MediaType)
 		return
 	}
 
-	// Dict
-	var dict *avutil.Dictionary
-	if o.Ctx.Dict != nil {
+	// Dictionary
+	var dict *astiav.Dictionary
+	if o.Ctx.Dictionary != nil {
 		// Parse dict
-		if err = o.Ctx.Dict.Parse(&dict); err != nil {
+		if dict, err = o.Ctx.Dictionary.parse(); err != nil {
 			err = fmt.Errorf("astilibav: parsing dict failed: %w", err)
 			return
 		}
 
-		// Make sure the dict is freed
-		defer avutil.AvDictFree(&dict)
+		// Make sure the dictionary is freed
+		defer dict.Free()
 	}
 
 	// Open codec
-	if ret := e.ctxCodec.AvcodecOpen2(cdc, &dict); ret < 0 {
-		err = fmt.Errorf("astilibav: d.e.ctxCodec.AvcodecOpen2 failed: %w", NewAvError(ret))
+	if err = e.codecCtx.Open(codec, dict); err != nil {
+		err = fmt.Errorf("astilibav: opening codec failed: %w", err)
 		return
 	}
-
-	// Make sure the codec is closed
-	e.AddCloseFunc(func() error {
-		if ret := e.ctxCodec.AvcodecClose(); ret < 0 {
-			emitAvError(nil, eh, ret, "d.e.ctxCodec.AvcodecClose failed")
-		}
-		return nil
-	})
 	return
 }
 
@@ -227,8 +214,8 @@ func (e *Encoder) HandleFrame(p FrameHandlerPayload) {
 
 		// Copy frame
 		f := e.fp.get()
-		if ret := avutil.AvFrameRef(f, p.Frame); ret < 0 {
-			emitAvError(e, e.eh, ret, "avutil.AvFrameRef failed")
+		if err := f.Ref(p.Frame); err != nil {
+			emitError(e, e.eh, err, "refing frame")
 			return
 		}
 
@@ -252,19 +239,19 @@ func (e *Encoder) HandleFrame(p FrameHandlerPayload) {
 	})
 }
 
-func (e *Encoder) encode(f *avutil.Frame, d Descriptor) {
+func (e *Encoder) encode(f *astiav.Frame, d Descriptor) {
 	// Reset frame attributes
 	if f != nil {
-		switch e.ctxCodec.CodecType() {
-		case avutil.AVMEDIA_TYPE_VIDEO:
-			f.SetKeyFrame(0)
-			f.SetPictType(avutil.AvPictureType(avutil.AV_PICTURE_TYPE_NONE))
+		switch e.codecCtx.MediaType() {
+		case astiav.MediaTypeVideo:
+			f.SetKeyFrame(false)
+			f.SetPictureType(astiav.PictureTypeNone)
 		}
 	}
 
 	// Send frame to encoder
-	if ret := avcodec.AvcodecSendFrame(e.ctxCodec, f); ret < 0 {
-		emitAvError(e, e.eh, ret, "avcodec.AvcodecSendFrame failed")
+	if err := e.codecCtx.SendFrame(f); err != nil {
+		emitError(e, e.eh, err, "sending frame")
 		return
 	}
 
@@ -283,9 +270,9 @@ func (e *Encoder) receivePkt(d Descriptor) (stop bool) {
 	defer e.pp.put(pkt)
 
 	// Receive pkt
-	if ret := avcodec.AvcodecReceivePacket(e.ctxCodec, pkt); ret < 0 {
-		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
-			emitAvError(e, e.eh, ret, "avcodec.AvcodecReceivePacket failed")
+	if err := e.codecCtx.ReceivePacket(pkt); err != nil {
+		if !errors.Is(err, astiav.ErrEof) && !errors.Is(err, astiav.ErrEagain) {
+			emitError(e, e.eh, err, "receiving packet")
 		}
 		stop = true
 		return
@@ -302,48 +289,48 @@ func (e *Encoder) receivePkt(d Descriptor) (stop bool) {
 	}
 
 	// Set pkt duration based on framerate
-	if f := e.ctxCodec.Framerate(); f.Num() > 0 {
-		pkt.SetDuration(avutil.AvRescaleQ(int64(1e9/f.ToDouble()), nanosecondRational, d.TimeBase()))
+	if f := e.codecCtx.Framerate(); f.Num() > 0 {
+		pkt.SetDuration(astiav.RescaleQ(int64(1e9/f.ToDouble()), nanosecondRational, d.TimeBase()))
 	}
 
 	// Rescale timestamps
-	pkt.AvPacketRescaleTs(d.TimeBase(), e.ctxCodec.TimeBase())
+	pkt.RescaleTs(d.TimeBase(), e.codecCtx.TimeBase())
 
 	// Dispatch pkt
-	e.d.dispatch(pkt, newEncoderDescriptor(e.ctxCodec))
+	e.d.dispatch(pkt, newEncoderDescriptor(e.codecCtx))
 	return
 }
 
 // AddStream adds a stream based on the codec ctx
-func (e *Encoder) AddStream(ctxFormat *avformat.Context) (o *avformat.Stream, err error) {
+func (e *Encoder) AddStream(formatCtx *astiav.FormatContext) (o *astiav.Stream, err error) {
 	// Add stream
-	o = AddStream(ctxFormat)
+	o = AddStream(formatCtx)
 
 	// Set codec parameters
-	if ret := avcodec.AvcodecParametersFromContext(o.CodecParameters(), e.ctxCodec); ret < 0 {
-		err = fmt.Errorf("astilibav: avcodec.AvcodecParametersFromContext from %+v to %+v failed: %w", e.ctxCodec, o.CodecParameters(), NewAvError(ret))
+	if err = o.CodecParameters().FromCodecContext(e.codecCtx); err != nil {
+		err = fmt.Errorf("astilibav: getting codec parameters from codec context failed: %w", err)
 		return
 	}
 
 	// Set other attributes
-	o.SetTimeBase(e.ctxCodec.TimeBase())
+	o.SetTimeBase(e.codecCtx.TimeBase())
 	return
 }
 
 // FrameSize returns the encoder frame size
 func (e *Encoder) FrameSize() int {
-	return e.ctxCodec.FrameSize()
+	return e.codecCtx.FrameSize()
 }
 
 type encoderDescriptor struct {
-	ctxCodec *avcodec.Context
+	codecCtx *astiav.CodecContext
 }
 
-func newEncoderDescriptor(ctxCodec *avcodec.Context) *encoderDescriptor {
-	return &encoderDescriptor{ctxCodec: ctxCodec}
+func newEncoderDescriptor(codecCtx *astiav.CodecContext) *encoderDescriptor {
+	return &encoderDescriptor{codecCtx: codecCtx}
 }
 
 // TimeBase implements the Descriptor interface
-func (d *encoderDescriptor) TimeBase() avutil.Rational {
-	return d.ctxCodec.TimeBase()
+func (d *encoderDescriptor) TimeBase() astiav.Rational {
+	return d.codecCtx.TimeBase()
 }

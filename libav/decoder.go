@@ -2,13 +2,13 @@ package astilibav
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avcodec"
-	"github.com/asticode/goav/avutil"
 )
 
 var countDecoder uint64
@@ -17,7 +17,7 @@ var countDecoder uint64
 type Decoder struct {
 	*astiencoder.BaseNode
 	c                 *astikit.Chan
-	ctxCodec          *avcodec.Context
+	codecCtx          *astiav.CodecContext
 	d                 *frameDispatcher
 	eh                *astiencoder.EventHandler
 	outputCtx         Context
@@ -29,10 +29,10 @@ type Decoder struct {
 
 // DecoderOptions represents decoder options
 type DecoderOptions struct {
-	CodecParams *avcodec.CodecParameters
-	Name        string
-	Node        astiencoder.NodeOptions
-	OutputCtx   Context
+	CodecParameters *astiav.CodecParameters
+	Name            string
+	Node            astiencoder.NodeOptions
+	OutputCtx       Context
 }
 
 // NewDecoder creates a new decoder
@@ -64,44 +64,39 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	d.addStats()
 
 	// Find decoder
-	var cdc *avcodec.Codec
+	var codec *astiav.Codec
 	if o.Name != "" {
-		if cdc = avcodec.AvcodecFindDecoderByName(o.Name); cdc == nil {
+		if codec = astiav.FindDecoderByName(o.Name); codec == nil {
 			err = fmt.Errorf("astilibav: no decoder found for name %s", o.Name)
 			return
 		}
 	} else {
-		if cdc = avcodec.AvcodecFindDecoder(o.CodecParams.CodecId()); cdc == nil {
-			err = fmt.Errorf("astilibav: no decoder found for codec id %+v", o.CodecParams.CodecId())
+		if codec = astiav.FindDecoder(o.CodecParameters.CodecID()); codec == nil {
+			err = fmt.Errorf("astilibav: no decoder found for codec id %s", o.CodecParameters.CodecID())
 			return
 		}
 	}
 
-	// Alloc context
-	if d.ctxCodec = cdc.AvcodecAllocContext3(); d.ctxCodec == nil {
-		err = fmt.Errorf("astilibav: no context allocated for codec %+v", cdc)
+	// Alloc codec context
+	if d.codecCtx = astiav.AllocCodecContext(codec); d.codecCtx == nil {
+		err = errors.New("astilibav: no codec context allocated")
 		return
 	}
 
-	// Copy codec parameters
-	if ret := avcodec.AvcodecParametersToContext(d.ctxCodec, o.CodecParams); ret < 0 {
-		err = fmt.Errorf("astilibav: avcodec.AvcodecParametersToContext failed: %w", NewAvError(ret))
+	// Make sure the codec context is freed
+	d.AddClose(d.codecCtx.Free)
+
+	// Convert codec parameters to codec context
+	if err = o.CodecParameters.ToCodecContext(d.codecCtx); err != nil {
+		err = fmt.Errorf("astilibav: converting codec parameters to codec context failed: %w", err)
 		return
 	}
 
 	// Open codec
-	if ret := d.ctxCodec.AvcodecOpen2(cdc, nil); ret < 0 {
-		err = fmt.Errorf("astilibav: d.ctxCodec.AvcodecOpen2 failed: %w", NewAvError(ret))
+	if err = d.codecCtx.Open(codec, nil); err != nil {
+		err = fmt.Errorf("astilibav: opening codec failed: %w", err)
 		return
 	}
-
-	// Make sure the codec is closed
-	d.AddCloseFunc(func() error {
-		if ret := d.ctxCodec.AvcodecClose(); ret < 0 {
-			emitAvError(nil, eh, ret, "d.ctxCodec.AvcodecClose failed")
-		}
-		return nil
-	})
 	return
 }
 
@@ -177,8 +172,8 @@ func (d *Decoder) HandlePkt(p PktHandlerPayload) {
 
 		// Copy pkt
 		pkt := d.pp.get()
-		if ret := pkt.AvPacketRef(p.Pkt); ret < 0 {
-			emitAvError(d, d.eh, ret, "AvPacketRef failed")
+		if err := pkt.Ref(p.Pkt); err != nil {
+			emitError(d, d.eh, err, "refing packet")
 			return
 		}
 
@@ -196,8 +191,8 @@ func (d *Decoder) HandlePkt(p PktHandlerPayload) {
 				d.statProcessedRate.Add(1)
 
 				// Send pkt to decoder
-				if ret := avcodec.AvcodecSendPacket(d.ctxCodec, pkt); ret < 0 {
-					emitAvError(d, d.eh, ret, "avcodec.AvcodecSendPacket failed")
+				if err := d.codecCtx.SendPacket(pkt); err != nil {
+					emitError(d, d.eh, err, "sending packet")
 					return
 				}
 
@@ -219,9 +214,9 @@ func (d *Decoder) receiveFrame(descriptor Descriptor) (stop bool) {
 	defer d.fp.put(f)
 
 	// Receive frame
-	if ret := avcodec.AvcodecReceiveFrame(d.ctxCodec, f); ret < 0 {
-		if ret != avutil.AVERROR_EOF && ret != avutil.AVERROR_EAGAIN {
-			emitAvError(d, d.eh, ret, "avcodec.AvcodecReceiveFrame failed")
+	if err := d.codecCtx.ReceiveFrame(f); err != nil {
+		if !errors.Is(err, astiav.ErrEof) && !errors.Is(err, astiav.ErrEagain) {
+			emitError(d, d.eh, err, "receiving frame")
 		}
 		stop = true
 		return

@@ -5,10 +5,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/goav/avcodec"
-	"github.com/asticode/goav/avutil"
 )
 
 // PktHandler represents a node that can handle a pkt
@@ -27,7 +26,7 @@ type PktHandlerConnector interface {
 type PktHandlerPayload struct {
 	Descriptor Descriptor
 	Node       astiencoder.Node
-	Pkt        *avcodec.Packet
+	Pkt        *astiav.Packet
 }
 
 type pktDispatcher struct {
@@ -62,7 +61,7 @@ func (d *pktDispatcher) delHandler(h PktHandler) {
 	delete(d.hs, h.Metadata().Name)
 }
 
-func (d *pktDispatcher) dispatch(pkt *avcodec.Packet, descriptor Descriptor) {
+func (d *pktDispatcher) dispatch(pkt *astiav.Packet, descriptor Descriptor) {
 	// Increment outgoing rate
 	d.statOutgoingRate.Add(1)
 
@@ -109,7 +108,7 @@ func (d *pktDispatcher) stats() []astikit.StatOptions {
 
 // PktCond represents an object that can decide whether to use a pkt
 type PktCond interface {
-	UsePkt(pkt *avcodec.Packet) bool
+	UsePkt(pkt *astiav.Packet) bool
 }
 
 type pktCond struct {
@@ -132,14 +131,14 @@ func (c *pktCond) Metadata() astiencoder.NodeMetadata {
 }
 
 // UsePkt implements the PktCond interface
-func (c *pktCond) UsePkt(pkt *avcodec.Packet) bool {
+func (c *pktCond) UsePkt(pkt *astiav.Packet) bool {
 	return pkt.StreamIndex() == c.i.Index
 }
 
 type pktPool struct {
 	c astiencoder.Closer
 	m *sync.Mutex
-	p []*avcodec.Packet
+	p []*astiav.Packet
 }
 
 func newPktPool(c astiencoder.Closer) *pktPool {
@@ -149,15 +148,12 @@ func newPktPool(c astiencoder.Closer) *pktPool {
 	}
 }
 
-func (p *pktPool) get() (pkt *avcodec.Packet) {
+func (p *pktPool) get() (pkt *astiav.Packet) {
 	p.m.Lock()
 	defer p.m.Unlock()
 	if len(p.p) == 0 {
-		pkt = avcodec.AvPacketAlloc()
-		p.c.AddCloseFunc(func() error {
-			avcodec.AvPacketFree(pkt)
-			return nil
-		})
+		pkt = astiav.AllocPacket()
+		p.c.AddClose(pkt.Free)
 		return
 	}
 	pkt = p.p[0]
@@ -165,10 +161,10 @@ func (p *pktPool) get() (pkt *avcodec.Packet) {
 	return
 }
 
-func (p *pktPool) put(pkt *avcodec.Packet) {
+func (p *pktPool) put(pkt *astiav.Packet) {
 	p.m.Lock()
 	defer p.m.Unlock()
-	pkt.AvPacketUnref()
+	pkt.Unref()
 	p.p = append(p.p, pkt)
 }
 
@@ -186,7 +182,7 @@ func newPktDurationer(ctx Context) *pktDurationer {
 	}
 }
 
-func (pd *pktDurationer) handlePkt(pkt *avcodec.Packet) (previousDuration int64) {
+func (pd *pktDurationer) handlePkt(pkt *astiav.Packet) (previousDuration int64) {
 	// Make sure to update previous attributes
 	defer func() {
 		if pkt != nil {
@@ -214,19 +210,19 @@ func (pd *pktDurationer) flush() (lastDuration int64) {
 	return
 }
 
-func (pd *pktDurationer) skipped(pkt *avcodec.Packet) (i int64) {
-	// Switch on codec type
+func (pd *pktDurationer) skipped(pkt *astiav.Packet) (i int64) {
+	// Switch on media type
 	var d time.Duration
-	switch pd.ctx.CodecType {
-	case avutil.AVMEDIA_TYPE_AUDIO:
+	switch pd.ctx.MediaType {
+	case astiav.MediaTypeAudio:
 		// Get skip samples side data
-		sd := pkt.AvPacketGetSideData(avcodec.AV_PKT_DATA_SKIP_SAMPLES, nil)
+		sd := pkt.SideData(astiav.PacketSideDataTypeSkipSamples)
 		if sd == nil {
 			return
 		}
 
 		// Get skipped duration
-		skipStart, skipEnd := avutil.AV_RL32(sd, 0), avutil.AV_RL32(sd, 4)
+		skipStart, skipEnd := astiav.RL32WithOffset(sd, 0), astiav.RL32WithOffset(sd, 4)
 		d = time.Duration(float64(skipStart+skipEnd) / float64(pd.ctx.SampleRate) * 1e9)
 	default:
 		return

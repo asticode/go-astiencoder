@@ -27,6 +27,7 @@
     "video": {
       "codec": "libx264",
       "dict": "profile=baseline",
+      "height": 360,
       "inputs": [
         {
           "media_type": "video",
@@ -37,7 +38,8 @@
         {
           "name": "default"
         }
-      ]
+      ],
+      "width": 640
     }
   }
 }

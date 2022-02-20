@@ -123,7 +123,7 @@ func (r *WorkflowRecording) write(name string, payload interface{}) (err error) 
 
 	// Write
 	r.c.Add(func() {
-		r.w.Write([]string{strconv.Itoa(int(time.Now().UTC().Unix())), name, base64.StdEncoding.EncodeToString(b)})
+		r.w.Write([]string{strconv.Itoa(int(time.Now().UTC().Unix())), name, base64.StdEncoding.EncodeToString(b)}) //nolint:errcheck
 		r.w.Flush()
 	})
 	return
