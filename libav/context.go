@@ -32,6 +32,7 @@ type Context struct {
 	GopSize           int
 	Height            int
 	PixelFormat       astiav.PixelFormat
+	Rotation          float64
 	SampleAspectRatio astiav.Rational
 	Width             int
 }
@@ -83,6 +84,9 @@ func (ctx Context) String() string {
 		if ctx.GopSize > 0 {
 			ss = append(ss, "gop size: "+strconv.Itoa(ctx.GopSize))
 		}
+		if ctx.Rotation != 0 {
+			ss = append(ss, "rotation: "+strconv.FormatFloat(ctx.Rotation, 'f', 2, 64))
+		}
 	}
 	return strings.Join(ss, " - ")
 }
@@ -91,9 +95,12 @@ type OutputContexter interface {
 	OutputCtx() Context
 }
 
-func NewContextFromStream(s *astiav.Stream) Context {
+func NewContextFromStream(s *astiav.Stream) (ctx Context) {
+	// Get codec parameters
 	cp := s.CodecParameters()
-	return Context{
+
+	// Create context
+	ctx = Context{
 		// Shared
 		BitRate:   cp.BitRate(),
 		CodecID:   cp.CodecID(),
@@ -114,6 +121,14 @@ func NewContextFromStream(s *astiav.Stream) Context {
 		SampleAspectRatio: s.SampleAspectRatio(),
 		Width:             cp.Width(),
 	}
+
+	// Get display matrix side data
+	if sd := s.SideData(astiav.PacketSideDataTypeDisplaymatrix); len(sd) > 0 {
+		if dm, err := astiav.NewDisplayMatrixFromBytes(sd); err == nil {
+			ctx.Rotation = dm.Rotation()
+		}
+	}
+	return
 }
 
 func streamFrameRate(s *astiav.Stream) astiav.Rational {

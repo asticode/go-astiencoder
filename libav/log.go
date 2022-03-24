@@ -10,6 +10,7 @@ import (
 )
 
 type EventLog struct {
+	Fmt    string
 	Level  astiav.LogLevel
 	Msg    string
 	Parent string
@@ -17,11 +18,12 @@ type EventLog struct {
 
 // TODO Process parent and update event's target
 func HandleLogs(eh *astiencoder.EventHandler) {
-	astiav.SetLogCallback(func(level astiav.LogLevel, msg, parent string) {
+	astiav.SetLogCallback(func(level astiav.LogLevel, fmt, msg, parent string) {
 		// Emit event
 		eh.Emit(astiencoder.Event{
 			Name: EventNameLog,
 			Payload: EventLog{
+				Fmt:    fmt,
 				Level:  level,
 				Msg:    msg,
 				Parent: parent,
