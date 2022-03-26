@@ -84,15 +84,15 @@ func TestEventLogger(t *testing.T) {
 	time.Sleep(time.Second)
 	ml.m.Lock()
 	require.Equal(t, map[string]int{
-		"astiencoder: message repeated 1 time(s): errorf-1":  1,
-		"astiencoder: message repeated 1 time(s): infof-1":   1,
-		"astiencoder: message repeated 2 time(s): debugk-%d": 1,
-		"astiencoder: message repeated 2 time(s): errork-%d": 1,
-		"astiencoder: message repeated 2 time(s): errorf-3":  1,
-		"astiencoder: message repeated 2 time(s): infok-%d":  1,
-		"astiencoder: message repeated 2 time(s): infof-3":   1,
-		"astiencoder: message repeated 1 time(s): msg":       2,
-		"astiencoder: message repeated 2 time(s): warnk-%d":  1,
+		"astiencoder: pattern repeated once: errorf-1":     1,
+		"astiencoder: pattern repeated once: infof-1":      1,
+		"astiencoder: pattern repeated 2 times: debugk-%d": 1,
+		"astiencoder: pattern repeated 2 times: errork-%d": 1,
+		"astiencoder: pattern repeated 2 times: errorf-3":  1,
+		"astiencoder: pattern repeated 2 times: infok-%d":  1,
+		"astiencoder: pattern repeated 2 times: infof-3":   1,
+		"astiencoder: pattern repeated once: msg":          2,
+		"astiencoder: pattern repeated 2 times: warnk-%d":  1,
 		"debugk-1": 1,
 		"errork-1": 1,
 		"errorf-1": 1,
@@ -113,7 +113,7 @@ func TestEventLogger(t *testing.T) {
 	l.Close()
 	ml.m.Lock()
 	require.Equal(t, map[string]int{
-		"astiencoder: message repeated 2 time(s): purge-1": 1,
+		"astiencoder: pattern repeated 2 times: purge-1": 1,
 		"purge-1": 1,
 	}, ml.msgs)
 	ml.m.Unlock()

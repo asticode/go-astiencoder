@@ -32,13 +32,15 @@ type eventLoggerItem struct {
 	createdAt time.Time
 	key       string
 	l         logLevel
+	msg       string
 }
 
-func newEventLoggerItem(key string, l logLevel) *eventLoggerItem {
+func newEventLoggerItem(key, msg string, l logLevel) *eventLoggerItem {
 	return &eventLoggerItem{
 		createdAt: time.Now(),
 		key:       key,
 		l:         l,
+		msg:       msg,
 	}
 }
 
@@ -120,8 +122,10 @@ func (l *EventLogger) purge() {
 }
 
 func (l *EventLogger) dumpItem(k string, i *eventLoggerItem) {
-	if i.count > 0 {
-		l.write(fmt.Sprintf("astiencoder: message repeated %d time(s): %s", i.count, i.key), i.l)
+	if i.count > 1 {
+		l.write(fmt.Sprintf("astiencoder: pattern repeated %d times: %s", i.count, i.key), i.l)
+	} else if i.count == 1 {
+		l.write("astiencoder: pattern repeated once: "+i.msg, i.l)
 	}
 	delete(l.is, k)
 }
@@ -130,7 +134,7 @@ func (l *EventLogger) process(key, msg string, lv logLevel) {
 	// Merge messages
 	if l.messageMergingPeriod > 0 {
 		// Merge
-		if stop := l.merge(key, lv); stop {
+		if stop := l.merge(key, msg, lv); stop {
 			return
 		}
 	}
@@ -139,7 +143,7 @@ func (l *EventLogger) process(key, msg string, lv logLevel) {
 	l.write(msg, lv)
 }
 
-func (l *EventLogger) merge(key string, lv logLevel) (stop bool) {
+func (l *EventLogger) merge(key, msg string, lv logLevel) (stop bool) {
 	// Lock
 	l.m.Lock()
 	defer l.m.Unlock()
@@ -155,7 +159,7 @@ func (l *EventLogger) merge(key string, lv logLevel) (stop bool) {
 	}
 
 	// Create item
-	l.is[k] = newEventLoggerItem(key, lv)
+	l.is[k] = newEventLoggerItem(key, msg, lv)
 	return false
 }
 
