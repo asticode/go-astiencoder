@@ -3,10 +3,10 @@ package astiencoder
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestEvent(t *testing.T) {
+func TestEventHandler(t *testing.T) {
 	// Setup
 	eh := NewEventHandler()
 	var es []string
@@ -38,7 +38,7 @@ func TestEvent(t *testing.T) {
 		Name:   "test-1",
 		Target: "test-1",
 	})
-	assert.Equal(t, []string{"1", "3", "5"}, es)
+	require.Equal(t, []string{"1", "3", "5"}, es)
 	es = []string(nil)
 
 	// Emit #2
@@ -46,5 +46,5 @@ func TestEvent(t *testing.T) {
 		Name:   "test-2",
 		Target: "test-2",
 	})
-	assert.Equal(t, []string{"2", "4", "5"}, es)
+	require.Equal(t, []string{"2", "4", "5"}, es)
 }

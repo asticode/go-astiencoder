@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/asticode/go-astiav"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +24,7 @@ func TestFrameRestamperWithFrameDuration(t *testing.T) {
 	} {
 		f.SetPts(ft.input)
 		r.Restamp(f)
-		assert.Equal(t, ft.output, f.Pts())
+		require.Equal(t, ft.output, f.Pts())
 	}
 }
 
@@ -52,6 +51,6 @@ func TestFrameRestamperWithModulo(t *testing.T) {
 	} {
 		f.SetPts(ft.input)
 		r.Restamp(f)
-		assert.Equal(t, ft.output, f.Pts())
+		require.Equal(t, ft.output, f.Pts())
 	}
 }

@@ -1,86 +1,76 @@
 package astilibav
 
 import (
-	"regexp"
 	"strings"
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astikit"
 )
 
 type EventLog struct {
-	Fmt    string
+	Format string
 	Level  astiav.LogLevel
 	Msg    string
 	Parent string
 }
 
-// TODO Process parent and update event's target
-func HandleLogs(eh *astiencoder.EventHandler) {
-	astiav.SetLogCallback(func(level astiav.LogLevel, fmt, msg, parent string) {
-		// Emit event
-		eh.Emit(astiencoder.Event{
-			Name: EventNameLog,
-			Payload: EventLog{
-				Fmt:    fmt,
-				Level:  level,
-				Msg:    msg,
-				Parent: parent,
-			},
+func WithLog(lvl astiav.LogLevel) astiencoder.EventHandlerLogOption {
+	return func(h *astiencoder.EventHandler, l *astiencoder.EventLogger) {
+		// Set log level
+		astiav.SetLogLevel(lvl)
+
+		// Set log callback
+		// TODO Process parent and update event's target
+		astiav.SetLogCallback(func(level astiav.LogLevel, fmt, msg, parent string) {
+			// Emit event
+			h.Emit(astiencoder.Event{
+				Name: EventNameLog,
+				Payload: EventLog{
+					Format: fmt,
+					Level:  level,
+					Msg:    msg,
+					Parent: parent,
+				},
+			})
 		})
-	})
-}
 
-type LoggerEventHandlerAdapterOptions struct {
-	IgnoredLogMessages []*regexp.Regexp
-}
-
-func LoggerEventHandlerAdapter(o LoggerEventHandlerAdapterOptions, i astikit.StdLogger, h *astiencoder.EventHandler) {
-	h.AddForEventName(EventNameLog, loggerEventHandlerCallback(o, astikit.AdaptStdLogger(i)))
-}
-
-func loggerEventHandlerCallback(o LoggerEventHandlerAdapterOptions, l astikit.CompleteLogger) astiencoder.EventCallback {
-	return func(e astiencoder.Event) bool {
-		if v, ok := e.Payload.(EventLog); ok {
-			// Sanitize
-			msg := strings.TrimSpace(v.Msg)
-			if msg == "" {
-				return false
-			}
-
-			// Check ignored messages
-			for _, r := range o.IgnoredLogMessages {
-				if len(r.FindIndex([]byte(msg))) > 0 {
+		// Handle log
+		h.AddForEventName(EventNameLog, func(e astiencoder.Event) bool {
+			if v, ok := e.Payload.(EventLog); ok {
+				// Sanitize
+				format := strings.TrimSpace(v.Format)
+				msg := strings.TrimSpace(v.Msg)
+				if msg == "" {
 					return false
 				}
-			}
 
-			// Add prefix
-			msg = "astilibav: " + msg
+				// Add prefix
+				format = "astilibav: " + format
+				msg = "astilibav: " + msg
 
-			// Add parent
-			if strings.Index(v.Parent, "0x") == 0 {
-				msg += " (" + v.Parent + ")"
-			}
-
-			// Add level
-			switch v.Level {
-			case astiav.LogLevelDebug, astiav.LogLevelVerbose:
-				l.Debug(msg)
-			case astiav.LogLevelInfo:
-				l.Info(msg)
-			case astiav.LogLevelError, astiav.LogLevelFatal, astiav.LogLevelPanic:
-				if v.Level == astiav.LogLevelFatal {
-					msg = "FATAL! " + msg
-				} else if v.Level == astiav.LogLevelPanic {
-					msg = "PANIC! " + msg
+				// Add parent
+				if strings.Index(v.Parent, "0x") == 0 {
+					msg += " (" + v.Parent + ")"
 				}
-				l.Error(msg)
-			case astiav.LogLevelWarning:
-				l.Warn(msg)
+
+				// Add level
+				switch v.Level {
+				case astiav.LogLevelDebug, astiav.LogLevelVerbose:
+					l.Debugk(format, msg)
+				case astiav.LogLevelInfo:
+					l.Infok(format, msg)
+				case astiav.LogLevelError, astiav.LogLevelFatal, astiav.LogLevelPanic:
+					if v.Level == astiav.LogLevelFatal {
+						msg = "FATAL! " + msg
+					} else if v.Level == astiav.LogLevelPanic {
+						msg = "PANIC! " + msg
+					}
+					l.Errork(format, msg)
+				case astiav.LogLevelWarning:
+					l.Warnk(format, msg)
+				}
 			}
-		}
-		return false
+			return false
+		})
 	}
 }

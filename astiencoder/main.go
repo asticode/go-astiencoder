@@ -8,7 +8,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
+	astilibav "github.com/asticode/go-astiencoder/libav"
 	"github.com/asticode/go-astikit"
 )
 
@@ -35,9 +37,6 @@ func main() {
 
 	// Create workflow server
 	ws := astiencoder.NewServer(astiencoder.ServerOptions{Logger: l})
-
-	// Adapt event handler
-	astiencoder.LoggerEventHandlerAdapter(l, eh)
 	ws.EventHandlerAdapter(eh)
 
 	// Create stater
@@ -45,6 +44,9 @@ func main() {
 
 	// Create encoder
 	e := newEncoder(c.Encoder, eh, ws, l, s)
+
+	// Log event handler
+	defer eh.Log(l, astilibav.WithLog(astiav.LogLevelInfo)).Start(e.w.Context()).Close()
 
 	// Handle signals
 	e.w.HandleSignals()

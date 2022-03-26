@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/asticode/go-astiav"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,7 +32,7 @@ func TestPktRestamperStartFromZero(t *testing.T) {
 		pkt.SetPts(ft.inputPts)
 		pkt.SetStreamIndex(ft.streamIdx)
 		r.Restamp(pkt)
-		assert.Equal(t, ft.outputDts, pkt.Dts())
-		assert.Equal(t, ft.outputPts, pkt.Pts())
+		require.Equal(t, ft.outputDts, pkt.Dts())
+		require.Equal(t, ft.outputPts, pkt.Pts())
 	}
 }
