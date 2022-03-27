@@ -38,10 +38,13 @@ func WithLog(lvl astiav.LogLevel) astiencoder.EventHandlerLogOption {
 		h.AddForEventName(EventNameLog, func(e astiencoder.Event) bool {
 			if v, ok := e.Payload.(EventLog); ok {
 				// Sanitize
-				format := strings.TrimSpace(v.Format)
 				msg := strings.TrimSpace(v.Msg)
 				if msg == "" {
 					return false
+				}
+				format := strings.TrimSpace(v.Format)
+				if format == "%s" {
+					format = msg
 				}
 
 				// Add prefix
