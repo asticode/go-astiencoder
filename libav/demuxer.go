@@ -107,7 +107,7 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	d.p = newPktPool(d)
 
 	// Create pkt dispatcher
-	d.d = newPktDispatcher(d, eh, d.p)
+	d.d = newPktDispatcher(d, eh)
 
 	// Add stats
 	d.addStats()

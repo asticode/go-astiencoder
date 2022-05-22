@@ -66,7 +66,7 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	f.p = newFramePool(f)
 
 	// Create frame dispatcher
-	f.d = newFrameDispatcher(f, eh, f.p)
+	f.d = newFrameDispatcher(f, eh)
 
 	// Add stats
 	f.addStats()

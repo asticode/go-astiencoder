@@ -34,17 +34,15 @@ type pktDispatcher struct {
 	hs               map[string]PktHandler
 	m                *sync.Mutex
 	n                astiencoder.Node
-	p                *pktPool
 	statOutgoingRate *astikit.CounterRateStat
 }
 
-func newPktDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, p *pktPool) *pktDispatcher {
+func newPktDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler) *pktDispatcher {
 	return &pktDispatcher{
 		eh:               eh,
 		hs:               make(map[string]PktHandler),
 		m:                &sync.Mutex{},
 		n:                n,
-		p:                p,
 		statOutgoingRate: astikit.NewCounterRateStat(),
 	}
 }

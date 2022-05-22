@@ -95,7 +95,7 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 	r.p = newFramePool(r)
 
 	// Create frame dispatcher
-	r.d = newFrameDispatcher(r, eh, r.p)
+	r.d = newFrameDispatcher(r, eh)
 
 	// Create filler
 	if r.f == nil {

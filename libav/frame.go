@@ -32,17 +32,15 @@ type frameDispatcher struct {
 	hs               map[string]FrameHandler
 	m                *sync.Mutex // Locks hs
 	n                astiencoder.Node
-	p                *framePool
 	statOutgoingRate *astikit.CounterRateStat
 }
 
-func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler, p *framePool) *frameDispatcher {
+func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler) *frameDispatcher {
 	return &frameDispatcher{
 		eh:               eh,
 		hs:               make(map[string]FrameHandler),
 		m:                &sync.Mutex{},
 		n:                n,
-		p:                p,
 		statOutgoingRate: astikit.NewCounterRateStat(),
 	}
 }

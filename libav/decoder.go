@@ -58,7 +58,7 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	d.pp = newPktPool(d)
 
 	// Create frame dispatcher
-	d.d = newFrameDispatcher(d, eh, d.fp)
+	d.d = newFrameDispatcher(d, eh)
 
 	// Add stats
 	d.addStats()

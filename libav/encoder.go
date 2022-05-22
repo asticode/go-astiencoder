@@ -55,7 +55,7 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	e.pp = newPktPool(e)
 
 	// Create pkt dispatcher
-	e.d = newPktDispatcher(e, eh, e.pp)
+	e.d = newPktDispatcher(e, eh)
 
 	// Add stats
 	e.addStats()

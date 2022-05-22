@@ -54,7 +54,7 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 	f.p = newFramePool(f)
 
 	// Create frame dispatcher
-	f.d = newFrameDispatcher(f, eh, f.p)
+	f.d = newFrameDispatcher(f, eh)
 
 	// Add stats
 	f.addStats()
