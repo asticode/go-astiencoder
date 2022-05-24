@@ -2,8 +2,10 @@ package astilibav
 
 import (
 	"sync"
+	"time"
 
 	"github.com/asticode/go-astiav"
+	"github.com/asticode/go-astikit"
 )
 
 // PktRestamper represents an object capable of restamping packets
@@ -55,18 +57,58 @@ func (r *pktRestamperWithOffset) timestamp(i int64) int64 {
 	return i
 }
 
-type PktRestamperStartFromZero struct {
+type pktRestamperStartFromZero struct {
 	*pktRestamperWithOffset
 }
 
 // NewPktRestamperStartFromZero creates a new pkt restamper that starts timestamps from 0
-func NewPktRestamperStartFromZero() *PktRestamperStartFromZero {
-	return &PktRestamperStartFromZero{pktRestamperWithOffset: newPktRestamperWithOffset()}
+func NewPktRestamperStartFromZero() PktRestamper {
+	return &pktRestamperStartFromZero{pktRestamperWithOffset: newPktRestamperWithOffset()}
 }
 
 // Restamp implements the Restamper interface
-func (r *PktRestamperStartFromZero) Restamp(pkt *astiav.Packet) {
+func (r *pktRestamperStartFromZero) Restamp(pkt *astiav.Packet) {
 	r.restamp(pkt, func(dts int64) int64 {
 		return -dts
 	})
+}
+
+type pktRestamperWithTime struct {
+	fillGaps bool
+	firstAt  *time.Time
+	lastDTS  *int64
+	timeBase astiav.Rational
+}
+
+// NewPktRestamperWithTime creates a new pkt restamper that computes timestamps based on the time
+// at which restamping was requested
+// "fillGaps" option allows to:
+//   - assign the current pkt to the previous DTS if previous DTS was never assigned
+//   - assign the current pkt to the next DTS if current DTS is the same as previous DTS
+func NewPktRestamperWithTime(fillGaps bool, timeBase astiav.Rational) PktRestamper {
+	return &pktRestamperWithTime{
+		fillGaps: fillGaps,
+		timeBase: timeBase,
+	}
+}
+
+var now = time.Now
+
+func (r *pktRestamperWithTime) Restamp(pkt *astiav.Packet) {
+	n := now()
+	if r.firstAt == nil {
+		r.firstAt = astikit.TimePtr(n)
+	}
+	currentDTS := astiav.RescaleQ(int64(n.Sub(*r.firstAt)), nanosecondRational, r.timeBase)
+	dts := currentDTS
+	if r.fillGaps && r.lastDTS != nil {
+		if previousDTS := currentDTS - int64(r.timeBase.Num()); *r.lastDTS < previousDTS {
+			dts = previousDTS
+		} else if nextDTS := currentDTS + int64(r.timeBase.Num()); *r.lastDTS == currentDTS {
+			dts = nextDTS
+		}
+	}
+	pkt.SetDts(dts)
+	pkt.SetPts(dts)
+	r.lastDTS = astikit.Int64Ptr(dts)
 }

@@ -4,7 +4,7 @@ go 1.13
 
 require (
 	github.com/BurntSushi/toml v0.3.1
-	github.com/asticode/go-astiav v0.3.2
+	github.com/asticode/go-astiav v0.4.0
 	github.com/asticode/go-astikit v0.28.2
 	github.com/asticode/go-astiws v1.5.0
 	github.com/gorilla/websocket v1.4.1

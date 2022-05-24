@@ -2,6 +2,7 @@ package astilibav
 
 import (
 	"testing"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/stretchr/testify/require"
@@ -13,6 +14,7 @@ type pktTest struct {
 	outputDts int64
 	outputPts int64
 	streamIdx int
+	t         time.Time
 }
 
 func TestPktRestamperStartFromZero(t *testing.T) {
@@ -34,5 +36,47 @@ func TestPktRestamperStartFromZero(t *testing.T) {
 		r.Restamp(pkt)
 		require.Equal(t, ft.outputDts, pkt.Dts())
 		require.Equal(t, ft.outputPts, pkt.Pts())
+	}
+}
+
+func TestFrameRestamperWithTime(t *testing.T) {
+	var tm time.Time
+	_now := now
+	defer func() { now = _now }()
+	now = func() time.Time { return tm }
+	pkt := astiav.AllocPacket()
+	require.NotNil(t, pkt)
+	defer pkt.Free()
+	r := NewPktRestamperWithTime(false, astiav.NewRational(1, 10))
+	for _, v := range []pktTest{
+		{t: time.Unix(0, 0), outputDts: 0},
+		{t: time.Unix(0, 1e8), outputDts: 1},
+		{t: time.Unix(0, 2e8), outputDts: 2},
+		{t: time.Unix(0, 4e8), outputDts: 4},
+		{t: time.Unix(0, 44e7), outputDts: 4},
+		{t: time.Unix(0, 5e8), outputDts: 5},
+		{t: time.Unix(0, 54e7), outputDts: 5},
+		{t: time.Unix(0, 7e8), outputDts: 7},
+	} {
+		tm = v.t
+		r.Restamp(pkt)
+		require.Equal(t, v.outputDts, pkt.Dts())
+		require.Equal(t, v.outputDts, pkt.Pts())
+	}
+	r = NewPktRestamperWithTime(true, astiav.NewRational(1, 10))
+	for _, v := range []pktTest{
+		{t: time.Unix(0, 0), outputDts: 0},
+		{t: time.Unix(0, 1e8), outputDts: 1},
+		{t: time.Unix(0, 2e8), outputDts: 2},
+		{t: time.Unix(0, 4e8), outputDts: 3},
+		{t: time.Unix(0, 44e7), outputDts: 4},
+		{t: time.Unix(0, 5e8), outputDts: 5},
+		{t: time.Unix(0, 54e7), outputDts: 6},
+		{t: time.Unix(0, 7e8), outputDts: 7},
+	} {
+		tm = v.t
+		r.Restamp(pkt)
+		require.Equal(t, v.outputDts, pkt.Dts())
+		require.Equal(t, v.outputDts, pkt.Pts())
 	}
 }
