@@ -86,6 +86,7 @@ type NodeParentMapper interface {
 
 // Statuses
 const (
+	StatusCreated = "created"
 	StatusPaused  = "paused"
 	StatusRunning = "running"
 	StatusStopped = "stopped"
@@ -165,7 +166,7 @@ func NewBaseNode(o NodeOptions, c *astikit.Closer, eh *EventHandler, s *Stater, 
 		parents:         make(map[string]Node),
 		parentsStarted:  make(map[string]bool),
 		s:               s,
-		status:          StatusStopped,
+		status:          StatusCreated,
 		target:          target,
 	}
 
@@ -424,19 +425,48 @@ func (n *BaseNode) HandlePause() {
 
 // AddChild implements the NodeParent interface
 func (n *BaseNode) AddChild(i Node) {
+	// Lock
 	n.m.Lock()
-	defer n.m.Unlock()
+
+	// Node doesn't exist
 	if _, ok := n.children[i.Metadata().Name]; ok {
+		n.m.Unlock()
 		return
 	}
+
+	// Add child
 	n.children[i.Metadata().Name] = i
+
+	// Unlock
+	n.m.Unlock()
+
+	// Send event
+	// Mutex should be unlocked at this point
+	n.eh.Emit(Event{
+		Name:    n.et(EventTypeChildAdded),
+		Payload: i,
+		Target:  n.target,
+	})
 }
 
 // DelChild implements the NodeParent interface
 func (n *BaseNode) DelChild(i Node) {
+	// Lock
 	n.m.Lock()
-	defer n.m.Unlock()
+
+	// Delete child
 	delete(n.children, i.Metadata().Name)
+
+	// Unlock
+	n.m.Unlock()
+
+	// Send event
+	// Mutex should be unlocked at this point
+	n.eh.Emit(Event{
+		Name:    n.et(EventTypeChildRemoved),
+		Payload: i,
+		Target:  n.target,
+	})
 }
 
 // ChildIsStarted implements the NodeParent interface

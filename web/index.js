@@ -59,6 +59,24 @@ var astiencoder = {
         var rollbacks = [], n = false
         if (recording) {
             switch (name) {
+                case 'astiencoder.node.child.added':
+                case 'astiencoder.node.child.removed':
+                    // Get node
+                    n = this.nodes[payload.parent]
+                    if (!n) break
+
+                    // Create rollback
+                    var rollback = {
+                        name: 'astiencoder.node.child.removed',
+                        payload: payload
+                    }
+                    if (name === 'astiencoder.node.child.removed') {
+                        rollback.name = 'astiencoder.node.child.added'
+                    }
+
+                    // Append rollback
+                    rollbacks.push(rollback)
+                    break
                 case 'astiencoder.node.closed':
                     // Get node
                     n = this.nodes[payload]
@@ -128,6 +146,20 @@ var astiencoder = {
 
         // Apply
         switch (name) {
+            case 'astiencoder.node.child.added':
+                // Apply
+                this.apply(payload.parent, {children: [payload.child]})
+
+                // Refresh nodes position
+                if (!recording) this.refreshNodesPosition()
+                break
+            case 'astiencoder.node.child.removed':
+                // Apply
+                this.apply(payload.parent, {childrenRemoved: [payload.child]})
+
+                // Refresh nodes position
+                if (!recording) this.refreshNodesPosition()
+                break
             case 'astiencoder.node.closed':
                 // Apply
                 this.apply(payload, {closed: true})
@@ -469,6 +501,10 @@ var astiencoder = {
                 // Get indexed key
                 var k = ''
                 switch (n.name) {
+                    case 'astiencoder.node.child.added':
+                    case 'astiencoder.node.child.removed':
+                        k = n.name + ' | ' + n.payload.parent + ' | ' + n.payload.child
+                        break
                     case 'astiencoder.node.closed':
                         k = 'closed | ' + n.payload
                         break
@@ -1070,19 +1106,31 @@ var astiencoder = {
 
                 // Get direction
                 var d = ""
-                if (n.dom.w.offsetTop + n.dom.w.offsetHeight < c.dom.w.offsetTop) d += "bottom-"
+                if ((n.dom.w.offsetTop <= c.dom.w.offsetTop && n.dom.w.offsetTop + n.dom.w.offsetHeight >= c.dom.w.offsetTop + c.dom.w.offsetHeight) || (c.dom.w.offsetTop <= n.dom.w.offsetTop && c.dom.w.offsetTop + c.dom.w.offsetHeight >= n.dom.w.offsetTop + c.dom.w.offsetHeight)) {
+                    d+= "center-"
+                } else if (n.dom.w.offsetTop + n.dom.w.offsetHeight < c.dom.w.offsetTop) d += "bottom-"
                 else d += "top-"
-                if (n.dom.w.offsetLeft + (n.dom.w.offsetWidth / 2) < c.dom.w.offsetLeft + (c.dom.w.offsetWidth / 2)) d += "right"
-                else d += "left"
+                if (d === "bottom-" || d === "top-") {
+                    if (n.dom.w.offsetLeft + (n.dom.w.offsetWidth / 2) < c.dom.w.offsetLeft + (c.dom.w.offsetWidth / 2)) d += "right"
+                    else d += "left"
+                } else {
+                    if (n.dom.w.offsetLeft + n.dom.w.offsetWidth < c.dom.w.offsetLeft) d += "right"
+                    else d += "left"
+                }
 
                 // Get arrow line coordinates
                 var lineFromX, lineFromY, lineToX, lineToY
-                if (d === "bottom-left" || d === "bottom-right") {
+                if (d.startsWith("bottom-")) {
                     lineFromX = n.dom.w.offsetLeft + (n.dom.w.offsetWidth / 2)
                     lineFromY = n.dom.w.offsetTop + n.dom.w.offsetHeight
                     lineToX = c.dom.w.offsetLeft + (c.dom.w.offsetWidth / 2)
                     lineToY = c.dom.w.offsetTop
-                } else if (d === "top-right") {
+                } else if (d.startsWith("top-")) {
+                    lineFromX = n.dom.w.offsetLeft + (n.dom.w.offsetWidth / 2)
+                    lineFromY = n.dom.w.offsetTop
+                    lineToX = c.dom.w.offsetLeft + (c.dom.w.offsetWidth / 2)
+                    lineToY = c.dom.w.offsetTop + c.dom.w.offsetHeight
+                } else if ((d.endsWith("-right"))) {
                     lineFromX = n.dom.w.offsetLeft + n.dom.w.offsetWidth
                     lineFromY = n.dom.w.offsetTop + (n.dom.w.offsetHeight / 2)
                     lineToX = c.dom.w.offsetLeft
@@ -1111,41 +1159,26 @@ var astiencoder = {
 
                 // Get arrow head line coordinates
                 var headLine1FromX, headLine1ToX, headLine1FromY, headLine1ToY, headLine2FromX, headLine2ToX, headLine2FromY, headLine2ToY
-                if (d === 'bottom-right') {
+                if (d.endsWith("-right")) {
                     headLine1FromX = lineToX - (Math.sin(lineAngle - arrowAngle) * 0.5)
-                    headLine1FromY = lineToY - (Math.cos(lineAngle - arrowAngle) * 0.5)
                     headLine1ToX = headLine1FromX - (Math.sin(lineAngle - arrowAngle) * arrowLength)
-                    headLine1ToY = headLine1FromY - (Math.cos(lineAngle - arrowAngle) * arrowLength)
                     headLine2FromX = lineToX - (Math.cos(oppositeLineAngle - arrowAngle) * 0.5)
-                    headLine2FromY = lineToY - (Math.sin(oppositeLineAngle - arrowAngle) * 0.5)
                     headLine2ToX = headLine2FromX - (Math.cos(oppositeLineAngle - arrowAngle) * arrowLength)
-                    headLine2ToY = headLine2FromY - (Math.sin(oppositeLineAngle - arrowAngle) * arrowLength)
-                } else if (d === 'bottom-left') {
+                } else {
                     headLine1FromX = lineToX + (Math.sin(lineAngle - arrowAngle) * 0.5)
+                    headLine1ToX = headLine1FromX + (Math.sin(lineAngle - arrowAngle) * arrowLength)
+                    headLine2FromX = lineToX + (Math.cos(oppositeLineAngle - arrowAngle) * 0.5)
+                    headLine2ToX = headLine2FromX + (Math.cos(oppositeLineAngle - arrowAngle) * arrowLength)
+                }
+                if (d.startsWith("bottom-")) {
                     headLine1FromY = lineToY - (Math.cos(lineAngle - arrowAngle) * 0.5)
-                    headLine1ToX = headLine1FromX + (Math.sin(lineAngle - arrowAngle) * arrowLength)
                     headLine1ToY = headLine1FromY - (Math.cos(lineAngle - arrowAngle) * arrowLength)
-                    headLine2FromX = lineToX + (Math.cos(oppositeLineAngle - arrowAngle) * 0.5)
                     headLine2FromY = lineToY - (Math.sin(oppositeLineAngle - arrowAngle) * 0.5)
-                    headLine2ToX = headLine2FromX + (Math.cos(oppositeLineAngle - arrowAngle) * arrowLength)
                     headLine2ToY = headLine2FromY - (Math.sin(oppositeLineAngle - arrowAngle) * arrowLength)
-                } else if (d === 'top-right') {
-                    headLine1FromX = lineToX - (Math.sin(lineAngle - arrowAngle) * 0.5)
+                } else {
                     headLine1FromY = lineToY + (Math.cos(lineAngle - arrowAngle) * 0.5)
-                    headLine1ToX = headLine1FromX - (Math.sin(lineAngle - arrowAngle) * arrowLength)
                     headLine1ToY = headLine1FromY + (Math.cos(lineAngle - arrowAngle) * arrowLength)
-                    headLine2FromX = lineToX - (Math.cos(oppositeLineAngle - arrowAngle) * 0.5)
                     headLine2FromY = lineToY + (Math.sin(oppositeLineAngle - arrowAngle) * 0.5)
-                    headLine2ToX = headLine2FromX - (Math.cos(oppositeLineAngle - arrowAngle) * arrowLength)
-                    headLine2ToY = headLine2FromY + (Math.sin(oppositeLineAngle - arrowAngle) * arrowLength)
-                } else if (d === 'top-left') {
-                    headLine1FromX = lineToX + (Math.sin(lineAngle - arrowAngle) * 0.5)
-                    headLine1FromY = lineToY + (Math.cos(lineAngle - arrowAngle) * 0.5)
-                    headLine1ToX = headLine1FromX + (Math.sin(lineAngle - arrowAngle) * arrowLength)
-                    headLine1ToY = headLine1FromY + (Math.cos(lineAngle - arrowAngle) * arrowLength)
-                    headLine2FromX = lineToX + (Math.cos(oppositeLineAngle - arrowAngle) * 0.5)
-                    headLine2FromY = lineToY + (Math.sin(oppositeLineAngle - arrowAngle) * 0.5)
-                    headLine2ToX = headLine2FromX + (Math.cos(oppositeLineAngle - arrowAngle) * arrowLength)
                     headLine2ToY = headLine2FromY + (Math.sin(oppositeLineAngle - arrowAngle) * arrowLength)
                 }
 
@@ -1235,6 +1268,18 @@ var astiencoder = {
                 // Update child
                 const c = this.nodes[item]
                 if (c) c.parents[name] = true
+            }.bind(this))
+        }
+
+        // Removed children
+        if (payload.childrenRemoved) {
+            payload.childrenRemoved.forEach(function(item) {
+                // Update node
+                delete this.nodes[name].children[item]
+
+                // Update child
+                const c = this.nodes[item]
+                if (c) delete c.parents[name]
             }.bind(this))
         }
 

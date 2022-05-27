@@ -2,23 +2,29 @@ package astiencoder
 
 // Default event names
 var (
-	EventNameError             = "astiencoder.error"
-	EventNameNodeClosed        = "astiencoder.node.closed"
-	EventNameNodeContinued     = "astiencoder.node.continued"
-	EventNameNodePaused        = "astiencoder.node.paused"
-	EventNameNodeStarted       = "astiencoder.node.started"
-	EventNameNodeStopped       = "astiencoder.node.stopped"
-	EventNameStats             = "astiencoder.stats"
-	EventNameWorkflowClosed    = "astiencoder.workflow.closed"
-	EventNameWorkflowContinued = "astiencoder.workflow.continued"
-	EventNameWorkflowPaused    = "astiencoder.workflow.paused"
-	EventNameWorkflowStarted   = "astiencoder.workflow.started"
-	EventNameWorkflowStopped   = "astiencoder.workflow.stopped"
-	EventTypeClosed            = "closed"
-	EventTypeContinued         = "continued"
-	EventTypePaused            = "paused"
-	EventTypeStarted           = "started"
-	EventTypeStopped           = "stopped"
+	EventNameError                = "astiencoder.error"
+	EventNameNodeChildAdded       = "astiencoder.node.child.added"
+	EventNameNodeChildRemoved     = "astiencoder.node.child.removed"
+	EventNameNodeClosed           = "astiencoder.node.closed"
+	EventNameNodeContinued        = "astiencoder.node.continued"
+	EventNameNodePaused           = "astiencoder.node.paused"
+	EventNameNodeStarted          = "astiencoder.node.started"
+	EventNameNodeStopped          = "astiencoder.node.stopped"
+	EventNameStats                = "astiencoder.stats"
+	EventNameWorkflowChildAdded   = "astiencoder.workflow.child.added"
+	EventNameWorkflowChildRemoved = "astiencoder.workflow.child.removed"
+	EventNameWorkflowClosed       = "astiencoder.workflow.closed"
+	EventNameWorkflowContinued    = "astiencoder.workflow.continued"
+	EventNameWorkflowPaused       = "astiencoder.workflow.paused"
+	EventNameWorkflowStarted      = "astiencoder.workflow.started"
+	EventNameWorkflowStopped      = "astiencoder.workflow.stopped"
+	EventTypeChildAdded           = "child.added"
+	EventTypeChildRemoved         = "child.removed"
+	EventTypeClosed               = "closed"
+	EventTypeContinued            = "continued"
+	EventTypePaused               = "paused"
+	EventTypeStarted              = "started"
+	EventTypeStopped              = "stopped"
 )
 
 // Event is an event coming out of the encoder
@@ -43,6 +49,10 @@ type EventTypeTransformer func(eventType string) string
 // EventTypeToNodeEventName is the node EventTypeTransformer
 func EventTypeToNodeEventName(eventType string) string {
 	switch eventType {
+	case EventTypeChildAdded:
+		return EventNameNodeChildAdded
+	case EventTypeChildRemoved:
+		return EventNameNodeChildRemoved
 	case EventTypeClosed:
 		return EventNameNodeClosed
 	case EventTypeContinued:
@@ -61,6 +71,10 @@ func EventTypeToNodeEventName(eventType string) string {
 // EventTypeToWorkflowEventName is the workflow EventTypeTransformer
 func EventTypeToWorkflowEventName(eventType string) string {
 	switch eventType {
+	case EventTypeChildAdded:
+		return EventNameWorkflowChildAdded
+	case EventTypeChildRemoved:
+		return EventNameWorkflowChildRemoved
 	case EventTypeClosed:
 		return EventNameWorkflowClosed
 	case EventTypeContinued:
