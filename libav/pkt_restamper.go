@@ -74,10 +74,11 @@ func (r *pktRestamperStartFromZero) Restamp(pkt *astiav.Packet) {
 }
 
 type pktRestamperWithTime struct {
-	fillGaps bool
-	firstAt  *time.Time
-	lastDTS  *int64
-	timeBase astiav.Rational
+	fillGaps      bool
+	firstAt       *time.Time
+	frameDuration int64
+	lastDTS       *int64
+	timeBase      astiav.Rational
 }
 
 // NewPktRestamperWithTime creates a new pkt restamper that computes timestamps based on the time
@@ -85,10 +86,12 @@ type pktRestamperWithTime struct {
 // "fillGaps" option allows to:
 //   - assign the current pkt to the previous DTS if previous DTS was never assigned
 //   - assign the current pkt to the next DTS if current DTS is the same as previous DTS
-func NewPktRestamperWithTime(fillGaps bool, timeBase astiav.Rational) PktRestamper {
+// "frameDuration" must be a duration in frame time base
+func NewPktRestamperWithTime(fillGaps bool, frameDuration int64, timeBase astiav.Rational) PktRestamper {
 	return &pktRestamperWithTime{
-		fillGaps: fillGaps,
-		timeBase: timeBase,
+		fillGaps:      fillGaps,
+		frameDuration: frameDuration,
+		timeBase:      timeBase,
 	}
 }
 
@@ -102,9 +105,9 @@ func (r *pktRestamperWithTime) Restamp(pkt *astiav.Packet) {
 	currentDTS := astiav.RescaleQ(int64(n.Sub(*r.firstAt)), nanosecondRational, r.timeBase)
 	dts := currentDTS
 	if r.fillGaps && r.lastDTS != nil {
-		if previousDTS := currentDTS - int64(r.timeBase.Num()); *r.lastDTS < previousDTS {
+		if previousDTS := currentDTS - r.frameDuration; *r.lastDTS < previousDTS {
 			dts = previousDTS
-		} else if nextDTS := currentDTS + int64(r.timeBase.Num()); *r.lastDTS == currentDTS {
+		} else if nextDTS := currentDTS + r.frameDuration; *r.lastDTS == currentDTS {
 			dts = nextDTS
 		}
 	}

@@ -39,7 +39,7 @@ func TestPktRestamperStartFromZero(t *testing.T) {
 	}
 }
 
-func TestFrameRestamperWithTime(t *testing.T) {
+func TestPktRestamperWithTime(t *testing.T) {
 	var tm time.Time
 	_now := now
 	defer func() { now = _now }()
@@ -47,7 +47,7 @@ func TestFrameRestamperWithTime(t *testing.T) {
 	pkt := astiav.AllocPacket()
 	require.NotNil(t, pkt)
 	defer pkt.Free()
-	r := NewPktRestamperWithTime(false, astiav.NewRational(1, 10))
+	r := NewPktRestamperWithTime(false, 1, astiav.NewRational(2, 20))
 	for _, v := range []pktTest{
 		{t: time.Unix(0, 0), outputDts: 0},
 		{t: time.Unix(0, 1e8), outputDts: 1},
@@ -63,7 +63,7 @@ func TestFrameRestamperWithTime(t *testing.T) {
 		require.Equal(t, v.outputDts, pkt.Dts())
 		require.Equal(t, v.outputDts, pkt.Pts())
 	}
-	r = NewPktRestamperWithTime(true, astiav.NewRational(1, 10))
+	r = NewPktRestamperWithTime(true, 1, astiav.NewRational(2, 20))
 	for _, v := range []pktTest{
 		{t: time.Unix(0, 0), outputDts: 0},
 		{t: time.Unix(0, 1e8), outputDts: 1},
