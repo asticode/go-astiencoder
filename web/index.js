@@ -4,8 +4,15 @@ var astiencoder = {
         document.addEventListener('keydown', this.onKeyDown.bind(this))
         document.addEventListener('keyup', this.onKeyUp.bind(this))
 
+        // Get params
+        const params = new URLSearchParams(window.location.search)
+
+        // Get urls
+        this.websocketUrl = params.get("websocket_url")
+        this.welcomeUrl = params.get("welcome_url")
+
         // Open websocket
-        this.openWebSocket({
+        if (this.websocketUrl && this.welcomeUrl) this.openWebSocket({
             onopen: this.onopen.bind(this),
             onmessage: this.onmessage.bind(this)
         })
@@ -17,7 +24,7 @@ var astiencoder = {
         }
 
         // Remove nodes
-        for (var name in this.nodes) {
+        for (name in this.nodes) {
             delete this.nodes[name]
         }
     },
@@ -25,7 +32,7 @@ var astiencoder = {
         // Fetch welcome
         this.sendHttp({
             method: 'GET',
-            url: '/welcome',
+            url: this.welcomeUrl,
             onsuccess: function(data) {
                 // Reset
                 this.reset()
@@ -97,7 +104,7 @@ var astiencoder = {
                     if (!n) break
 
                     // Create rollback
-                    var rollback = {}
+                    rollback = {}
                     
                     // Get name
                     switch (n.status) {
@@ -127,7 +134,7 @@ var astiencoder = {
                     break
                 case 'astiencoder.stats':    
                     // Create rollback
-                    var rollback = {
+                    rollback = {
                         name: name,
                         payload: []
                     }
@@ -250,7 +257,7 @@ var astiencoder = {
 
         // All keys match
         if (count === keys.length) {
-            for (var idx = 0; idx < keys.length; idx++) {
+            for (idx = 0; idx < keys.length; idx++) {
                 this.keys[keys[idx]] = false
             }
             return true
@@ -634,7 +641,7 @@ var astiencoder = {
             // Delete prop
             delete(obj[prop])
         },
-        set: function(obj, prop, value) {
+        set: function(obj, prop) {
             // Tag already exists
             if (typeof obj[prop] !== 'undefined') return
 
@@ -729,7 +736,7 @@ var astiencoder = {
         // Check node
         var hide = false
         var show = false
-        for (var tag in this.nodes[name].tags) {
+        for (tag in this.nodes[name].tags) {
             if (hides[tag]) hide = true
             else if (shows[tag]) show = true
         }
@@ -769,7 +776,7 @@ var astiencoder = {
 
             // Add children
             n.children = new Proxy({}, {
-                set: function(obj, prop, value) {
+                set: function(obj, prop) {
                     // Nothing changed
                     if (typeof obj[prop] !== 'undefined') return
 
@@ -1461,50 +1468,37 @@ var astiencoder = {
             this.unloadHandled = true
         }
 
-        // Send health request
-        this.sendHttp({
-            url: '/ok',
-            method: 'GET',
-            onerror: function() {
-                // Make sure to reconnect when server is down
-                setTimeout(function() {
-                    this.openWebSocket(options)
-                }.bind(this), 1000)
-            }.bind(this),
-            onsuccess: function() {
-                // Create websocket
-                this.ws = new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + '/websocket')
+        // Create websocket
+        this.ws = new WebSocket(this.websocketUrl)
     
-                // Handle open
-                var pingInterval = null
-                this.ws.onopen = function() {
-                    // Make sure to ping
-                    pingInterval = setInterval(function() {
-                        this.sendWebSocket('ping')
-                    }.bind(this), 50*1e3)
-    
-                    // Open callback
-                    options.onopen()
-                }.bind(this)
-    
-                // Handle close
-                this.ws.onclose = function() {
-                    // Cancel ping
-                    clearInterval(pingInterval)
-    
-                    // Reconnect
-                    setTimeout(function() {
-                        this.openWebSocket(options)
-                    }.bind(this), 1000)
-                }.bind(this)
-    
-                // Handle message
-                this.ws.onmessage = function(event) {
-                    var data = JSON.parse(event.data)
-                    options.onmessage(data.event_name, data.payload, false)
-                }.bind(this)
-            }.bind(this)
-        })
+        // Handle open
+        var pingInterval = null
+        this.ws.onopen = function() {
+            // Make sure to ping
+            pingInterval = setInterval(function() {
+                this.sendWebSocket('ping')
+            }.bind(this), 50*1e3)
+
+            // Open callback
+            options.onopen()
+        }.bind(this)
+
+        // Handle close
+        this.ws.onclose = function() {
+            // Cancel ping
+            clearInterval(pingInterval)
+
+            // Reconnect
+            setTimeout(function() {
+                this.openWebSocket(options)
+            }.bind(this), 1000)
+        }.bind(this)
+
+        // Handle message
+        this.ws.onmessage = function(event) {
+            var data = JSON.parse(event.data)
+            options.onmessage(data.event_name, data.payload, false)
+        }.bind(this)
     },
     sendWebSocket (name, payload) {
         if (!this.ws) return

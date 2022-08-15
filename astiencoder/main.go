@@ -51,12 +51,6 @@ func main() {
 	// Handle signals
 	e.w.HandleSignals()
 
-	// Serve
-	astikit.ServeHTTP(e.w, astikit.ServeHTTPOptions{
-		Addr:    c.Encoder.Server.Addr,
-		Handler: ws.Handler(),
-	})
-
 	// Job has been provided
 	if len(*job) > 0 {
 		// Open file

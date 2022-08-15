@@ -2,113 +2,34 @@ package astiencoder
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
-	"sync"
 
 	"github.com/asticode/go-astikit"
-	"github.com/asticode/go-astiws"
-	"github.com/gorilla/websocket"
-	"github.com/julienschmidt/httprouter"
 )
 
 type Server struct {
-	cs map[*astiws.Client]bool
-	l  astikit.SeverityLogger
-	m  *sync.Mutex // Locks cs
-	w  *Workflow
-	ws *astiws.Manager
+	l astikit.SeverityLogger
+	n ServerNotifierFunc
+	w *Workflow
 }
 
+type ServerNotifierFunc func(eventName string, payload interface{})
+
 type ServerOptions struct {
-	Logger astikit.StdLogger
+	Logger       astikit.StdLogger
+	NotifierFunc ServerNotifierFunc
 }
 
 func NewServer(o ServerOptions) *Server {
 	return &Server{
-		cs: make(map[*astiws.Client]bool),
-		l:  astikit.AdaptStdLogger(o.Logger),
-		m:  &sync.Mutex{},
-		ws: astiws.NewManager(astiws.ManagerConfiguration{MaxMessageSize: 1e6}, o.Logger),
+		l: astikit.AdaptStdLogger(o.Logger),
+		n: o.NotifierFunc,
 	}
 }
 
 func (s *Server) SetWorkflow(w *Workflow) {
 	s.w = w
-}
-
-func (s *Server) Handler() http.Handler {
-	// Create router
-	r := httprouter.New()
-
-	// Add routes
-	r.Handler(http.MethodGet, "/", s.serveHomepage())
-	r.Handler(http.MethodGet, "/ok", s.serveOK())
-	r.Handler(http.MethodGet, "/websocket", s.serveWebSocket())
-	r.Handler(http.MethodGet, "/welcome", s.serveWelcome())
-	return r
-}
-
-func (s *Server) serveOK() http.Handler {
-	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {})
-}
-
-func (s *Server) serveWebSocket() http.Handler {
-	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		if err := s.ws.ServeHTTP(rw, r, s.adaptWebSocketClient); err != nil {
-			var e *websocket.CloseError
-			if ok := errors.As(err, &e); !ok ||
-				(e.Code != websocket.CloseNoStatusReceived && e.Code != websocket.CloseNormalClosure) {
-				s.l.Error(fmt.Errorf("astiencoder: handling websocket failed: %w", err))
-			}
-			return
-		}
-	})
-}
-
-func (s *Server) adaptWebSocketClient(c *astiws.Client) (err error) {
-	// Add client
-	s.m.Lock()
-	s.cs[c] = true
-	s.m.Unlock()
-
-	// Add listeners
-	c.AddListener(astiws.EventNameDisconnect, s.webSocketDisconnected)
-	c.AddListener("ping", s.webSocketPing)
-	return
-}
-
-func (s *Server) webSocketDisconnected(c *astiws.Client, eventName string, payload json.RawMessage) error {
-	// Remove client
-	s.m.Lock()
-	delete(s.cs, c)
-	s.m.Unlock()
-	return nil
-}
-
-func (s *Server) webSocketPing(c *astiws.Client, eventName string, payload json.RawMessage) error {
-	if err := c.ExtendConnection(); err != nil {
-		s.l.Error(fmt.Errorf("astiencoder: extending ws connection failed: %w", err))
-	}
-	return nil
-}
-
-func (s *Server) sendWebSocket(eventName string, payload interface{}) {
-	// Get clients
-	var cs []*astiws.Client
-	s.m.Lock()
-	for c := range s.cs {
-		cs = append(cs, c)
-	}
-	s.m.Unlock()
-
-	// Loop through clients
-	for _, c := range cs {
-		if err := c.Write(eventName, payload); err != nil {
-			s.l.Error(fmt.Errorf("astiencoder: writing event %s with payload %+v to websocket client %p failed: %w", eventName, payload, c, err))
-		}
-	}
 }
 
 func serverEventHandlerAdapter(eh *EventHandler, fn func(name string, payload interface{})) {
@@ -144,7 +65,10 @@ func serverEventHandlerAdapter(eh *EventHandler, fn func(name string, payload in
 }
 
 func (s *Server) EventHandlerAdapter(eh *EventHandler) {
-	serverEventHandlerAdapter(eh, s.sendWebSocket)
+	if s.n == nil {
+		return
+	}
+	serverEventHandlerAdapter(eh, s.n)
 }
 
 type ServerWorkflow struct {
@@ -266,7 +190,7 @@ type ServerWelcome struct {
 	Workflow *ServerWorkflow `json:"workflow,omitempty"`
 }
 
-func (s *Server) serveWelcome() http.Handler {
+func (s *Server) ServeWelcome() http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		// Create body
 		var b ServerWelcome
