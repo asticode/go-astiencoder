@@ -102,13 +102,6 @@ header #right {
 
 header #right > div {
     display: grid;
-}
-
-header #right #top {
-    grid-template-columns: repeat(2, 1fr);
-}
-
-header #right #cpus {
     grid-template-columns: repeat(4, 1fr);
 }
 

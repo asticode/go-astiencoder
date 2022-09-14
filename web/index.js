@@ -276,8 +276,11 @@ var astiencoder = {
                 // Switch on prop
                 switch (prop) {
                     case 'astiencoder.host.usage':
-                        document.getElementById("memory-global").innerText = ''
-                        document.getElementById("cpu-global").innerText = ''
+                        document.getElementById("memory-virtual").innerText = ''
+                        document.getElementById("memory-resident").innerText = ''
+                        document.getElementById("memory-used").innerText = ''
+                        document.getElementById("memory-total").innerText = ''
+                        document.getElementById("cpu-total").innerText = ''
                         document.getElementById("cpus").innerText = ''
                         break
                 }
@@ -292,8 +295,11 @@ var astiencoder = {
                 // Switch on prop
                 switch (prop) {
                     case 'astiencoder.host.usage':
-                        if (value.value.memory.used && value.value.memory.total) document.getElementById("memory-global").innerText = (value.value.memory.used/Math.pow(1024, 3)).toFixed(2) + '/' + (value.value.memory.total/Math.pow(1024, 3)).toFixed(2) + ' GB'
-                        if (value.value.cpu.global) document.getElementById("cpu-global").innerText = value.value.cpu.global.toFixed(2) + '%'
+                        if (value.value.memory.resident) document.getElementById("memory-resident").innerText = (value.value.memory.resident/Math.pow(1024, 3)).toFixed(2)
+                        if (value.value.memory.virtual) document.getElementById("memory-virtual").innerText = (value.value.memory.virtual/Math.pow(1024, 3)).toFixed(2)
+                        if (value.value.memory.used) document.getElementById("memory-used").innerText = (value.value.memory.used/Math.pow(1024, 3)).toFixed(2)
+                        if (value.value.memory.total) document.getElementById("memory-total").innerText = (value.value.memory.total/Math.pow(1024, 3)).toFixed(2)
+                        if (value.value.cpu.total) document.getElementById("cpu-total").innerText = value.value.cpu.total.toFixed(2)
                         if (value.value.cpu.individual) {
                             var e = document.getElementById("cpus")
                             e.innerHTML = ""

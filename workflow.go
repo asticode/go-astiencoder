@@ -33,19 +33,23 @@ func NewWorkflow(ctx context.Context, name string, eh *EventHandler, tf CreateTa
 		Label:       "root",
 		Name:        "root",
 	}}, c, eh, s, w, EventTypeToWorkflowEventName)
-
-	// Add stats
-	w.addStats()
 	return
 }
 
-func (w *Workflow) addStats() {
-	w.bn.AddStats([]astikit.StatOptions{{
-		Handler: newStatPSUtil(),
-		Metadata: &astikit.StatMetadata{
-			Name: StatNameHostUsage,
-		},
-	}}...)
+func (w *Workflow) AddDefaultStats() (err error) {
+	// Create ps util
+	var u *statPSUtil
+	if u, err = newStatPSUtil(); err != nil {
+		err = fmt.Errorf("astiencoder: creating ps util failed: %w", err)
+		return
+	}
+
+	// Add host usage stat
+	w.bn.AddStats(astikit.StatOptions{
+		Handler:  u,
+		Metadata: &astikit.StatMetadata{Name: StatNameHostUsage},
+	})
+	return
 }
 
 // Name returns the workflow name

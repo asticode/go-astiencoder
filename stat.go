@@ -2,6 +2,8 @@ package astiencoder
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -9,6 +11,7 @@ import (
 	"github.com/asticode/go-astikit"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
+	"github.com/shirou/gopsutil/v3/process"
 )
 
 const (
@@ -116,21 +119,32 @@ type statHostUsage struct {
 }
 
 type statHostUsageCPU struct {
-	Global     float64   `json:"global"`
 	Individual []float64 `json:"individual"`
+	Total      float64   `json:"total"`
 }
 
 type statHostUsageMemory struct {
-	Total uint64 `json:"total"`
-	Used  uint64 `json:"used"`
+	Resident uint64 `json:"resident"`
+	Total    uint64 `json:"total"`
+	Used     uint64 `json:"used"`
+	Virtual  uint64 `json:"virtual"`
 }
 
 type statPSUtil struct {
+	p       *process.Process
 	started uint32
 }
 
-func newStatPSUtil() *statPSUtil {
-	return &statPSUtil{}
+func newStatPSUtil() (u *statPSUtil, err error) {
+	// Create util
+	u = &statPSUtil{}
+
+	// Create process
+	if u.p, err = process.NewProcess(int32(os.Getpid())); err != nil {
+		err = fmt.Errorf("astiencoder: creating process failed: %w", err)
+		return
+	}
+	return
 }
 
 func (s *statPSUtil) Start() {
@@ -149,17 +163,21 @@ func (s *statPSUtil) Value(delta time.Duration) interface{} {
 
 	// Get CPU
 	var v statHostUsage
-	if vs, err := cpu.Percent(0, false); err == nil && len(vs) > 0 {
-		v.CPU.Global = vs[0]
-	}
 	if vs, err := cpu.Percent(0, true); err == nil {
 		v.CPU.Individual = vs
 	}
+	if vs, err := cpu.Percent(0, false); err == nil && len(vs) > 0 {
+		v.CPU.Total = vs[0]
+	}
 
 	// Get memory
-	if vv, err := mem.VirtualMemory(); err == nil {
-		v.Memory.Total = vv.Total
-		v.Memory.Used = vv.Used
+	if i, err := s.p.MemoryInfo(); err == nil {
+		v.Memory.Resident = i.RSS
+		v.Memory.Virtual = i.VMS
+	}
+	if s, err := mem.VirtualMemory(); err == nil {
+		v.Memory.Total = s.Total
+		v.Memory.Used = s.Used
 	}
 	return v
 }

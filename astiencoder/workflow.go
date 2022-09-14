@@ -18,6 +18,12 @@ func addWorkflow(name string, j Job, e *encoder) (w *astiencoder.Workflow, c *as
 	// Create workflow
 	w = astiencoder.NewWorkflow(e.w.Context(), name, e.eh, e.w.NewTask, c, e.s)
 
+	// Add default stats
+	if err = w.AddDefaultStats(); err != nil {
+		err = fmt.Errorf("main: adding default stats failed: %w", err)
+		return
+	}
+
 	// Build workflow
 	b := newBuilder()
 	if err = b.buildWorkflow(j, w, e.eh, c, e.s); err != nil {

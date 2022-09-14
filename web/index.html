@@ -22,10 +22,20 @@
             </div>            
         </div>
         <div id="right">
-            <div id="top">
-                <div>CPU: <span id="cpu-global"></span></div>
-                <div>Memory: <span id="memory-global"></span></div>
-            </div>
+            <table>
+                <tr>
+                    <td>Process memory</td>
+                    <td><span id="memory-resident"></span>/<span id="memory-virtual"></span>GB</td>
+                </tr>
+                <tr>
+                    <td>Total memory</td>
+                    <td><span id="memory-used"></span>/<span id="memory-total"></span>GB</td>
+                </tr>
+                <tr>
+                    <td>Total CPU</td>
+                    <td><span id="cpu-total"></span>%</td>
+                </tr>
+            </table>
             <div id="cpus"></div>
         </div>
     </header>
