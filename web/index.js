@@ -7,6 +7,9 @@ var astiencoder = {
         // Get params
         const params = new URLSearchParams(window.location.search)
 
+        // Init nodes position refresher
+        this.initNodesPositionRefresher()
+
         // Get urls
         this.websocketUrl = params.get("websocket_url")
         this.welcomeUrl = params.get("welcome_url")
@@ -968,91 +971,243 @@ var astiencoder = {
             return true
         }
     }),
-    refreshNodesPosition () {
-        // Reset
-        document.getElementById('nodes').innerHTML = ''
+    apply (name, payload) {
+        if (this.workflow.name === name) this.applyToWorkflow(payload)
+        else this.applyToNode(name, payload)
+    },
+    applyToWorkflow (payload) {
+        // Stat
+        if (payload.stat) {
+            this.workflow.stats[payload.stat.name] = payload.stat
+        }
+    },
+    applyToNode (name, payload) {
+        // Add node
+        // If node already exists, it will do nothing
+        this.nodes[name] = payload
 
-        // Create svg
-        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
-        document.getElementById('nodes').appendChild(svg)
+        // Children
+        if (payload.children) {
+            payload.children.forEach(function(item) {
+                // Update node
+                this.nodes[name].children[item] = true
 
-        // Get levels
-        var processedNodes = {}, total = Object.keys(this.nodes).length, levels = []
-        while (Object.keys(processedNodes).length < total) {
-            // Loop through nodes
-            var level = [], tempLevel = {}
-            for (var name in this.nodes) {
-                // Already processed
-                if (processedNodes[name]) continue
-
-                // There are no levels yet, we check nodes with no parents
-                if (levels.length === 0) {
-                    if (Object.keys(this.nodes[name].parents).length === 0) level.push(this.nodes[name])
-                    continue
-                }
-                
-                // Loop through previous level nodes
-                levels[levels.length-1].forEach(item => {
-                    if (this.nodes[name].parents[item.name]) tempLevel[name] = this.nodes[name]
-                })
-            }
-
-            // Move children in the same zone as their parent
-            if (levels.length > 0 && Object.keys(tempLevel).length > 0) {
-                // Loop through previous level nodes
-                levels[levels.length - 1].forEach(item => {
-                    // Loop through children
-                    for (var k in item.children) {
-                        const c = tempLevel[k]
-                        if (c) {
-                            level.push(c)
-                            delete tempLevel[k]
-                        }
-                    }
-                })
-            }
-
-            // No nodes in level
-            // This shouldn't happen but we want to avoid infinite loops
-            if (level.length === 0) break
-
-            // Append level
-            levels.push(level)
-            level.forEach(node => processedNodes[node.name] = true)
+                // Update child
+                const c = this.nodes[item]
+                if (c) c.parents[name] = true
+            }.bind(this))
         }
 
-        // Loop through levels
-        levels.forEach(level => {
-            // Create wrapper
-            const lw = document.createElement('div')
+        // Removed children
+        if (payload.childrenRemoved) {
+            payload.childrenRemoved.forEach(function(item) {
+                // Update node
+                delete this.nodes[name].children[item]
 
-            // Loop through level items
-            level.forEach(item => {
-                // Node is not displayed
-                if (!item.displayed()) return
+                // Update child
+                const c = this.nodes[item]
+                if (c) delete c.parents[name]
+            }.bind(this))
+        }
 
-                // Append wrapper
-                lw.appendChild(item.dom.w)
+        // Closed
+        if (typeof payload.closed !== 'undefined') this.nodes[name].closed = payload.closed
 
-                // Loop through children
-                for (var c in item.children) {
-                    // Node is not displayed
-                    const n = this.nodes[c]
-                    if (!n || !n.displayed()) continue
+        // Description
+        if (payload.description) this.nodes[name].description = payload.description
 
-                    // Append arrow
-                    svg.appendChild(item.children[c].arrow.line)
-                    svg.appendChild(item.children[c].arrow.head.line1)
-                    svg.appendChild(item.children[c].arrow.head.line2)
+        // Label
+        if (payload.label) this.nodes[name].label = payload.label
+
+        // Name
+        if (payload.name) this.nodes[name].name = payload.name
+
+        // Parents
+        if (payload.parents) {
+            payload.parents.forEach(function(item) {
+                // Update node
+                this.nodes[name].parents[item] = true
+
+                // Update parent
+                const p = this.nodes[item]
+                if (p) p.children[name] = true
+            }.bind(this))
+        }
+
+        // Stat
+        if (payload.stat) {
+            // Add stat
+            // If stat already exists, it will do nothing
+            this.nodes[name].stats[payload.stat.label] = payload.stat
+
+            // Description
+            if (payload.stat.description) this.nodes[name].stats[payload.stat.label].description = payload.stat.description
+
+            // Label
+            if (payload.stat.label) this.nodes[name].stats[payload.stat.label].label = payload.stat.label
+
+            // Unit
+            // Process unit before value since we need the updated unit when handling the value
+            if (payload.stat.unit) this.nodes[name].stats[payload.stat.label].unit = payload.stat.unit
+
+            // Value
+            if (typeof payload.stat.value !== 'undefined') {
+                var v = payload.stat.value
+                var f = parseFloat(v)
+                if (!isNaN(f)) {
+                    switch (this.nodes[name].stats[payload.stat.label].unit) {
+                        case 'bps':
+                            if (f > 1e9) {
+                                f /= 1e9
+                                this.nodes[name].stats[payload.stat.label].unit = 'Gbps'
+                            } else if (f > 1e6) {
+                                f /= 1e6
+                                this.nodes[name].stats[payload.stat.label].unit = 'Mbps'
+                            } else if (f > 1e3) {
+                                f /= 1e3
+                                this.nodes[name].stats[payload.stat.label].unit = 'kbps'
+                            }
+                            break
+                        case 'ns':
+                            if (f > 1e9 || f < -1e9) {
+                                f /= 1e9
+                                this.nodes[name].stats[payload.stat.label].unit = 's'
+                            } else if (f > 1e6 || f < -1e6) {
+                                f /= 1e6
+                                this.nodes[name].stats[payload.stat.label].unit = 'ms'
+                            } else if (f > 1e3 || f < -1e3) {
+                                f /= 1e3
+                                this.nodes[name].stats[payload.stat.label].unit = 'µs'
+                            }
+                            break
+                    }
+                    f = f.toFixed(2)
+                    if (f < 10 && f >= 0) f = '0' + f
+                    else if (f > -10 && f < 0) f = '-0' + (-f)
+                    if (this.nodes[name].stats[payload.stat.label].unit === '%') {
+                        if (f >= 1000) f = '+∞'
+                        else if (f <= -1000) f = '-∞'
+                    }
                 }
-            })
+                this.nodes[name].stats[payload.stat.label].value = f
+            }
+        }
 
-            // Append wrapper
-            document.getElementById('nodes').appendChild(lw)
-        })
-        
-        // Refresh size
-        this.refreshNodesSize()
+        // Status
+        if (payload.status) this.nodes[name].status = payload.status
+
+        // Tags
+        if (payload.tags) {
+            // Loop through tags
+            payload.tags.forEach(function(item) {
+                this.nodes[name].tags[item] = true
+            }.bind(this))
+        }
+    },
+
+    /* nodes position refresher */
+    initNodesPositionRefresher () {
+        this.nodesPositionRefresher = {
+            a: new Uint8Array(1),
+            f: function() {
+                // Reset
+                document.getElementById('nodes').innerHTML = ''
+
+                // Create svg
+                const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+                document.getElementById('nodes').appendChild(svg)
+
+                // Get levels
+                var processedNodes = {}, total = Object.keys(this.nodes).length, levels = []
+                while (Object.keys(processedNodes).length < total) {
+                    // Loop through nodes
+                    var level = [], tempLevel = {}
+                    for (var name in this.nodes) {
+                        // Already processed
+                        if (processedNodes[name]) continue
+
+                        // There are no levels yet, we check nodes with no parents
+                        if (levels.length === 0) {
+                            if (Object.keys(this.nodes[name].parents).length === 0) level.push(this.nodes[name])
+                            continue
+                        }
+                        
+                        // Loop through previous level nodes
+                        levels[levels.length-1].forEach(item => {
+                            if (this.nodes[name].parents[item.name]) tempLevel[name] = this.nodes[name]
+                        })
+                    }
+
+                    // Move children in the same zone as their parent
+                    if (levels.length > 0 && Object.keys(tempLevel).length > 0) {
+                        // Loop through previous level nodes
+                        levels[levels.length - 1].forEach(item => {
+                            // Loop through children
+                            for (var k in item.children) {
+                                const c = tempLevel[k]
+                                if (c) {
+                                    level.push(c)
+                                    delete tempLevel[k]
+                                }
+                            }
+                        })
+                    }
+
+                    // No nodes in level
+                    // This shouldn't happen but we want to avoid infinite loops
+                    if (level.length === 0) break
+
+                    // Append level
+                    levels.push(level)
+                    level.forEach(node => processedNodes[node.name] = true)
+                }
+
+                // Loop through levels
+                levels.forEach(level => {
+                    // Create wrapper
+                    const lw = document.createElement('div')
+
+                    // Loop through level items
+                    level.forEach(item => {
+                        // Node is not displayed
+                        if (!item.displayed()) return
+
+                        // Append wrapper
+                        lw.appendChild(item.dom.w)
+
+                        // Loop through children
+                        for (var c in item.children) {
+                            // Node is not displayed
+                            const n = this.nodes[c]
+                            if (!n || !n.displayed()) continue
+
+                            // Append arrow
+                            svg.appendChild(item.children[c].arrow.line)
+                            svg.appendChild(item.children[c].arrow.head.line1)
+                            svg.appendChild(item.children[c].arrow.head.line2)
+                        }
+                    })
+
+                    // Append wrapper
+                    document.getElementById('nodes').appendChild(lw)
+                })
+                
+                // Refresh size
+                this.refreshNodesSize()
+            }.bind(this),
+            i: setInterval(function() {
+                // Nothing to do
+                if (Atomics.compareExchange(this.nodesPositionRefresher.a, 0, 1, 0) === 0) {
+                    return
+                }
+
+                // Refresh nodes position
+                this.nodesPositionRefresher.f()
+            }.bind(this), 50)
+        }
+    },
+    refreshNodesPosition () {
+        Atomics.store(this.nodesPositionRefresher.a, 0, 1)
     },
     refreshNodesSize () {
         // Get zoom ratio
@@ -1255,139 +1410,6 @@ var astiencoder = {
             levelWidths,
             totalHeight,
             totalWidth
-        }
-    },
-    apply (name, payload) {
-        if (this.workflow.name === name) this.applyToWorkflow(payload)
-        else this.applyToNode(name, payload)
-    },
-    applyToWorkflow (payload) {
-        // Stat
-        if (payload.stat) {
-            this.workflow.stats[payload.stat.name] = payload.stat
-        }
-    },
-    applyToNode (name, payload) {
-        // Add node
-        // If node already exists, it will do nothing
-        this.nodes[name] = payload
-
-        // Children
-        if (payload.children) {
-            payload.children.forEach(function(item) {
-                // Update node
-                this.nodes[name].children[item] = true
-
-                // Update child
-                const c = this.nodes[item]
-                if (c) c.parents[name] = true
-            }.bind(this))
-        }
-
-        // Removed children
-        if (payload.childrenRemoved) {
-            payload.childrenRemoved.forEach(function(item) {
-                // Update node
-                delete this.nodes[name].children[item]
-
-                // Update child
-                const c = this.nodes[item]
-                if (c) delete c.parents[name]
-            }.bind(this))
-        }
-
-        // Closed
-        if (typeof payload.closed !== 'undefined') this.nodes[name].closed = payload.closed
-
-        // Description
-        if (payload.description) this.nodes[name].description = payload.description
-
-        // Label
-        if (payload.label) this.nodes[name].label = payload.label
-
-        // Name
-        if (payload.name) this.nodes[name].name = payload.name
-
-        // Parents
-        if (payload.parents) {
-            payload.parents.forEach(function(item) {
-                // Update node
-                this.nodes[name].parents[item] = true
-
-                // Update parent
-                const p = this.nodes[item]
-                if (p) p.children[name] = true
-            }.bind(this))
-        }
-
-        // Stat
-        if (payload.stat) {
-            // Add stat
-            // If stat already exists, it will do nothing
-            this.nodes[name].stats[payload.stat.label] = payload.stat
-
-            // Description
-            if (payload.stat.description) this.nodes[name].stats[payload.stat.label].description = payload.stat.description
-
-            // Label
-            if (payload.stat.label) this.nodes[name].stats[payload.stat.label].label = payload.stat.label
-
-            // Unit
-            // Process unit before value since we need the updated unit when handling the value
-            if (payload.stat.unit) this.nodes[name].stats[payload.stat.label].unit = payload.stat.unit
-
-            // Value
-            if (typeof payload.stat.value !== 'undefined') {
-                var v = payload.stat.value
-                var f = parseFloat(v)
-                if (!isNaN(f)) {
-                    switch (this.nodes[name].stats[payload.stat.label].unit) {
-                        case 'bps':
-                            if (f > 1e9) {
-                                f /= 1e9
-                                this.nodes[name].stats[payload.stat.label].unit = 'Gbps'
-                            } else if (f > 1e6) {
-                                f /= 1e6
-                                this.nodes[name].stats[payload.stat.label].unit = 'Mbps'
-                            } else if (f > 1e3) {
-                                f /= 1e3
-                                this.nodes[name].stats[payload.stat.label].unit = 'kbps'
-                            }
-                            break
-                        case 'ns':
-                            if (f > 1e9 || f < -1e9) {
-                                f /= 1e9
-                                this.nodes[name].stats[payload.stat.label].unit = 's'
-                            } else if (f > 1e6 || f < -1e6) {
-                                f /= 1e6
-                                this.nodes[name].stats[payload.stat.label].unit = 'ms'
-                            } else if (f > 1e3 || f < -1e3) {
-                                f /= 1e3
-                                this.nodes[name].stats[payload.stat.label].unit = 'µs'
-                            }
-                            break
-                    }
-                    f = f.toFixed(2)
-                    if (f < 10 && f >= 0) f = '0' + f
-                    else if (f > -10 && f < 0) f = '-0' + (-f)
-                    if (this.nodes[name].stats[payload.stat.label].unit === '%') {
-                        if (f >= 1000) f = '+∞'
-                        else if (f <= -1000) f = '-∞'
-                    }
-                }
-                this.nodes[name].stats[payload.stat.label].value = f
-            }
-        }
-
-        // Status
-        if (payload.status) this.nodes[name].status = payload.status
-
-        // Tags
-        if (payload.tags) {
-            // Loop through tags
-            payload.tags.forEach(function(item) {
-                this.nodes[name].tags[item] = true
-            }.bind(this))
         }
     },
 
