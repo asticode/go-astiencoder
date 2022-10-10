@@ -24,6 +24,7 @@ type Context struct {
 	// Audio
 	ChannelLayout astiav.ChannelLayout
 	Channels      int
+	FrameSize     int
 	SampleFormat  astiav.SampleFormat
 	SampleRate    int
 
@@ -111,6 +112,7 @@ func NewContextFromStream(s *astiav.Stream) (ctx Context) {
 		// Audio
 		ChannelLayout: cp.ChannelLayout(),
 		Channels:      cp.Channels(),
+		FrameSize:     cp.FrameSize(),
 		SampleFormat:  cp.SampleFormat(),
 		SampleRate:    cp.SampleRate(),
 
