@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -24,25 +23,143 @@ type Demuxer struct {
 	*astiencoder.BaseNode
 	d                     *pktDispatcher
 	eh                    *astiencoder.EventHandler
-	emulateRate           bool
+	er                    *demuxerEmulateRate
 	formatContext         *astiav.FormatContext
 	interruptRet          *int
-	l                     *demuxerLooper
-	loop                  uint32
+	l                     *demuxerLoop
 	p                     *pktPool
+	pb                    *demuxerProbe
 	readFrameErrorHandler DemuxerReadFrameErrorHandler
 	ss                    map[int]*demuxerStream
 	statIncomingRate      *astikit.CounterRateStat
 }
 
-type DemuxerReadFrameErrorHandler func(d *Demuxer, err error) (stop, handled bool)
+// Demuxer will start by dispatching without sleeping all packets with negative PTS
+// followed by n seconds of packets so that next nodes (e.g. the decoder) have a sufficient
+// buffer to do their work properly (e.g. decoders don't output frames until their PTS is
+// positive). After that, Demuxer sleeps between packets based on their DTS.
+type DemuxerEmulateRateOptions struct {
+	// BufferDuration represents the duration of packets with positive PTS dispatched at the
+	// start without sleeping.
+	// Defaults to 2s
+	BufferDuration time.Duration
+	Enabled        bool
+}
+
+type demuxerEmulateRate struct {
+	bufferDuration time.Duration
+	enabled        bool
+}
+
+func newDemuxerEmulateRate(o DemuxerEmulateRateOptions) *demuxerEmulateRate {
+	r := &demuxerEmulateRate{
+		bufferDuration: o.BufferDuration,
+		enabled:        o.Enabled,
+	}
+	if r.bufferDuration <= 0 {
+		r.bufferDuration = 2 * time.Second
+	}
+	return r
+}
+
+// Demuxer will seek back to the start of the input when eof is reached
+// In this case the packets are restamped
+type DemuxerLoopOptions struct {
+	Enabled bool
+}
+
+type demuxerLoop struct {
+	// Number of time it has looped
+	cycleCount uint
+	// Duration of one loop cycle
+	cycleDuration time.Duration
+	enabled       uint32
+}
+
+func newDemuxerLoop(o DemuxerLoopOptions) *demuxerLoop {
+	return &demuxerLoop{enabled: astikit.BoolToUInt32(o.Enabled)}
+}
+
+type DemuxerProbeInfo struct {
+	FirstPTS DemuxerProbeInfoFirstPTS
+}
+
+type DemuxerProbeInfoFirstPTS struct {
+	// Streams whose first pts is the same as the overall first pts.
+	// Indexed by stream index
+	Streams  map[int]bool
+	Timebase astiav.Rational
+	Value    int64
+}
+
+func (i DemuxerProbeInfo) PTSReference() PTSReference {
+	return PTSReference{
+		PTS:      i.FirstPTS.Value,
+		Time:     time.Now(),
+		TimeBase: i.FirstPTS.Timebase,
+	}
+}
+
+type demuxerProbe struct {
+	data     []*astiav.Packet
+	duration time.Duration
+	info     *DemuxerProbeInfo
+}
+
+func newDemuxerProbe(duration time.Duration) *demuxerProbe {
+	p := &demuxerProbe{duration: duration}
+	if p.duration <= 0 {
+		p.duration = 2 * time.Second
+	}
+	return p
+}
+
+type demuxerStreamEmulateRate struct {
+	bufferDuration time.Duration
+	referenceTime  time.Time
+	// In stream timebase
+	referenceTS int64
+}
+
+func (d *Demuxer) newDemuxerStreamEmulateRate(s *demuxerStream) *demuxerStreamEmulateRate {
+	return &demuxerStreamEmulateRate{bufferDuration: d.er.bufferDuration}
+}
+
+type demuxerStreamLoop struct {
+	cycleFirstPktPTS          *int64
+	cycleFirstPktPTSRemainder time.Duration
+	cycleLastPktDuration      time.Duration
+	cycleLastPktPTS           int64
+	restampRemainder          time.Duration
+}
+
+func newDemuxerStreamLoop() *demuxerStreamLoop {
+	return &demuxerStreamLoop{}
+}
 
 type demuxerStream struct {
 	ctx Context
 	d   Descriptor
-	e   *demuxerRateEmulator
-	pd  *pktDurationer
+	er  *demuxerStreamEmulateRate
+	l   *demuxerStreamLoop
 	s   *astiav.Stream
+}
+
+func (d *Demuxer) newDemuxerStream(s *astiav.Stream) *demuxerStream {
+	// Create ctx
+	ctx := NewContextFromStream(s)
+
+	// Create demuxer stream
+	ds := &demuxerStream{
+		ctx: ctx,
+		d:   ctx.Descriptor(),
+		l:   newDemuxerStreamLoop(),
+		s:   s,
+	}
+
+	// Create rate emulator
+	ds.er = d.newDemuxerStreamEmulateRate(ds)
+	return ds
 }
 
 func (d *demuxerStream) stream() *Stream {
@@ -54,25 +171,26 @@ func (d *demuxerStream) stream() *Stream {
 	}
 }
 
+type DemuxerReadFrameErrorHandler func(d *Demuxer, err error) (stop, handled bool)
+
 // DemuxerOptions represents demuxer options
 type DemuxerOptions struct {
 	// String content of the demuxer as you would use in ffmpeg
 	Dictionary *Dictionary
-	// If true, the demuxer will sleep between packets for the exact duration of the packet
-	EmulateRate bool
-	// Max duration of continuous packets of the same stream the demuxer receives has to be
-	// inferior to this value.
-	// Defaults to 1s
-	EmulateRateBufferDuration time.Duration
+	// Emulate rate options
+	EmulateRate DemuxerEmulateRateOptions
 	// Exact input format
 	Format *astiav.InputFormat
-	// If true, at the end of the input the demuxer will seek to its beginning and start over
-	// In this case the packets are restamped
-	Loop bool
+	// Loop options
+	Loop DemuxerLoopOptions
 	// Basic node options
 	Node astiencoder.NodeOptions
 	// Context used to cancel probing
 	ProbeCtx context.Context
+	// In order to emulate rate or loop properly, Demuxer needs to probe data.
+	// ProbeDuration represents the duration the Demuxer will probe.
+	// Defaults to 2s
+	ProbeDuration time.Duration
 	// Custom read frame error handler
 	// If handled is false, default error handling will be executed
 	ReadFrameErrorHandler DemuxerReadFrameErrorHandler
@@ -89,7 +207,9 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	// Create demuxer
 	d = &Demuxer{
 		eh:                    eh,
-		emulateRate:           o.EmulateRate,
+		er:                    newDemuxerEmulateRate(o.EmulateRate),
+		l:                     newDemuxerLoop(o.Loop),
+		pb:                    newDemuxerProbe(o.ProbeDuration),
 		readFrameErrorHandler: o.ReadFrameErrorHandler,
 		ss:                    make(map[int]*demuxerStream),
 		statIncomingRate:      astikit.NewCounterRateStat(),
@@ -97,11 +217,6 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Create base node
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, d, astiencoder.EventTypeToNodeEventName)
-
-	// Update loop
-	if o.Loop {
-		d.loop = 1
-	}
 
 	// Create pkt pool
 	d.p = newPktPool(d)
@@ -179,27 +294,118 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		return
 	}
 
-	// Loop through streams
+	// Create streams
 	for _, s := range d.formatContext.Streams() {
-		// Create demuxer stream
-		ds := &demuxerStream{
-			ctx: NewContextFromStream(s),
-			s:   s,
-		}
-		ds.d = ds.ctx.Descriptor()
-
-		// Create rate emulator
-		ds.e = newDemuxerRateEmulator(o.EmulateRateBufferDuration, d.d, d.eh, d.p, ds)
-
-		// Create pkt durationer
-		ds.pd = newPktDurationer(ds.ctx)
-
-		// Store stream
-		d.ss[s.Index()] = ds
+		d.ss[s.Index()] = d.newDemuxerStream(s)
 	}
 
-	// Create looper
-	d.l = newDemuxerLooper(d.ss)
+	// Probe
+	if d.er.enabled || atomic.LoadUint32(&d.l.enabled) > 0 {
+		if err = d.probe(); err != nil {
+			err = fmt.Errorf("astilibav: probing failed: %w", err)
+			return
+		}
+	}
+	return
+}
+
+// Probes the starting pkts of a duration equivalent to probeDuration to retrieve
+// the first overall PTS and the streams whose first PTS is the same as the first
+// overall PTS
+// We don't stop before probeDuration in case the smallest PTS is not in the
+// first pkt.
+func (d *Demuxer) probe() (err error) {
+	// Loop
+	firstPTSs := make(map[*demuxerStream]int64)
+	for {
+		// Get pkt from pool
+		pkt := d.p.get()
+
+		// Read frame
+		if errReadFrame := d.formatContext.ReadFrame(pkt); errReadFrame != nil {
+			// Make sure to close pkt
+			d.p.put(pkt)
+
+			// We've reached eof but we have enough information
+			if errors.Is(errReadFrame, astiav.ErrEof) && len(firstPTSs) > 0 {
+				break
+			}
+
+			// We don't have enough information
+			err = fmt.Errorf("asilibav: reading frame failed: %w", errReadFrame)
+			return
+		}
+
+		// Add pkt to probe data
+		d.pb.data = append(d.pb.data, pkt)
+
+		// Invalid timestamps
+		// Only frames with PTS >= 0 get out of decoders
+		if pkt.Pts() == astiav.NoPtsValue || pkt.Pts() < 0 {
+			continue
+		}
+
+		// Get stream
+		s, ok := d.ss[pkt.StreamIndex()]
+		if !ok {
+			continue
+		}
+
+		// Get pts
+		pts := pkt.Pts()
+
+		// Process pkt side data
+		if skippedStart, _ := d.processPktSideData(pkt, s); skippedStart > 0 {
+			// Get duration
+			sd, _ := durationToTimeBase(skippedStart, s.ctx.TimeBase)
+
+			// Update pts
+			pts += sd
+		}
+
+		// Update first pts
+		if firstPTS, ok := firstPTSs[s]; ok {
+			if pts < firstPTS {
+				firstPTSs[s] = pts
+			}
+		} else {
+			firstPTSs[s] = pts
+		}
+
+		// We've reached probe duration
+		if time.Duration(astiav.RescaleQ(pts-firstPTSs[s], s.ctx.TimeBase, nanosecondRational)) > d.pb.duration {
+			break
+		}
+	}
+
+	// Get first overall PTS in nanosecond timebase
+	var firstPTS *int64
+	for s, v := range firstPTSs {
+		pts := astiav.RescaleQ(v, s.ctx.TimeBase, nanosecondRational)
+		if firstPTS == nil {
+			firstPTS = astikit.Int64Ptr(pts)
+		} else if pts < *firstPTS {
+			*firstPTS = pts
+		}
+	}
+
+	// Update probe info
+	d.pb.info = &DemuxerProbeInfo{FirstPTS: DemuxerProbeInfoFirstPTS{
+		Streams:  make(map[int]bool),
+		Timebase: nanosecondRational,
+		Value:    *firstPTS,
+	}}
+	for s, v := range firstPTSs {
+		pts := astiav.RescaleQ(v, s.ctx.TimeBase, nanosecondRational)
+		if pts == *firstPTS {
+			d.pb.info.FirstPTS.Streams[s.s.Index()] = true
+		}
+	}
+
+	// Update streams emulate rate reference timestamp
+	for _, s := range d.ss {
+		s.er.referenceTS = astiav.RescaleQ(*firstPTS, nanosecondRational, s.ctx.TimeBase)
+	}
 	return
 }
 
@@ -220,12 +426,12 @@ func (d *Demuxer) addStats() {
 	d.BaseNode.AddStats(ss...)
 }
 
+func (d *Demuxer) ProbeInfo() *DemuxerProbeInfo {
+	return d.pb.info
+}
+
 func (d *Demuxer) SetLoop(loop bool) {
-	var v uint32
-	if loop {
-		v = 1
-	}
-	atomic.StoreUint32(&d.loop, v)
+	atomic.StoreUint32(&d.l.enabled, astikit.BoolToUInt32(loop))
 }
 
 // Streams returns the streams ordered by index
@@ -292,30 +498,24 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 			*d.interruptRet = 1
 		}()
 
-		// Emulate rate
-		wg := &sync.WaitGroup{}
-		if d.emulateRate {
+		// Update emulate rate time references
+		if d.er.enabled {
+			// Create reference time
+			referenceTime := time.Now().Add(-d.er.bufferDuration)
+
 			// Loop through streams
 			for _, s := range d.ss {
-				// Execute the rest in a goroutine
-				wg.Add(1)
-				go func(e *demuxerRateEmulator) {
-					// Make sure to mark task as done
-					defer wg.Done()
-
-					// Make sure to stop rate emulator
-					defer e.stop()
-
-					// Start rate emulator
-					e.start(d.Context())
-				}(s.e)
+				// Update stream reference time
+				if s.er.referenceTime.IsZero() {
+					s.er.referenceTime = referenceTime
+				}
 			}
 		}
 
 		// Loop
 		for {
 			// Read frame
-			if stop := d.readFrame(d.Context()); stop {
+			if stop := d.readFrame(); stop {
 				break
 			}
 
@@ -327,40 +527,52 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 				break
 			}
 		}
-
-		// Wait for rate emulators
-		wg.Wait()
-
-		// Reset looper
-		d.l.reset()
 	})
 }
 
-func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
+func (d *Demuxer) nextPkt() (pkt *astiav.Packet, handle, stop bool) {
+	// Check probe data first
+	if len(d.pb.data) > 0 {
+		pkt = d.pb.data[0]
+		d.pb.data = d.pb.data[1:]
+		handle = true
+		return
+	}
+
 	// Get pkt from pool
-	pkt := d.p.get()
-	defer d.p.put(pkt)
+	pkt = d.p.get()
 
 	// Read frame
 	if err := d.formatContext.ReadFrame(pkt); err != nil {
-		if atomic.LoadUint32(&d.loop) > 0 && errors.Is(err, astiav.ErrEof) {
-			// Let the looper know we're looping
-			d.l.looping()
+		if atomic.LoadUint32(&d.l.enabled) > 0 && errors.Is(err, astiav.ErrEof) {
+			// Loop
+			d.loop()
+
+			// Get seek information
+			seekStreamIdx := -1
+			seekTimestamp := d.formatContext.StartTime()
+			if d.pb.info != nil {
+				// Loop through streams
+				for idx := range d.pb.info.FirstPTS.Streams {
+					// Get stream
+					s, ok := d.ss[idx]
+					if !ok {
+						continue
+					}
+
+					// Update
+					seekStreamIdx = s.ctx.Index
+					seekTimestamp = astiav.RescaleQ(d.pb.info.FirstPTS.Value, d.pb.info.FirstPTS.Timebase, s.ctx.TimeBase)
+					break
+				}
+			}
 
 			// Seek to start
-			if err = d.formatContext.SeekFrame(-1, d.formatContext.StartTime(), astiav.NewSeekFlags(astiav.SeekFlagBackward)); err != nil {
+			if err = d.formatContext.SeekFrame(seekStreamIdx, seekTimestamp, astiav.NewSeekFlags(astiav.SeekFlagBackward)); err != nil {
 				emitError(d, d.eh, err, "seeking to frame")
 				stop = true
 			}
 		} else {
-			// Let the rate emulators know we've reached EOF
-			if d.emulateRate && errors.Is(err, astiav.ErrEof) {
-				// Loop through streams
-				for _, s := range d.ss {
-					s.e.eof()
-				}
-			}
-
 			// Custom error handler
 			if d.readFrameErrorHandler != nil {
 				var handled bool
@@ -378,261 +590,168 @@ func (d *Demuxer) readFrame(ctx context.Context) (stop bool) {
 		return
 	}
 
+	// Pkt should be handled
+	handle = true
+	return
+}
+
+func (d *Demuxer) readFrame() bool {
+	// Get next pkt
+	pkt, handle, stop := d.nextPkt()
+
+	// First, make sure pkt is properly closed
+	defer d.p.put(pkt)
+
+	// Stop
+	if stop {
+		return true
+	} else if !handle {
+		return false
+	}
+
 	// Increment incoming rate
 	d.statIncomingRate.Add(float64(pkt.Size() * 8))
 
+	// Handle pkt
+	d.handlePkt(pkt)
+	return false
+}
+
+func (d *Demuxer) handlePkt(pkt *astiav.Packet) {
 	// Get stream
 	s, ok := d.ss[pkt.StreamIndex()]
 	if !ok {
 		return
 	}
 
-	// Handle pkt duration
-	previousDuration := s.pd.handlePkt(pkt)
-
-	// Handle loop
-	d.l.handlePkt(pkt, &previousDuration)
-
-	// Emulate rate
-	if d.emulateRate {
-		// Handle rate emulation
-		s.e.handlePkt(ctx, pkt, previousDuration)
-	} else {
-		// Dispatch pkt
-		d.d.dispatch(pkt, s.d)
-	}
-	return
-}
-
-type demuxerLooper struct {
-	ss map[int]*demuxerLooperStream // Indexed by stream index
-}
-
-type demuxerLooperStream struct {
-	duration         int64
-	durationD        time.Duration
-	lastDuration     int64
-	restampDelta     int64
-	restampRemainder time.Duration
-	s                *demuxerStream
-}
-
-func newDemuxerLooperStream(s *demuxerStream) *demuxerLooperStream {
-	return &demuxerLooperStream{
-		s: s,
-	}
-}
-
-func newDemuxerLooper(ss map[int]*demuxerStream) (l *demuxerLooper) {
-	// Create looper
-	l = &demuxerLooper{
-		ss: make(map[int]*demuxerLooperStream),
-	}
-
-	// Loop through streams
-	for idx, s := range ss {
-		l.ss[idx] = newDemuxerLooperStream(s)
-	}
-	return
-}
-
-func (l *demuxerLooper) reset() {
-	for _, s := range l.ss {
-		s.duration = 0
-		s.lastDuration = 0
-		s.restampRemainder = 0
-	}
-}
-
-func (l *demuxerLooper) handlePkt(pkt *astiav.Packet, previousDuration *int64) {
-	// Get stream
-	s, ok := l.ss[pkt.StreamIndex()]
-	if !ok {
-		return
-	}
-
-	// Update durations
-	if *previousDuration > 0 {
-		s.duration += *previousDuration
-	} else if s.lastDuration > 0 {
-		*previousDuration = s.lastDuration
-		s.lastDuration = 0
-	}
-
-	// Restamp
-	if s.restampDelta > 0 {
-		d := pkt.Pts() - pkt.Dts()
-		pkt.SetDts(pkt.Dts() + s.restampDelta)
-		pkt.SetPts(pkt.Dts() + d)
-	}
-}
-
-func (l *demuxerLooper) looping() {
-	// Get max duration
-	var maxDuration time.Duration
-	for _, s := range l.ss {
-		// Flush pkt durationer
-		s.lastDuration = s.s.pd.flush()
-
-		// Update duration
-		s.duration += s.lastDuration
-		s.durationD = time.Duration(astiav.RescaleQ(s.duration, s.s.ctx.TimeBase, nanosecondRational))
-
-		// Get max duration
-		if s.durationD > maxDuration {
-			maxDuration = s.durationD
+	// Timestamps are valid
+	if pkt.Dts() != astiav.NoPtsValue && pkt.Pts() != astiav.NoPtsValue {
+		// Process pkt duration
+		// Do it before processing side data
+		// Since we can't get more precise than nanoseconds, if there's precision loss here, there's nothing
+		// we can do about it
+		if d.l.cycleCount == 0 {
+			s.l.cycleLastPktDuration = time.Duration(astiav.RescaleQ(pkt.Duration(), s.ctx.TimeBase, nanosecondRational))
 		}
-	}
 
-	// Loop through streams
-	for _, s := range l.ss {
-		// Get delta duration
-		d := maxDuration - s.durationD + s.restampRemainder
+		// Process pkt side data
+		skippedStart, skippedEnd := d.processPktSideData(pkt, s)
 
-		// Process delta
-		restampDelta := s.duration
-		if d > 0 {
-			// Convert duration to timebase
-			var i int64
-			i, s.restampRemainder = durationToTimeBase(d, s.s.ctx.TimeBase)
+		// Skipped start
+		if skippedStart > 0 {
+			// Get duration
+			sd, sr := durationToTimeBase(skippedStart, s.ctx.TimeBase)
 
-			// Use delta
-			if i > 0 {
-				restampDelta += i
-				s.lastDuration += i
+			// Restamp
+			pkt.SetDts(pkt.Dts() + sd)
+			pkt.SetPts(pkt.Pts() + sd)
+
+			// Store remainder
+			if d.l.cycleCount == 0 {
+				// Only frames with PTS >= 0 get out of decoders
+				if s.l.cycleFirstPktPTS == nil && pkt.Pts() >= 0 {
+					s.l.cycleFirstPktPTSRemainder = sr
+				}
 			}
 		}
 
-		// Update restamp delta
-		s.restampDelta += restampDelta
+		// Skipped end
+		if skippedEnd > 0 {
+			if d.l.cycleCount == 0 {
+				s.l.cycleLastPktDuration -= skippedEnd
+			}
+		}
 
-		// Reset duration
-		s.duration = 0
+		// Process pkt pts
+		// Do it after processing side data
+		if d.l.cycleCount == 0 {
+			// Only frames with PTS >= 0 get out of decoders
+			if s.l.cycleFirstPktPTS == nil && pkt.Pts() >= 0 {
+				s.l.cycleFirstPktPTS = astikit.Int64Ptr(pkt.Pts())
+			}
+			s.l.cycleLastPktPTS = pkt.Pts()
+		}
+
+		// Loop restamp
+		if atomic.LoadUint32(&d.l.enabled) > 0 && d.l.cycleCount > 0 {
+			// Get duration
+			var dl int64
+			dl, s.l.restampRemainder = durationToTimeBase(time.Duration(d.l.cycleCount)*d.l.cycleDuration+s.l.restampRemainder, s.ctx.TimeBase)
+
+			// Restamp
+			pkt.SetDts(pkt.Dts() + dl)
+			pkt.SetPts(pkt.Pts() + dl)
+		}
+
+		// Emulate rate
+		if d.er.enabled {
+			// Get pkt at
+			pktAt := s.er.referenceTime.Add(time.Duration(astiav.RescaleQ(pkt.Dts()-s.er.referenceTS, s.ctx.TimeBase, nanosecondRational)))
+
+			// Wait if there are too many pkts in rate emulator buffer
+			if delta := time.Until(pktAt) - s.er.bufferDuration; delta > 0 {
+				astikit.Sleep(d.Context(), delta) //nolint:errcheck
+			}
+		}
 	}
+
+	// Dispatch pkt
+	d.d.dispatch(pkt, s.d)
 }
 
-type demuxerRateEmulator struct {
-	bufferDuration time.Duration
-	c              *astikit.Chan
-	cancel         context.CancelFunc
-	ctx            context.Context
-	d              *pktDispatcher
-	eh             *astiencoder.EventHandler
-	lastAt         time.Time
-	m              *sync.Mutex // Locks ps
-	p              *pktPool
-	ps             map[*astiav.Packet]bool
-	s              *demuxerStream
-}
-
-func newDemuxerRateEmulator(bufferDuration time.Duration, d *pktDispatcher, eh *astiencoder.EventHandler, p *pktPool, s *demuxerStream) (e *demuxerRateEmulator) {
-	e = &demuxerRateEmulator{
-		bufferDuration: bufferDuration,
-		c:              astikit.NewChan(astikit.ChanOptions{}),
-		d:              d,
-		eh:             eh,
-		m:              &sync.Mutex{},
-		p:              p,
-		ps:             make(map[*astiav.Packet]bool),
-		s:              s,
-	}
-	if e.bufferDuration <= 0 {
-		e.bufferDuration = time.Second
+func (d *Demuxer) processPktSideData(pkt *astiav.Packet, s *demuxerStream) (skippedStart, skippedEnd time.Duration) {
+	// Switch on media type
+	switch s.ctx.MediaType {
+	case astiav.MediaTypeAudio:
+		skippedStart, skippedEnd = d.processPktSideDataSkipSamples(pkt, s)
 	}
 	return
 }
 
-func (e *demuxerRateEmulator) start(ctx context.Context) {
-	// Create context
-	e.ctx, e.cancel = context.WithCancel(ctx)
-
-	// Start chan
-	e.c.Start(e.ctx)
-
-	// Unref remaining pkts
-	e.m.Lock()
-	for pkt := range e.ps {
-		e.p.put(pkt)
-	}
-	e.ps = map[*astiav.Packet]bool{}
-	e.m.Unlock()
-
-	// Reset chan
-	e.c.Reset()
-}
-
-func (e *demuxerRateEmulator) stop() {
-	// Cancel context
-	if e.cancel != nil {
-		e.cancel()
-		e.cancel = nil
-	}
-
-	// Make sure to stop chan
-	e.c.Stop()
-}
-
-func (e *demuxerRateEmulator) handlePkt(ctx context.Context, in *astiav.Packet, previousDuration int64) {
-	// Copy pkt
-	pkt := e.p.get()
-	if err := pkt.Ref(in); err != nil {
-		emitError(e, e.eh, err, "refing packet")
+func (d *Demuxer) processPktSideDataSkipSamples(pkt *astiav.Packet, s *demuxerStream) (skippedStart, skippedEnd time.Duration) {
+	// Get skip samples side data
+	sd := pkt.SideData(astiav.PacketSideDataTypeSkipSamples)
+	if sd == nil {
 		return
 	}
 
-	// Store pkt
-	e.m.Lock()
-	e.ps[pkt] = true
-	e.m.Unlock()
+	// Get number of skipped samples
+	skippedSamplesStart, skippedSamplesEnd := astiav.RL32WithOffset(sd, 0), astiav.RL32WithOffset(sd, 4)
 
-	// Get pkt at
-	pktAt := e.lastAt
-	if pktAt.IsZero() {
-		pktAt = time.Now()
+	// Skipped start
+	if skippedSamplesStart > 0 {
+		skippedStart = time.Duration(float64(skippedSamplesStart) / float64(s.ctx.SampleRate) * 1e9)
 	}
 
-	// Process previous duration
-	if previousDuration > 0 {
-		pktAt = pktAt.Add(time.Duration(astiav.RescaleQ(previousDuration, e.s.ctx.TimeBase, nanosecondRational)))
+	// Skipped end
+	if skippedSamplesEnd > 0 {
+		skippedEnd = time.Duration(float64(skippedSamplesEnd) / float64(s.ctx.SampleRate) * 1e9)
 	}
-
-	// Add to chan
-	e.c.Add(func() {
-		// Make sure to clean pkt
-		defer func() {
-			// Put pkt
-			e.p.put(pkt)
-
-			// Unstore pkt
-			e.m.Lock()
-			delete(e.ps, pkt)
-			e.m.Unlock()
-		}()
-
-		// Sleep
-		if delta := time.Until(pktAt); delta > 0 {
-			astikit.Sleep(e.ctx, delta) //nolint:errcheck
-		}
-
-		// Check context error
-		if err := e.ctx.Err(); err != nil {
-			return
-		}
-
-		// Dispatch
-		e.d.dispatch(pkt, e.s.d)
-	})
-
-	// Update last at
-	e.lastAt = pktAt
-
-	// Too many pkts are buffered, demuxer needs to wait
-	if delta := time.Until(e.lastAt) - e.bufferDuration; delta > 0 {
-		// Sleep
-		astikit.Sleep(ctx, delta) //nolint:errcheck
-	}
+	return
 }
 
-func (e *demuxerRateEmulator) eof() {
-	e.c.Add(func() { e.stop() })
+func (d *Demuxer) loop() {
+	// This is the first time it's looping
+	if d.l.cycleCount == 0 {
+		// Loop through streams
+		for _, s := range d.ss {
+			// No first pkt pts
+			if s.l.cycleFirstPktPTS == nil {
+				continue
+			}
+
+			// Get duration
+			// Since we can't get more precise than nanoseconds, if there's precision loss here, there's nothing
+			// we can do about it
+			ld := s.l.cycleFirstPktPTSRemainder + s.l.cycleLastPktDuration + time.Duration(astiav.RescaleQ(s.l.cycleLastPktPTS-*s.l.cycleFirstPktPTS, s.ctx.TimeBase, nanosecondRational))
+
+			// Update loop cycle duration
+			if d.l.cycleDuration < ld {
+				d.l.cycleDuration = ld
+			}
+		}
+	}
+
+	// Increment loop cycle count
+	d.l.cycleCount++
 }

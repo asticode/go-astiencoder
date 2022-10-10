@@ -125,7 +125,7 @@ func (b *builder) openInputs(j Job, bd *buildData) (is map[string]openedInput, e
 		var d *astilibav.Demuxer
 		if d, err = astilibav.NewDemuxer(astilibav.DemuxerOptions{
 			Dictionary:  astilibav.NewDefaultDictionary(cfg.Dict),
-			EmulateRate: cfg.EmulateRate,
+			EmulateRate: astilibav.DemuxerEmulateRateOptions{Enabled: cfg.EmulateRate},
 			URL:         cfg.URL,
 		}, bd.eh, bd.c, bd.s); err != nil {
 			err = fmt.Errorf("main: creating demuxer failed: %w", err)

@@ -3,7 +3,6 @@ package astilibav
 import (
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
@@ -164,72 +163,4 @@ func (p *pktPool) put(pkt *astiav.Packet) {
 	defer p.m.Unlock()
 	pkt.Unref()
 	p.p = append(p.p, pkt)
-}
-
-type pktDurationer struct {
-	ctx              Context
-	previousDTS      *int64
-	previousDuration int64
-	previousSkipped  int64
-	skippedRemainder time.Duration
-}
-
-func newPktDurationer(ctx Context) *pktDurationer {
-	return &pktDurationer{
-		ctx: ctx,
-	}
-}
-
-func (pd *pktDurationer) handlePkt(pkt *astiav.Packet) (previousDuration int64) {
-	// Make sure to update previous attributes
-	defer func() {
-		if pkt != nil {
-			pd.previousDTS = astikit.Int64Ptr(pkt.Dts())
-			pd.previousDuration = pkt.Duration()
-			pd.previousSkipped = pd.skipped(pkt)
-		}
-	}()
-
-	// No previous DTS
-	if pd.previousDTS == nil {
-		return
-	}
-
-	// Get duration
-	// Use DTS delta since we can't trust pkt.Duration()
-	return pkt.Dts() - *pd.previousDTS - pd.previousSkipped
-}
-
-func (pd *pktDurationer) flush() (lastDuration int64) {
-	lastDuration = pd.previousDuration - pd.previousSkipped
-	pd.previousDTS = nil
-	pd.previousDuration = 0
-	pd.previousSkipped = 0
-	return
-}
-
-func (pd *pktDurationer) skipped(pkt *astiav.Packet) (i int64) {
-	// Switch on media type
-	var d time.Duration
-	switch pd.ctx.MediaType {
-	case astiav.MediaTypeAudio:
-		// Get skip samples side data
-		sd := pkt.SideData(astiav.PacketSideDataTypeSkipSamples)
-		if sd == nil {
-			return
-		}
-
-		// Get skipped duration
-		skipStart, skipEnd := astiav.RL32WithOffset(sd, 0), astiav.RL32WithOffset(sd, 4)
-		d = time.Duration(float64(skipStart+skipEnd) / float64(pd.ctx.SampleRate) * 1e9)
-	default:
-		return
-	}
-
-	// Add remainder
-	d += pd.skippedRemainder
-
-	// Convert duration to timebase
-	i, pd.skippedRemainder = durationToTimeBase(d, pd.ctx.TimeBase)
-	return
 }
