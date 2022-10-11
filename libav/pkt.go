@@ -92,13 +92,13 @@ func (d *pktDispatcher) dispatch(pkt *astiav.Packet, descriptor Descriptor) {
 func (d *pktDispatcher) stats() []astikit.StatOptions {
 	return []astikit.StatOptions{
 		{
-			Handler: d.statOutgoingRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of packets going out per second",
 				Label:       "Outgoing rate",
 				Name:        StatNameOutgoingRate,
 				Unit:        "pps",
 			},
+			Valuer: d.statOutgoingRate,
 		},
 	}
 }
@@ -133,15 +133,17 @@ func (c *pktCond) UsePkt(pkt *astiav.Packet) bool {
 }
 
 type pktPool struct {
-	c astiencoder.Closer
-	m *sync.Mutex
-	p []*astiav.Packet
+	c                  astiencoder.Closer
+	m                  *sync.Mutex
+	p                  []*astiav.Packet
+	statAllocatedCount *astikit.CounterStat
 }
 
 func newPktPool(c astiencoder.Closer) *pktPool {
 	return &pktPool{
-		c: c,
-		m: &sync.Mutex{},
+		c:                  c,
+		m:                  &sync.Mutex{},
+		statAllocatedCount: astikit.NewCounterStat(),
 	}
 }
 
@@ -150,6 +152,7 @@ func (p *pktPool) get() (pkt *astiav.Packet) {
 	defer p.m.Unlock()
 	if len(p.p) == 0 {
 		pkt = astiav.AllocPacket()
+		p.statAllocatedCount.Add(1)
 		p.c.AddClose(pkt.Free)
 		return
 	}
@@ -163,4 +166,18 @@ func (p *pktPool) put(pkt *astiav.Packet) {
 	defer p.m.Unlock()
 	pkt.Unref()
 	p.p = append(p.p, pkt)
+}
+
+func (p *pktPool) stats() []astikit.StatOptions {
+	return []astikit.StatOptions{
+		{
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of allocated packets",
+				Label:       "Allocated packets",
+				Name:        StatNameAllocatedPackets,
+				Unit:        "p",
+			},
+			Valuer: p.statAllocatedCount,
+		},
+	}
 }

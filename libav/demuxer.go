@@ -412,14 +412,15 @@ func (d *Demuxer) probe() (err error) {
 func (d *Demuxer) addStats() {
 	// Get stats
 	ss := d.d.stats()
+	ss = append(ss, d.p.stats()...)
 	ss = append(ss, astikit.StatOptions{
-		Handler: d.statIncomingRate,
 		Metadata: &astikit.StatMetadata{
 			Description: "Number of bits going in per second",
 			Label:       "Incoming rate",
 			Name:        StatNameIncomingRate,
 			Unit:        "bps",
 		},
+		Valuer: d.statIncomingRate,
 	})
 
 	// Add stats

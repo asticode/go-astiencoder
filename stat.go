@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/asticode/go-astikit"
@@ -131,8 +130,7 @@ type statHostUsageMemory struct {
 }
 
 type statPSUtil struct {
-	p       *process.Process
-	started uint32
+	p *process.Process
 }
 
 func newStatPSUtil() (u *statPSUtil, err error) {
@@ -147,20 +145,7 @@ func newStatPSUtil() (u *statPSUtil, err error) {
 	return
 }
 
-func (s *statPSUtil) Start() {
-	atomic.SwapUint32(&s.started, 1)
-}
-
-func (s *statPSUtil) Stop() {
-	atomic.SwapUint32(&s.started, 0)
-}
-
-func (s *statPSUtil) Value(delta time.Duration) interface{} {
-	// Check started
-	if atomic.LoadUint32(&s.started) == 0 {
-		return nil
-	}
-
+func (s *statPSUtil) Value() interface{} {
 	// Get CPU
 	var v statHostUsage
 	if vs, err := cpu.Percent(0, true); err == nil {

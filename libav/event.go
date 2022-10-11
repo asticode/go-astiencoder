@@ -9,10 +9,11 @@ const (
 
 // Stat names
 const (
-	StatNameAverageDelay  = "astilibav.average.delay"
-	StatNameFilledRate    = "astilibav.filled.rate"
-	StatNameIncomingRate  = "astilibav.incoming.rate"
-	StatNameOutgoingRate  = "astilibav.outgoing.rate"
-	StatNameProcessedRate = "astilibav.processed.rate"
-	StatNameWorkRatio     = "astilibav.work.ratio"
+	StatNameAllocatedFrames  = "astilibav.allocated.frames"
+	StatNameAllocatedPackets = "astilibav.allocated.packets"
+	StatNameAverageDelay     = "astilibav.average.delay"
+	StatNameFilledRate       = "astilibav.filled.rate"
+	StatNameIncomingRate     = "astilibav.incoming.rate"
+	StatNameOutgoingRate     = "astilibav.outgoing.rate"
+	StatNameProcessedRate    = "astilibav.processed.rate"
 )

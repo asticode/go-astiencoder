@@ -46,8 +46,8 @@ func (w *Workflow) AddDefaultStats() (err error) {
 
 	// Add host usage stat
 	w.bn.AddStats(astikit.StatOptions{
-		Handler:  u,
 		Metadata: &astikit.StatMetadata{Name: StatNameHostUsage},
+		Valuer:   u,
 	})
 	return
 }

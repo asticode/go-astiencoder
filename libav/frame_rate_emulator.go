@@ -83,24 +83,25 @@ func (r *FrameRateEmulator) addStats() {
 	// Get stats
 	ss := r.c.Stats()
 	ss = append(ss, r.d.stats()...)
+	ss = append(ss, r.p.stats()...)
 	ss = append(ss,
 		astikit.StatOptions{
-			Handler: r.statIncomingRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of frames coming in per second",
 				Label:       "Incoming rate",
 				Name:        StatNameIncomingRate,
 				Unit:        "fps",
 			},
+			Valuer: r.statIncomingRate,
 		},
 		astikit.StatOptions{
-			Handler: r.statProcessedRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of frames processed per second",
 				Label:       "Processed rate",
 				Name:        StatNameProcessedRate,
 				Unit:        "fps",
 			},
+			Valuer: r.statProcessedRate,
 		},
 	)
 

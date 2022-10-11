@@ -99,33 +99,34 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 func (m *Muxer) addStats() {
 	// Get stats
 	ss := m.c.Stats()
+	ss = append(ss, m.p.stats()...)
 	ss = append(ss,
 		astikit.StatOptions{
-			Handler: m.statIncomingRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of packets coming in per second",
 				Label:       "Incoming rate",
 				Name:        StatNameIncomingRate,
 				Unit:        "pps",
 			},
+			Valuer: m.statIncomingRate,
 		},
 		astikit.StatOptions{
-			Handler: m.statOutgoingRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of bits going out per second",
 				Label:       "Outgoing rate",
 				Name:        StatNameOutgoingRate,
 				Unit:        "bps",
 			},
+			Valuer: m.statOutgoingRate,
 		},
 		astikit.StatOptions{
-			Handler: m.statProcessedRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of packets processed per second",
 				Label:       "Processed rate",
 				Name:        StatNameProcessedRate,
 				Unit:        "pps",
 			},
+			Valuer: m.statProcessedRate,
 		},
 	)
 

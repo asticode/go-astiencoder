@@ -296,16 +296,11 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 
 			// Handle stats
 			if n.s != nil {
-				// Make sure to stop and delete stats
+				// Make sure to delete stats
 				defer func() {
 					// Lock
 					n.m.Lock()
 					defer n.m.Unlock()
-
-					// Stop stats
-					for _, s := range n.ss {
-						s.Handler.Stop()
-					}
 
 					// Delete stats
 					n.s.DelStats(n.target, n.ss...)
@@ -314,11 +309,6 @@ func (n *BaseNode) Start(ctx context.Context, tc CreateTaskFunc, execFunc BaseNo
 				// Add stats
 				n.m.Lock()
 				n.s.AddStats(n.target, n.ss...)
-
-				// Start stats
-				for _, s := range n.ss {
-					s.Handler.Start()
-				}
 				n.m.Unlock()
 			}
 

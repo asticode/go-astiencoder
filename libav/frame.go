@@ -88,27 +88,29 @@ func (d *frameDispatcher) dispatch(f *astiav.Frame, descriptor Descriptor) {
 func (d *frameDispatcher) stats() []astikit.StatOptions {
 	return []astikit.StatOptions{
 		{
-			Handler: d.statOutgoingRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of frames going out per second",
 				Label:       "Outgoing rate",
 				Name:        StatNameOutgoingRate,
 				Unit:        "fps",
 			},
+			Valuer: d.statOutgoingRate,
 		},
 	}
 }
 
 type framePool struct {
-	c astiencoder.Closer
-	m *sync.Mutex
-	p []*astiav.Frame
+	c                  astiencoder.Closer
+	m                  *sync.Mutex
+	p                  []*astiav.Frame
+	statAllocatedCount *astikit.CounterStat
 }
 
 func newFramePool(c astiencoder.Closer) *framePool {
 	return &framePool{
-		c: c,
-		m: &sync.Mutex{},
+		c:                  c,
+		m:                  &sync.Mutex{},
+		statAllocatedCount: astikit.NewCounterStat(),
 	}
 }
 
@@ -117,6 +119,7 @@ func (p *framePool) get() (f *astiav.Frame) {
 	defer p.m.Unlock()
 	if len(p.p) == 0 {
 		f = astiav.AllocFrame()
+		p.statAllocatedCount.Add(1)
 		p.c.AddClose(f.Free)
 		return
 	}
@@ -130,4 +133,18 @@ func (p *framePool) put(f *astiav.Frame) {
 	defer p.m.Unlock()
 	f.Unref()
 	p.p = append(p.p, f)
+}
+
+func (p *framePool) stats() []astikit.StatOptions {
+	return []astikit.StatOptions{
+		{
+			Metadata: &astikit.StatMetadata{
+				Description: "Number of allocated frames",
+				Label:       "Allocated frames",
+				Name:        StatNameAllocatedFrames,
+				Unit:        "f",
+			},
+			Valuer: p.statAllocatedCount,
+		},
+	}
 }

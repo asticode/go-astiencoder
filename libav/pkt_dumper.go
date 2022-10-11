@@ -79,24 +79,25 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.C
 func (d *PktDumper) addStats() {
 	// Get stats
 	ss := d.c.Stats()
+	ss = append(ss, d.p.stats()...)
 	ss = append(ss,
 		astikit.StatOptions{
-			Handler: d.statIncomingRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of packets coming in per second",
 				Label:       "Incoming rate",
 				Name:        StatNameIncomingRate,
 				Unit:        "pps",
 			},
+			Valuer: d.statIncomingRate,
 		},
 		astikit.StatOptions{
-			Handler: d.statProcessedRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of packets processed per second",
 				Label:       "Processed rate",
 				Name:        StatNameProcessedRate,
 				Unit:        "pps",
 			},
+			Valuer: d.statProcessedRate,
 		},
 	)
 

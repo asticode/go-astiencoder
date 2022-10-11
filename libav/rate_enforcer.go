@@ -118,42 +118,43 @@ func (r *RateEnforcer) addStats() {
 	// Get stats
 	ss := r.c.Stats()
 	ss = append(ss, r.d.stats()...)
+	ss = append(ss, r.p.stats()...)
 	ss = append(ss,
 		astikit.StatOptions{
-			Handler: r.statIncomingRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of frames coming in per second",
 				Label:       "Incoming rate",
 				Name:        StatNameIncomingRate,
 				Unit:        "fps",
 			},
+			Valuer: r.statIncomingRate,
 		},
 		astikit.StatOptions{
-			Handler: r.statProcessedRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of frames processed per second",
 				Label:       "Processed rate",
 				Name:        StatNameProcessedRate,
 				Unit:        "fps",
 			},
+			Valuer: r.statProcessedRate,
 		},
 		astikit.StatOptions{
-			Handler: r.statDelayAvg,
 			Metadata: &astikit.StatMetadata{
 				Description: "Average delay of frames coming in",
 				Label:       "Average delay",
 				Name:        StatNameAverageDelay,
 				Unit:        "ns",
 			},
+			Valuer: r.statDelayAvg,
 		},
 		astikit.StatOptions{
-			Handler: r.statFilledRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of frames filled per second",
 				Label:       "Filled rate",
 				Name:        StatNameFilledRate,
 				Unit:        "fps",
 			},
+			Valuer: r.statFilledRate,
 		},
 	)
 

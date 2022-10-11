@@ -144,24 +144,26 @@ func (e *Encoder) addStats() {
 	// Get stats
 	ss := e.c.Stats()
 	ss = append(ss, e.d.stats()...)
+	ss = append(ss, e.fp.stats()...)
+	ss = append(ss, e.pp.stats()...)
 	ss = append(ss,
 		astikit.StatOptions{
-			Handler: e.statIncomingRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of frames coming in per second",
 				Label:       "Incoming rate",
 				Name:        StatNameIncomingRate,
 				Unit:        "fps",
 			},
+			Valuer: e.statIncomingRate,
 		},
 		astikit.StatOptions{
-			Handler: e.statProcessedRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of frames processed per second",
 				Label:       "Processed rate",
 				Name:        StatNameProcessedRate,
 				Unit:        "fps",
 			},
+			Valuer: e.statProcessedRate,
 		},
 	)
 

@@ -67,24 +67,25 @@ func (p *PktPiper) addStats() {
 	// Get stats
 	ss := p.c.Stats()
 	ss = append(ss, p.d.stats()...)
+	ss = append(ss, p.p.stats()...)
 	ss = append(ss,
 		astikit.StatOptions{
-			Handler: p.statIncomingRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of pkts coming in per second",
 				Label:       "Incoming rate",
 				Name:        StatNameIncomingRate,
 				Unit:        "fps",
 			},
+			Valuer: p.statIncomingRate,
 		},
 		astikit.StatOptions{
-			Handler: p.statProcessedRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of pkts processed per second",
 				Label:       "Processed rate",
 				Name:        StatNameProcessedRate,
 				Unit:        "fps",
 			},
+			Valuer: p.statProcessedRate,
 		},
 	)
 

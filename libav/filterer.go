@@ -221,24 +221,25 @@ func (f *Filterer) addStats() {
 	// Get stats
 	ss := f.c.Stats()
 	ss = append(ss, f.d.stats()...)
+	ss = append(ss, f.p.stats()...)
 	ss = append(ss,
 		astikit.StatOptions{
-			Handler: f.statIncomingRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of frames coming in per second",
 				Label:       "Incoming rate",
 				Name:        StatNameIncomingRate,
 				Unit:        "fps",
 			},
+			Valuer: f.statIncomingRate,
 		},
 		astikit.StatOptions{
-			Handler: f.statProcessedRate,
 			Metadata: &astikit.StatMetadata{
 				Description: "Number of frames processed per second",
 				Label:       "Processed rate",
 				Name:        StatNameProcessedRate,
 				Unit:        "fps",
 			},
+			Valuer: f.statProcessedRate,
 		},
 	)
 
