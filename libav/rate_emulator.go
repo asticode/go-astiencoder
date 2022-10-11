@@ -16,6 +16,7 @@ type rateEmulator struct {
 	buffer      []interface{}
 	cancel      context.CancelFunc
 	ctx         context.Context
+	flushOnStop bool
 	funcAt      rateEmulatorAtFunc
 	funcBefore  rateEmulatorBeforeFunc
 	funcExec    rateEmulatorExecFunc
@@ -23,15 +24,15 @@ type rateEmulator struct {
 	m           *sync.Mutex
 	nextAt      time.Time
 	reloadChan  chan bool
-	shouldFlush bool
 }
 
-func newRateEmulator(funcAt rateEmulatorAtFunc, funcBefore rateEmulatorBeforeFunc, funcExec rateEmulatorExecFunc) *rateEmulator {
+func newRateEmulator(flushOnStop bool, funcAt rateEmulatorAtFunc, funcBefore rateEmulatorBeforeFunc, funcExec rateEmulatorExecFunc) *rateEmulator {
 	return &rateEmulator{
-		funcAt:     funcAt,
-		funcBefore: funcBefore,
-		funcExec:   funcExec,
-		m:          &sync.Mutex{},
+		flushOnStop: flushOnStop,
+		funcAt:      funcAt,
+		funcBefore:  funcBefore,
+		funcExec:    funcExec,
+		m:           &sync.Mutex{},
 	}
 }
 
@@ -42,9 +43,6 @@ func (r *rateEmulator) start(parentCtx context.Context) {
 	defer cancel()
 	r.ctx = ctx
 	r.cancel = cancel
-
-	// Reset flush
-	r.shouldFlush = false
 
 	// Process buffer
 	for _, i := range r.buffer {
@@ -64,11 +62,11 @@ func (r *rateEmulator) start(parentCtx context.Context) {
 	r.m.Lock()
 	r.ctx = nil
 	r.cancel = nil
-	shouldFlush := r.shouldFlush
+	flush := r.flushOnStop
 	r.m.Unlock()
 
 	// Flush
-	if shouldFlush {
+	if flush {
 		r.flush()
 	}
 }
@@ -133,6 +131,12 @@ func (r *rateEmulator) startLoopCycle(ctx context.Context) (stop bool) {
 	return
 }
 
+func (r *rateEmulator) setFlushOnStop(flushOnStop bool) {
+	r.m.Lock()
+	defer r.m.Unlock()
+	r.flushOnStop = flushOnStop
+}
+
 func (r *rateEmulator) flush() {
 	for {
 		if stop := r.flushLoopCycle(); stop {
@@ -182,13 +186,10 @@ func (r *rateEmulator) run() {
 	r.funcExec(i)
 }
 
-func (r *rateEmulator) stop(shouldFlush bool) {
+func (r *rateEmulator) stop() {
 	// Lock
 	r.m.Lock()
 	defer r.m.Unlock()
-
-	// Update flush
-	r.shouldFlush = shouldFlush
 
 	// Cancel
 	if r.cancel != nil {

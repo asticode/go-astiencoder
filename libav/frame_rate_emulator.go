@@ -39,6 +39,7 @@ type PTSReference struct {
 }
 
 type FrameRateEmulatorOptions struct {
+	FlushOnStop  bool
 	Node         astiencoder.NodeOptions
 	OutputCtx    Context
 	PTSReference PTSReference
@@ -72,7 +73,7 @@ func NewFrameRateEmulator(o FrameRateEmulatorOptions, eh *astiencoder.EventHandl
 	r.d = newFrameDispatcher(r, eh)
 
 	// Create rate emulator
-	r.r = newRateEmulator(r.rateEmulatorAt, r.rateEmulatorBefore, r.rateEmulatorExec)
+	r.r = newRateEmulator(o.FlushOnStop, r.rateEmulatorAt, r.rateEmulatorBefore, r.rateEmulatorExec)
 
 	// Add stats
 	r.addStats()
@@ -107,6 +108,10 @@ func (r *FrameRateEmulator) addStats() {
 
 	// Add stats
 	r.BaseNode.AddStats(ss...)
+}
+
+func (r *FrameRateEmulator) SetFlushOnStop(flushOnStop bool) {
+	r.r.setFlushOnStop(flushOnStop)
 }
 
 // OutputCtx returns the output ctx
@@ -148,7 +153,7 @@ func (r *FrameRateEmulator) Start(ctx context.Context, t astiencoder.CreateTaskF
 			defer wg.Done()
 
 			// Make sure to stop rate emulator properly
-			defer r.r.stop(false)
+			defer r.r.stop()
 
 			// Start rate emulator
 			r.r.start(r.Context())
