@@ -41,7 +41,7 @@ type Demuxer struct {
 type DemuxerEmulateRateOptions struct {
 	// BufferDuration represents the duration of packets with positive PTS dispatched at the
 	// start without sleeping.
-	// Defaults to 2s
+	// Defaults to 1s
 	BufferDuration time.Duration
 	Enabled        bool
 }
@@ -57,7 +57,7 @@ func newDemuxerEmulateRate(o DemuxerEmulateRateOptions) *demuxerEmulateRate {
 		enabled:        o.Enabled,
 	}
 	if r.bufferDuration <= 0 {
-		r.bufferDuration = 2 * time.Second
+		r.bufferDuration = time.Second
 	}
 	return r
 }
@@ -109,7 +109,7 @@ type demuxerProbe struct {
 func newDemuxerProbe(duration time.Duration) *demuxerProbe {
 	p := &demuxerProbe{duration: duration}
 	if p.duration <= 0 {
-		p.duration = 2 * time.Second
+		p.duration = time.Second
 	}
 	return p
 }
@@ -189,7 +189,7 @@ type DemuxerOptions struct {
 	ProbeCtx context.Context
 	// In order to emulate rate or loop properly, Demuxer needs to probe data.
 	// ProbeDuration represents the duration the Demuxer will probe.
-	// Defaults to 2s
+	// Defaults to 1s
 	ProbeDuration time.Duration
 	// Custom read frame error handler
 	// If handled is false, default error handling will be executed
