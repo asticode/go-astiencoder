@@ -153,35 +153,35 @@ func (h *EventHandler) Log(i astikit.StdLogger, opts ...EventHandlerLogOption) (
 		if len(t) > 0 {
 			t = "(" + t + ")"
 		}
-		l.Errorf("%s%s", e.Payload.(error), t)
+		l.Writef(astikit.LoggerLevelError, "%s%s", e.Payload.(error), t)
 		return false
 	})
 
 	// Node
 	h.AddForEventName(EventNameNodeClosed, func(e Event) bool {
-		l.Infof("astiencoder: node %s (%s) is closed", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
+		l.Writef(astikit.LoggerLevelInfo, "astiencoder: node %s (%s) is closed", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false
 	})
 	h.AddForEventName(EventNameNodePaused, func(e Event) bool {
-		l.Infof("astiencoder: node %s (%s) is paused", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
+		l.Writef(astikit.LoggerLevelInfo, "astiencoder: node %s (%s) is paused", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false
 	})
 	h.AddForEventName(EventNameNodeStarted, func(e Event) bool {
-		l.Infof("astiencoder: node %s (%s) is started", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
+		l.Writef(astikit.LoggerLevelInfo, "astiencoder: node %s (%s) is started", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false
 	})
 	h.AddForEventName(EventNameNodeStopped, func(e Event) bool {
-		l.Infof("astiencoder: node %s (%s) is stopped", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
+		l.Writef(astikit.LoggerLevelInfo, "astiencoder: node %s (%s) is stopped", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false
 	})
 
 	// Workflow
 	h.AddForEventName(EventNameWorkflowStarted, func(e Event) bool {
-		l.Infof("astiencoder: workflow %s is started", e.Target.(*Workflow).Name())
+		l.Writef(astikit.LoggerLevelInfo, "astiencoder: workflow %s is started", e.Target.(*Workflow).Name())
 		return false
 	})
 	h.AddForEventName(EventNameWorkflowStopped, func(e Event) bool {
-		l.Infof("astiencoder: workflow %s is stopped", e.Target.(*Workflow).Name())
+		l.Writef(astikit.LoggerLevelInfo, "astiencoder: workflow %s is stopped", e.Target.(*Workflow).Name())
 		return false
 	})
 	return

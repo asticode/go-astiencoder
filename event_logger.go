@@ -9,15 +9,6 @@ import (
 	"github.com/asticode/go-astikit"
 )
 
-type logLevel string
-
-const (
-	logLevelDebug logLevel = "debug"
-	logLevelError logLevel = "error"
-	logLevelInfo  logLevel = "info"
-	logLevelWarn  logLevel = "warn"
-)
-
 type EventLogger struct {
 	cancel               context.CancelFunc
 	ctx                  context.Context
@@ -31,15 +22,15 @@ type eventLoggerItem struct {
 	count     int
 	createdAt time.Time
 	key       string
-	l         logLevel
+	ll        astikit.LoggerLevel
 	msg       string
 }
 
-func newEventLoggerItem(key, msg string, l logLevel) *eventLoggerItem {
+func newEventLoggerItem(ll astikit.LoggerLevel, key, msg string) *eventLoggerItem {
 	return &eventLoggerItem{
 		createdAt: time.Now(),
 		key:       key,
-		l:         l,
+		ll:        ll,
 		msg:       msg,
 	}
 }
@@ -123,33 +114,33 @@ func (l *EventLogger) purge() {
 
 func (l *EventLogger) dumpItem(k string, i *eventLoggerItem) {
 	if i.count > 1 {
-		l.write(fmt.Sprintf("astiencoder: pattern repeated %d times: %s", i.count, i.key), i.l)
+		l.l.Write(i.ll, fmt.Sprintf("astiencoder: pattern repeated %d times: %s", i.count, i.key))
 	} else if i.count == 1 {
-		l.write("astiencoder: pattern repeated once: "+i.msg, i.l)
+		l.l.Write(i.ll, "astiencoder: pattern repeated once: "+i.msg)
 	}
 	delete(l.is, k)
 }
 
-func (l *EventLogger) process(key, msg string, lv logLevel) {
+func (l *EventLogger) process(ll astikit.LoggerLevel, key, msg string) {
 	// Merge messages
 	if l.messageMergingPeriod > 0 {
 		// Merge
-		if stop := l.merge(key, msg, lv); stop {
+		if stop := l.merge(ll, key, msg); stop {
 			return
 		}
 	}
 
 	// Write
-	l.write(msg, lv)
+	l.l.Write(ll, msg)
 }
 
-func (l *EventLogger) merge(key, msg string, lv logLevel) (stop bool) {
+func (l *EventLogger) merge(ll astikit.LoggerLevel, key, msg string) (stop bool) {
 	// Lock
 	l.m.Lock()
 	defer l.m.Unlock()
 
 	// Create final key
-	k := string(lv) + ":" + key
+	k := ll.String() + ":" + key
 
 	// Check whether item exists
 	i, ok := l.is[k]
@@ -159,46 +150,15 @@ func (l *EventLogger) merge(key, msg string, lv logLevel) (stop bool) {
 	}
 
 	// Create item
-	l.is[k] = newEventLoggerItem(key, msg, lv)
+	l.is[k] = newEventLoggerItem(ll, key, msg)
 	return false
 }
 
-func (l *EventLogger) write(msg string, lv logLevel) {
-	switch lv {
-	case logLevelDebug:
-		l.l.Debug(msg)
-	case logLevelError:
-		l.l.Error(msg)
-	case logLevelWarn:
-		l.l.Warn(msg)
-	default:
-		l.l.Info(msg)
-	}
+func (l *EventLogger) Writek(ll astikit.LoggerLevel, key, msg string) {
+	l.process(ll, key, msg)
 }
 
-func (l *EventLogger) Debugk(key, msg string) {
-	l.process(key, msg, logLevelDebug)
-}
-
-func (l *EventLogger) Errorf(format string, v ...interface{}) {
+func (l *EventLogger) Writef(ll astikit.LoggerLevel, format string, v ...interface{}) {
 	msg := fmt.Sprintf(format, v...)
-	l.process(msg, msg, logLevelError)
-}
-
-func (l *EventLogger) Errork(key, msg string) {
-	l.process(key, msg, logLevelError)
-}
-
-func (l *EventLogger) Infof(format string, v ...interface{}) {
-	msg := fmt.Sprintf(format, v...)
-	l.process(msg, msg, logLevelInfo)
-}
-
-func (l *EventLogger) Infok(key, msg string) {
-	l.process(key, msg, logLevelInfo)
-}
-
-func (l *EventLogger) Warnk(key, msg string) {
-	l.process(key, msg, logLevelWarn)
-
+	l.process(ll, msg, msg)
 }
