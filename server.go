@@ -14,7 +14,7 @@ type Server struct {
 	w *Workflow
 }
 
-type ServerNotifierFunc func(eventName string, payload interface{})
+type ServerNotifierFunc func(eventName EventName, payload interface{})
 
 type ServerOptions struct {
 	Logger       astikit.StdLogger
@@ -32,7 +32,7 @@ func (s *Server) SetWorkflow(w *Workflow) {
 	s.w = w
 }
 
-func serverEventHandlerAdapter(eh *EventHandler, fn func(name string, payload interface{})) {
+func serverEventHandlerAdapter(eh *EventHandler, fn func(name EventName, payload interface{})) {
 	// Register catch all handler
 	eh.AddForAll(func(e Event) bool {
 		// Get payload

@@ -42,7 +42,7 @@ func (w *Workflow) NewRecording(o WorkflowRecordingOptions) (r *WorkflowRecordin
 	}
 
 	// Adapt event handler
-	serverEventHandlerAdapter(w.eh, func(name string, payload interface{}) {
+	serverEventHandlerAdapter(w.eh, func(name EventName, payload interface{}) {
 		// Recording not started
 		if r.ctx == nil {
 			return
@@ -113,7 +113,7 @@ func (r *WorkflowRecording) Start(ctx context.Context) (err error) {
 	return
 }
 
-func (r *WorkflowRecording) write(name string, payload interface{}) (err error) {
+func (r *WorkflowRecording) write(name EventName, payload interface{}) (err error) {
 	// Marshal payload
 	var b []byte
 	if b, err = json.Marshal(payload); err != nil {
@@ -123,7 +123,7 @@ func (r *WorkflowRecording) write(name string, payload interface{}) (err error) 
 
 	// Write
 	r.c.Add(func() {
-		r.w.Write([]string{strconv.Itoa(int(time.Now().UTC().Unix())), name, base64.StdEncoding.EncodeToString(b)}) //nolint:errcheck
+		r.w.Write([]string{strconv.Itoa(int(time.Now().UTC().Unix())), string(name), base64.StdEncoding.EncodeToString(b)}) //nolint:errcheck
 		r.w.Flush()
 	})
 	return

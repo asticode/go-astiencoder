@@ -12,7 +12,7 @@ import (
 type EventHandler struct {
 	// Indexed by target then by event name then by listener idx
 	// We use a map[int]Listener so that deletion is as smooth as possible
-	cs  map[interface{}]map[string]map[int]EventCallback
+	cs  map[interface{}]map[EventName]map[int]EventCallback
 	idx int
 	m   *sync.Mutex
 }
@@ -23,17 +23,17 @@ type EventCallback func(e Event) (deleteListener bool)
 // NewEventHandler creates a new event handler
 func NewEventHandler() *EventHandler {
 	return &EventHandler{
-		cs: make(map[interface{}]map[string]map[int]EventCallback),
+		cs: make(map[interface{}]map[EventName]map[int]EventCallback),
 		m:  &sync.Mutex{},
 	}
 }
 
 // Add adds a new callback for a specific target and event name
-func (h *EventHandler) Add(target interface{}, eventName string, c EventCallback) {
+func (h *EventHandler) Add(target interface{}, eventName EventName, c EventCallback) {
 	h.m.Lock()
 	defer h.m.Unlock()
 	if _, ok := h.cs[target]; !ok {
-		h.cs[target] = make(map[string]map[int]EventCallback)
+		h.cs[target] = make(map[EventName]map[int]EventCallback)
 	}
 	if _, ok := h.cs[target][eventName]; !ok {
 		h.cs[target][eventName] = make(map[int]EventCallback)
@@ -43,7 +43,7 @@ func (h *EventHandler) Add(target interface{}, eventName string, c EventCallback
 }
 
 // AddForEventName adds a new callback for a specific event name
-func (h *EventHandler) AddForEventName(eventName string, c EventCallback) {
+func (h *EventHandler) AddForEventName(eventName EventName, c EventCallback) {
 	h.Add(nil, eventName, c)
 }
 
@@ -57,7 +57,7 @@ func (h *EventHandler) AddForAll(c EventCallback) {
 	h.Add(nil, "", c)
 }
 
-func (h *EventHandler) del(target interface{}, eventName string, idx int) {
+func (h *EventHandler) del(target interface{}, eventName EventName, idx int) {
 	h.m.Lock()
 	defer h.m.Unlock()
 	if _, ok := h.cs[target]; !ok {
@@ -71,12 +71,12 @@ func (h *EventHandler) del(target interface{}, eventName string, idx int) {
 
 type eventHandlerCallback struct {
 	c         EventCallback
-	eventName string
+	eventName EventName
 	idx       int
 	target    interface{}
 }
 
-func (h *EventHandler) callbacks(target interface{}, eventName string) (cs []eventHandlerCallback) {
+func (h *EventHandler) callbacks(target interface{}, eventName EventName) (cs []eventHandlerCallback) {
 	// Lock
 	h.m.Lock()
 	defer h.m.Unlock()
@@ -90,7 +90,7 @@ func (h *EventHandler) callbacks(target interface{}, eventName string) (cs []eve
 	}
 	for _, target := range targets {
 		if _, ok := h.cs[target]; ok {
-			eventNames := []string{""}
+			eventNames := []EventName{""}
 			if eventName != "" {
 				eventNames = append(eventNames, eventName)
 			}
@@ -129,15 +129,35 @@ func (h *EventHandler) Emit(e Event) {
 	}
 }
 
-type EventHandlerLogOption func(*EventHandler, *EventLogger)
+type EventHandlerLogAdapter func(*EventHandler, *EventLogger)
 
-func (h *EventHandler) Log(i astikit.StdLogger, opts ...EventHandlerLogOption) (l *EventLogger) {
+type EventHandlerLogOptions struct {
+	Adapters     []EventHandlerLogAdapter
+	Logger       astikit.StdLogger
+	LoggerLevels map[EventName]astikit.LoggerLevel
+}
+
+func (h *EventHandler) Log(o EventHandlerLogOptions) (l *EventLogger) {
 	// Create event logger
-	l = newEventLogger(i)
+	l = newEventLogger(o.Logger)
 
-	// Loop through options
-	for _, opt := range opts {
-		opt(h, l)
+	// Loop through adapters
+	for _, a := range o.Adapters {
+		a(h, l)
+	}
+
+	// Get logger levels
+	lls := map[EventName]astikit.LoggerLevel{
+		EventNameError:           astikit.LoggerLevelError,
+		EventNameNodeClosed:      astikit.LoggerLevelInfo,
+		EventNameNodePaused:      astikit.LoggerLevelInfo,
+		EventNameNodeStarted:     astikit.LoggerLevelInfo,
+		EventNameNodeStopped:     astikit.LoggerLevelInfo,
+		EventNameWorkflowStarted: astikit.LoggerLevelInfo,
+		EventNameWorkflowStopped: astikit.LoggerLevelInfo,
+	}
+	for n, ll := range o.LoggerLevels {
+		lls[n] = ll
 	}
 
 	// Error
@@ -153,35 +173,35 @@ func (h *EventHandler) Log(i astikit.StdLogger, opts ...EventHandlerLogOption) (
 		if len(t) > 0 {
 			t = "(" + t + ")"
 		}
-		l.Writef(astikit.LoggerLevelError, "%s%s", e.Payload.(error), t)
+		l.Writef(lls[e.Name], "%s%s", e.Payload.(error), t)
 		return false
 	})
 
 	// Node
 	h.AddForEventName(EventNameNodeClosed, func(e Event) bool {
-		l.Writef(astikit.LoggerLevelInfo, "astiencoder: node %s (%s) is closed", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
+		l.Writef(lls[e.Name], "astiencoder: node %s (%s) is closed", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false
 	})
 	h.AddForEventName(EventNameNodePaused, func(e Event) bool {
-		l.Writef(astikit.LoggerLevelInfo, "astiencoder: node %s (%s) is paused", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
+		l.Writef(lls[e.Name], "astiencoder: node %s (%s) is paused", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false
 	})
 	h.AddForEventName(EventNameNodeStarted, func(e Event) bool {
-		l.Writef(astikit.LoggerLevelInfo, "astiencoder: node %s (%s) is started", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
+		l.Writef(lls[e.Name], "astiencoder: node %s (%s) is started", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false
 	})
 	h.AddForEventName(EventNameNodeStopped, func(e Event) bool {
-		l.Writef(astikit.LoggerLevelInfo, "astiencoder: node %s (%s) is stopped", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
+		l.Writef(lls[e.Name], "astiencoder: node %s (%s) is stopped", e.Target.(Node).Metadata().Name, e.Target.(Node).Metadata().Label)
 		return false
 	})
 
 	// Workflow
 	h.AddForEventName(EventNameWorkflowStarted, func(e Event) bool {
-		l.Writef(astikit.LoggerLevelInfo, "astiencoder: workflow %s is started", e.Target.(*Workflow).Name())
+		l.Writef(lls[e.Name], "astiencoder: workflow %s is started", e.Target.(*Workflow).Name())
 		return false
 	})
 	h.AddForEventName(EventNameWorkflowStopped, func(e Event) bool {
-		l.Writef(astikit.LoggerLevelInfo, "astiencoder: workflow %s is stopped", e.Target.(*Workflow).Name())
+		l.Writef(lls[e.Name], "astiencoder: workflow %s is stopped", e.Target.(*Workflow).Name())
 		return false
 	})
 	return

@@ -35,7 +35,7 @@ func newEventLoggerItem(ll astikit.LoggerLevel, key, msg string) *eventLoggerIte
 	}
 }
 
-func WithMessageMerging(period time.Duration) EventHandlerLogOption {
+func MessageMergingEventHandlerLogAdapter(period time.Duration) EventHandlerLogAdapter {
 	return func(_ *EventHandler, l *EventLogger) {
 		l.messageMergingPeriod = period
 	}

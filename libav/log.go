@@ -15,34 +15,12 @@ type EventLog struct {
 	Parent string
 }
 
-type WithLogOptions struct {
+type EventHandlerLogAdapterOptions struct {
 	LogLevel        astiav.LogLevel
-	LoggerLevelFunc func(l astiav.LogLevel, msg *string) (ll astikit.LoggerLevel, ok bool)
+	LoggerLevelFunc func(l astiav.LogLevel) (ll astikit.LoggerLevel, processed, stop bool)
 }
 
-func defaultLoggerLevelsFunc(l astiav.LogLevel, msg *string) (ll astikit.LoggerLevel, ok bool) {
-	switch l {
-	case astiav.LogLevelDebug, astiav.LogLevelVerbose:
-		ll = astikit.LoggerLevelDebug
-	case astiav.LogLevelInfo:
-		ll = astikit.LoggerLevelInfo
-	case astiav.LogLevelError, astiav.LogLevelFatal, astiav.LogLevelPanic:
-		if l == astiav.LogLevelFatal {
-			*msg = "FATAL! " + *msg
-		} else if l == astiav.LogLevelPanic {
-			*msg = "PANIC! " + *msg
-		}
-		ll = astikit.LoggerLevelError
-	case astiav.LogLevelWarning:
-		ll = astikit.LoggerLevelWarn
-	default:
-		return
-	}
-	ok = true
-	return
-}
-
-func WithLog(o WithLogOptions) astiencoder.EventHandlerLogOption {
+func EventHandlerLogAdapter(o EventHandlerLogAdapterOptions) astiencoder.EventHandlerLogAdapter {
 	return func(h *astiencoder.EventHandler, l *astiencoder.EventLogger) {
 		// Set log level
 		astiav.SetLogLevel(o.LogLevel)
@@ -62,10 +40,10 @@ func WithLog(o WithLogOptions) astiencoder.EventHandlerLogOption {
 			})
 		})
 
-		// Get logger levels func
+		// Get logger level func
 		llf := o.LoggerLevelFunc
 		if llf == nil {
-			llf = defaultLoggerLevelsFunc
+			llf = func(l astiav.LogLevel) (ll astikit.LoggerLevel, processed bool, stop bool) { return }
 		}
 
 		// Handle log
@@ -91,9 +69,28 @@ func WithLog(o WithLogOptions) astiencoder.EventHandlerLogOption {
 				}
 
 				// Get level
-				ll, ok := llf(v.Level, &msg)
-				if !ok {
+				ll, processed, stop := llf(v.Level)
+				if stop {
 					return false
+				}
+				if !processed {
+					switch v.Level {
+					case astiav.LogLevelDebug, astiav.LogLevelVerbose:
+						ll = astikit.LoggerLevelDebug
+					case astiav.LogLevelInfo:
+						ll = astikit.LoggerLevelInfo
+					case astiav.LogLevelError, astiav.LogLevelFatal, astiav.LogLevelPanic:
+						if v.Level == astiav.LogLevelFatal {
+							msg = "FATAL! " + msg
+						} else if v.Level == astiav.LogLevelPanic {
+							msg = "PANIC! " + msg
+						}
+						ll = astikit.LoggerLevelError
+					case astiav.LogLevelWarning:
+						ll = astikit.LoggerLevelWarn
+					default:
+						return false
+					}
 				}
 
 				// Write

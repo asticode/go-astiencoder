@@ -50,7 +50,7 @@ func (l *mockedLogger) Printf(format string, v ...interface{}) {
 func TestEventLogger(t *testing.T) {
 	ml := newMockedLogger()
 	l := newEventLogger(ml)
-	WithMessageMerging(500*time.Millisecond)(nil, l)
+	MessageMergingEventHandlerLogAdapter(500*time.Millisecond)(nil, l)
 	l.Start(context.Background())
 	go func() {
 		l.Writef(astikit.LoggerLevelError, "errorf-%d", 1)

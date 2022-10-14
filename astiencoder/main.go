@@ -46,7 +46,12 @@ func main() {
 	e := newEncoder(c.Encoder, eh, ws, l, s)
 
 	// Log event handler
-	defer eh.Log(l, astilibav.WithLog(astiav.LogLevelInfo)).Start(e.w.Context()).Close()
+	defer eh.Log(astiencoder.EventHandlerLogOptions{
+		Adapters: []astiencoder.EventHandlerLogAdapter{
+			astilibav.EventHandlerLogAdapter(astilibav.EventHandlerLogAdapterOptions{LogLevel: astiav.LogLevelInfo}),
+		},
+		Logger: l,
+	}).Start(e.w.Context()).Close()
 
 	// Handle signals
 	e.w.HandleSignals()
