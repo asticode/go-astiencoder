@@ -283,6 +283,7 @@ var astiencoder = {
                         document.getElementById("memory-resident").innerText = ''
                         document.getElementById("memory-used").innerText = ''
                         document.getElementById("memory-total").innerText = ''
+                        document.getElementById("cpu-process").innerText = ''
                         document.getElementById("cpu-total").innerText = ''
                         document.getElementById("cpus").innerText = ''
                         break
@@ -302,6 +303,7 @@ var astiencoder = {
                         if (value.value.memory.virtual) document.getElementById("memory-virtual").innerText = (value.value.memory.virtual/Math.pow(1024, 3)).toFixed(2)
                         if (value.value.memory.used) document.getElementById("memory-used").innerText = (value.value.memory.used/Math.pow(1024, 3)).toFixed(2)
                         if (value.value.memory.total) document.getElementById("memory-total").innerText = (value.value.memory.total/Math.pow(1024, 3)).toFixed(2)
+                        if (value.value.cpu.process) document.getElementById("cpu-process").innerText = value.value.cpu.process.toFixed(2)
                         if (value.value.cpu.total) document.getElementById("cpu-total").innerText = value.value.cpu.total.toFixed(2)
                         if (value.value.cpu.individual) {
                             var e = document.getElementById("cpus")

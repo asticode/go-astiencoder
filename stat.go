@@ -112,17 +112,18 @@ func (s *Stater) handle(stats []astikit.StatValue) {
 	})
 }
 
-type statHostUsage struct {
-	CPU    statHostUsageCPU    `json:"cpu"`
-	Memory statHostUsageMemory `json:"memory"`
+type StatValueHostUsage struct {
+	CPU    StatValueHostUsageCPU    `json:"cpu"`
+	Memory StatValueHostUsageMemory `json:"memory"`
 }
 
-type statHostUsageCPU struct {
+type StatValueHostUsageCPU struct {
 	Individual []float64 `json:"individual"`
+	Process    float64   `json:"process"`
 	Total      float64   `json:"total"`
 }
 
-type statHostUsageMemory struct {
+type StatValueHostUsageMemory struct {
 	Resident uint64 `json:"resident"`
 	Total    uint64 `json:"total"`
 	Used     uint64 `json:"used"`
@@ -147,12 +148,17 @@ func newStatPSUtil() (u *statPSUtil, err error) {
 
 func (s *statPSUtil) Value() interface{} {
 	// Get CPU
-	var v statHostUsage
-	if vs, err := cpu.Percent(0, true); err == nil {
-		v.CPU.Individual = vs
+	var v StatValueHostUsage
+	var numCPUs float64
+	if ps, err := cpu.Percent(0, true); err == nil {
+		v.CPU.Individual = ps
+		numCPUs = float64(len(ps))
 	}
-	if vs, err := cpu.Percent(0, false); err == nil && len(vs) > 0 {
-		v.CPU.Total = vs[0]
+	if ps, err := cpu.Percent(0, false); err == nil && len(ps) > 0 {
+		v.CPU.Total = ps[0]
+	}
+	if p, err := s.p.CPUPercent(); err == nil {
+		v.CPU.Process = p / numCPUs
 	}
 
 	// Get memory
