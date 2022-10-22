@@ -131,7 +131,9 @@ type StatValueHostUsageMemory struct {
 }
 
 type statPSUtil struct {
-	p *process.Process
+	lastTimes   *cpu.TimesStat
+	lastTimesAt time.Time
+	p           *process.Process
 }
 
 func newStatPSUtil() (u *statPSUtil, err error) {
@@ -143,22 +145,32 @@ func newStatPSUtil() (u *statPSUtil, err error) {
 		err = fmt.Errorf("astiencoder: creating process failed: %w", err)
 		return
 	}
+
+	// Get times
+	if u.lastTimes, err = u.p.Times(); err != nil {
+		err = fmt.Errorf("astiencoder: getting times failed: %w", err)
+		return
+	}
+	u.lastTimesAt = time.Now()
 	return
 }
 
 func (s *statPSUtil) Value() interface{} {
-	// Get CPU
+	// Get process CPU
 	var v StatValueHostUsage
-	var numCPUs float64
+	if t, err := s.p.Times(); err == nil {
+		n := time.Now()
+		v.CPU.Process = (t.Total() - t.Idle - (s.lastTimes.Total() - s.lastTimes.Idle)) / n.Sub(s.lastTimesAt).Seconds() * 100
+		s.lastTimes = t
+		s.lastTimesAt = n
+	}
+
+	// Get global CPU
 	if ps, err := cpu.Percent(0, true); err == nil {
 		v.CPU.Individual = ps
-		numCPUs = float64(len(ps))
 	}
 	if ps, err := cpu.Percent(0, false); err == nil && len(ps) > 0 {
 		v.CPU.Total = ps[0]
-	}
-	if p, err := s.p.CPUPercent(); err == nil {
-		v.CPU.Process = p / numCPUs
 	}
 
 	// Get memory
