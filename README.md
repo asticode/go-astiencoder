@@ -82,25 +82,6 @@ Simply run the following command:
 $ go get github.com/asticode/go-astiencoder/...
 ```
 
-## Test everything is working fine
-
-Simply run the following command:
-
-```
-$ make version
-```
-
-It should print something like:
-
-```
-avcodec: 3805796
-avdevice: 3801956
-avfilter: 462948
-avutil: 3673700
-resample: GPL version 2 or later
-swscale: 328036
-```
-
 # How can I run the out-of-the-box encoder?
 ## Modes
 
