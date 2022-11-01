@@ -3,7 +3,6 @@ module github.com/asticode/go-astiencoder
 go 1.13
 
 require (
-	github.com/BurntSushi/toml v0.3.1
 	github.com/asticode/go-astiav v0.6.0
 	github.com/asticode/go-astikit v0.35.0
 	github.com/shirou/gopsutil/v3 v3.21.10
