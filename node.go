@@ -123,8 +123,13 @@ func DisconnectNodes(parent, child Node) {
 
 // NodeOptions represents node options
 type NodeOptions struct {
-	Metadata       NodeMetadata
-	NoIndirectStop bool
+	AutoStop *NodeAutoStopOptions
+	Metadata NodeMetadata
+}
+
+type NodeAutoStopOptions struct {
+	WhenAllChildrenAreStopped bool
+	WhenAllParentsAreStopped  bool
 }
 
 // BaseNode represents a base node
@@ -477,7 +482,7 @@ func (n *BaseNode) ChildIsStopped(m NodeMetadata) {
 		return
 	}
 	delete(n.childrenStarted, m.Name)
-	if len(n.childrenStarted) == 0 && !n.o.NoIndirectStop {
+	if len(n.childrenStarted) == 0 && (n.o.AutoStop == nil || n.o.AutoStop.WhenAllChildrenAreStopped) {
 		n.Stop()
 	}
 }
@@ -532,7 +537,7 @@ func (n *BaseNode) ParentIsStopped(m NodeMetadata) {
 		return
 	}
 	delete(n.parentsStarted, m.Name)
-	if len(n.parentsStarted) == 0 && !n.o.NoIndirectStop {
+	if len(n.parentsStarted) == 0 && (n.o.AutoStop == nil || n.o.AutoStop.WhenAllParentsAreStopped) {
 		n.Stop()
 	}
 }
