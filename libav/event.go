@@ -16,4 +16,6 @@ const (
 	StatNameIncomingRate     = "astilibav.incoming.rate"
 	StatNameOutgoingRate     = "astilibav.outgoing.rate"
 	StatNameProcessedRate    = "astilibav.processed.rate"
+	StatNameReadRate         = "astilibav.read.rate"
+	StatNameWrittenRate      = "astilibav.written.rate"
 )

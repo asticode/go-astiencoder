@@ -17,25 +17,25 @@ var countRateEnforcer uint64
 // RateEnforcer represents an object capable of enforcing rate based on PTS
 type RateEnforcer struct {
 	*astiencoder.BaseNode
-	c                 *astikit.Chan
-	currentNode       astiencoder.Node
-	d                 *frameDispatcher
-	delay             time.Duration
-	descriptor        Descriptor
-	desiredNode       astiencoder.Node
-	eh                *astiencoder.EventHandler
-	f                 RateEnforcerFiller
-	frames            map[astiencoder.Node][]*astiav.Frame
-	m                 *sync.Mutex
-	outputCtx         Context
-	p                 *framePool
-	period            time.Duration
-	ptsReferences     map[astiencoder.Node]*rateEnforcerPTSReference
-	restamper         FrameRestamper
-	statDelayAvg      *astikit.CounterAvgStat
-	statFilledRate    *astikit.CounterRateStat
-	statIncomingRate  *astikit.CounterRateStat
-	statProcessedRate *astikit.CounterRateStat
+	c                   *astikit.Chan
+	currentNode         astiencoder.Node
+	d                   *frameDispatcher
+	delay               time.Duration
+	descriptor          Descriptor
+	desiredNode         astiencoder.Node
+	eh                  *astiencoder.EventHandler
+	f                   RateEnforcerFiller
+	frames              map[astiencoder.Node][]*astiav.Frame
+	m                   *sync.Mutex
+	outputCtx           Context
+	p                   *framePool
+	period              time.Duration
+	ptsReferences       map[astiencoder.Node]*rateEnforcerPTSReference
+	restamper           FrameRestamper
+	statFramesDelay     *astikit.AtomicDuration
+	statFramesFilled    uint64
+	statFramesProcessed uint64
+	statFramesReceived  uint64
 }
 
 type rateEnforcerPTSReference struct {
@@ -78,21 +78,18 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 
 	// Create rate enforcer
 	r = &RateEnforcer{
-		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		delay:             o.Delay,
-		descriptor:        o.OutputCtx.Descriptor(),
-		frames:            make(map[astiencoder.Node][]*astiav.Frame),
-		eh:                eh,
-		f:                 o.Filler,
-		m:                 &sync.Mutex{},
-		outputCtx:         o.OutputCtx,
-		period:            time.Duration(float64(1e9) / o.OutputCtx.FrameRate.ToDouble()),
-		ptsReferences:     map[astiencoder.Node]*rateEnforcerPTSReference{},
-		restamper:         o.Restamper,
-		statDelayAvg:      astikit.NewCounterAvgStat(),
-		statFilledRate:    astikit.NewCounterRateStat(),
-		statIncomingRate:  astikit.NewCounterRateStat(),
-		statProcessedRate: astikit.NewCounterRateStat(),
+		c:               astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		delay:           o.Delay,
+		descriptor:      o.OutputCtx.Descriptor(),
+		frames:          make(map[astiencoder.Node][]*astiav.Frame),
+		eh:              eh,
+		f:               o.Filler,
+		m:               &sync.Mutex{},
+		outputCtx:       o.OutputCtx,
+		period:          time.Duration(float64(1e9) / o.OutputCtx.FrameRate.ToDouble()),
+		ptsReferences:   map[astiencoder.Node]*rateEnforcerPTSReference{},
+		restamper:       o.Restamper,
+		statFramesDelay: astikit.NewAtomicDuration(0),
 	}
 
 	// Create base node
@@ -109,16 +106,38 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 		r.f = newPreviousRateEnforcerFiller(r, r.eh, r.p)
 	}
 
-	// Add stats
-	r.addStats()
+	// Add stat options
+	r.addStatOptions()
 	return
 }
 
-func (r *RateEnforcer) addStats() {
+type RateEnforcerStats struct {
+	FramesAllocated uint64
+	FramesDelay     time.Duration
+	FramesDispached uint64
+	FramesFilled    uint64
+	FramesProcessed uint64
+	FramesReceived  uint64
+	WorkDuration    time.Duration
+}
+
+func (r *RateEnforcer) Stats() RateEnforcerStats {
+	return RateEnforcerStats{
+		FramesAllocated: r.p.stats().framesAllocated,
+		FramesDelay:     r.statFramesDelay.Duration(),
+		FramesDispached: r.d.stats().framesDispatched,
+		FramesFilled:    atomic.LoadUint64(&r.statFramesFilled),
+		FramesProcessed: atomic.LoadUint64(&r.statFramesProcessed),
+		FramesReceived:  atomic.LoadUint64(&r.statFramesReceived),
+		WorkDuration:    r.c.Stats().WorkDuration,
+	}
+}
+
+func (r *RateEnforcer) addStatOptions() {
 	// Get stats
-	ss := r.c.Stats()
-	ss = append(ss, r.d.stats()...)
-	ss = append(ss, r.p.stats()...)
+	ss := r.c.StatOptions()
+	ss = append(ss, r.d.statOptions()...)
+	ss = append(ss, r.p.statOptions()...)
 	ss = append(ss,
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -127,7 +146,7 @@ func (r *RateEnforcer) addStats() {
 				Name:        StatNameIncomingRate,
 				Unit:        "fps",
 			},
-			Valuer: r.statIncomingRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&r.statFramesReceived),
 		},
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -136,7 +155,7 @@ func (r *RateEnforcer) addStats() {
 				Name:        StatNameProcessedRate,
 				Unit:        "fps",
 			},
-			Valuer: r.statProcessedRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&r.statFramesProcessed),
 		},
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -145,7 +164,7 @@ func (r *RateEnforcer) addStats() {
 				Name:        StatNameAverageDelay,
 				Unit:        "ns",
 			},
-			Valuer: r.statDelayAvg,
+			Valuer: astikit.NewAtomicDurationAvgStat(r.statFramesDelay, &r.statFramesProcessed),
 		},
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -154,7 +173,7 @@ func (r *RateEnforcer) addStats() {
 				Name:        StatNameFilledRate,
 				Unit:        "fps",
 			},
-			Valuer: r.statFilledRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&r.statFramesFilled),
 		},
 	)
 
@@ -221,8 +240,8 @@ func (r *RateEnforcer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) 
 func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
 	r.DoWhenUnclosed(func() {
-		// Increment incoming rate
-		r.statIncomingRate.Add(1)
+		// Increment received frames
+		atomic.AddUint64(&r.statFramesReceived, 1)
 
 		// Invalid pts
 		if p.Frame.Pts() == astiav.NoPtsValue {
@@ -249,8 +268,8 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 				// Handle pause
 				defer r.HandlePause()
 
-				// Increment processed rate
-				r.statProcessedRate.Add(1)
+				// Increment processed frames
+				atomic.AddUint64(&r.statFramesProcessed, 1)
 
 				// Lock
 				r.m.Lock()
@@ -284,9 +303,9 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 					ptsReference = r.ptsReferences[p.Node]
 				}
 
-				// Process delay stat
+				// Increment frames delay
 				if r.currentNode == p.Node {
-					r.statDelayAvg.Add(float64(t.Sub(ptsReference.timeFromPTS(f.Pts()))))
+					r.statFramesDelay.Add(t.Sub(ptsReference.timeFromPTS(f.Pts())))
 				}
 			})
 		})
@@ -352,7 +371,7 @@ func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time) (stop bo
 
 	// Frame has been filled
 	if filled {
-		r.statFilledRate.Add(1)
+		atomic.AddUint64(&r.statFramesFilled, 1)
 	} else {
 		r.p.put(f)
 	}

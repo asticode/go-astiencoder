@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
@@ -14,15 +15,15 @@ var countPktPiper uint64
 // PktPiper represents an object capable of piping pkts
 type PktPiper struct {
 	*astiencoder.BaseNode
-	c                 *astikit.Chan
-	d                 *pktDispatcher
-	ds                Descriptor
-	eh                *astiencoder.EventHandler
-	outputCtx         Context
-	p                 *pktPool
-	restamper         PktRestamper
-	statIncomingRate  *astikit.CounterRateStat
-	statProcessedRate *astikit.CounterRateStat
+	c                    *astikit.Chan
+	d                    *pktDispatcher
+	ds                   Descriptor
+	eh                   *astiencoder.EventHandler
+	outputCtx            Context
+	p                    *pktPool
+	restamper            PktRestamper
+	statPacketsProcessed uint64
+	statPacketsReceived  uint64
 }
 
 // PktPiperOptions represents pkt piper options
@@ -40,13 +41,11 @@ func NewPktPiper(o PktPiperOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 
 	// Create pkt piper
 	p = &PktPiper{
-		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		ds:                NewDescriptor(o.OutputCtx.TimeBase),
-		eh:                eh,
-		outputCtx:         o.OutputCtx,
-		restamper:         o.Restamper,
-		statIncomingRate:  astikit.NewCounterRateStat(),
-		statProcessedRate: astikit.NewCounterRateStat(),
+		c:         astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		ds:        NewDescriptor(o.OutputCtx.TimeBase),
+		eh:        eh,
+		outputCtx: o.OutputCtx,
+		restamper: o.Restamper,
 	}
 
 	// Create base node
@@ -58,16 +57,34 @@ func NewPktPiper(o PktPiperOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	// Create pkt dispatcher
 	p.d = newPktDispatcher(p, eh)
 
-	// Add stats
-	p.addStats()
+	// Add stat options
+	p.addStatOptions()
 	return
 }
 
-func (p *PktPiper) addStats() {
+type PktPiperStats struct {
+	PacketsAllocated  uint64
+	PacketsDispatched uint64
+	PacketsProcessed  uint64
+	PacketsReceived   uint64
+	WorkDuration      time.Duration
+}
+
+func (p *PktPiper) Stats() PktPiperStats {
+	return PktPiperStats{
+		PacketsAllocated:  p.p.stats().packetsAllocated,
+		PacketsDispatched: p.d.stats().packetsDispatched,
+		PacketsProcessed:  atomic.LoadUint64(&p.statPacketsProcessed),
+		PacketsReceived:   atomic.LoadUint64(&p.statPacketsReceived),
+		WorkDuration:      p.c.Stats().WorkDuration,
+	}
+}
+
+func (p *PktPiper) addStatOptions() {
 	// Get stats
-	ss := p.c.Stats()
-	ss = append(ss, p.d.stats()...)
-	ss = append(ss, p.p.stats()...)
+	ss := p.c.StatOptions()
+	ss = append(ss, p.d.statOptions()...)
+	ss = append(ss, p.p.statOptions()...)
 	ss = append(ss,
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -76,7 +93,7 @@ func (p *PktPiper) addStats() {
 				Name:        StatNameIncomingRate,
 				Unit:        "fps",
 			},
-			Valuer: p.statIncomingRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&p.statPacketsReceived),
 		},
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -85,7 +102,7 @@ func (p *PktPiper) addStats() {
 				Name:        StatNameProcessedRate,
 				Unit:        "fps",
 			},
-			Valuer: p.statProcessedRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&p.statPacketsProcessed),
 		},
 	)
 
@@ -130,8 +147,8 @@ func (p *PktPiper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 func (p *PktPiper) Pipe(data []byte) {
 	// Everything executed outside the main loop should be protected from the closer
 	p.DoWhenUnclosed(func() {
-		// Increment incoming rate
-		p.statIncomingRate.Add(1)
+		// Increment received packets
+		atomic.AddUint64(&p.statPacketsReceived, 1)
 
 		// Get pkt
 		pkt := p.p.get()
@@ -152,8 +169,8 @@ func (p *PktPiper) Pipe(data []byte) {
 				// Make sure to close pkt
 				defer p.p.put(pkt)
 
-				// Increment processed rate
-				p.statProcessedRate.Add(1)
+				// Increment processed packets
+				atomic.AddUint64(&p.statPacketsProcessed, 1)
 
 				// Restamp
 				if p.restamper != nil {

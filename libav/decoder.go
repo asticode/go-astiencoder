@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
@@ -16,15 +17,16 @@ var countDecoder uint64
 // Decoder represents an object capable of decoding packets
 type Decoder struct {
 	*astiencoder.BaseNode
-	c                 *astikit.Chan
-	codecCtx          *astiav.CodecContext
-	d                 *frameDispatcher
-	eh                *astiencoder.EventHandler
-	outputCtx         Context
-	fp                *framePool
-	pp                *pktPool
-	statIncomingRate  *astikit.CounterRateStat
-	statProcessedRate *astikit.CounterRateStat
+	c                    *astikit.Chan
+	codecCtx             *astiav.CodecContext
+	d                    *frameDispatcher
+	eh                   *astiencoder.EventHandler
+	fp                   *framePool
+	outputCtx            Context
+	statBytesReceived    uint64
+	statPacketsProcessed uint64
+	statPacketsReceived  uint64
+	pp                   *pktPool
 }
 
 // DecoderOptions represents decoder options
@@ -43,11 +45,9 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Create decoder
 	d = &Decoder{
-		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		eh:                eh,
-		outputCtx:         o.OutputCtx,
-		statIncomingRate:  astikit.NewCounterRateStat(),
-		statProcessedRate: astikit.NewCounterRateStat(),
+		c:         astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		eh:        eh,
+		outputCtx: o.OutputCtx,
 	}
 
 	// Create base node
@@ -60,8 +60,8 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	// Create frame dispatcher
 	d.d = newFrameDispatcher(d, eh)
 
-	// Add stats
-	d.addStats()
+	// Add stat options
+	d.addStatOptions()
 
 	// Find decoder
 	var codec *astiav.Codec
@@ -100,12 +100,34 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	return
 }
 
-func (d *Decoder) addStats() {
-	// Get stats
-	ss := d.c.Stats()
-	ss = append(ss, d.d.stats()...)
-	ss = append(ss, d.fp.stats()...)
-	ss = append(ss, d.pp.stats()...)
+type DecoderStats struct {
+	BytesReceived    uint64
+	FramesAllocated  uint64
+	FramesDispached  uint64
+	PacketsAllocated uint64
+	PacketsProcessed uint64
+	PacketsReceived  uint64
+	WorkDuration     time.Duration
+}
+
+func (d *Decoder) Stats() DecoderStats {
+	return DecoderStats{
+		BytesReceived:    atomic.LoadUint64(&d.statBytesReceived),
+		FramesAllocated:  d.fp.stats().framesAllocated,
+		FramesDispached:  d.d.stats().framesDispatched,
+		PacketsAllocated: d.pp.stats().packetsAllocated,
+		PacketsProcessed: atomic.LoadUint64(&d.statPacketsProcessed),
+		PacketsReceived:  atomic.LoadUint64(&d.statPacketsReceived),
+		WorkDuration:     d.c.Stats().WorkDuration,
+	}
+}
+
+func (d *Decoder) addStatOptions() {
+	// Get stat options
+	ss := d.c.StatOptions()
+	ss = append(ss, d.d.statOptions()...)
+	ss = append(ss, d.fp.statOptions()...)
+	ss = append(ss, d.pp.statOptions()...)
 	ss = append(ss,
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -114,7 +136,7 @@ func (d *Decoder) addStats() {
 				Name:        StatNameIncomingRate,
 				Unit:        "pps",
 			},
-			Valuer: d.statIncomingRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&d.statPacketsReceived),
 		},
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -123,7 +145,7 @@ func (d *Decoder) addStats() {
 				Name:        StatNameProcessedRate,
 				Unit:        "pps",
 			},
-			Valuer: d.statProcessedRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&d.statPacketsProcessed),
 		},
 	)
 
@@ -169,8 +191,13 @@ func (d *Decoder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 func (d *Decoder) HandlePkt(p PktHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
 	d.DoWhenUnclosed(func() {
-		// Increment incoming rate
-		d.statIncomingRate.Add(1)
+		// Increment packets received
+		atomic.AddUint64(&d.statPacketsReceived, 1)
+
+		// Increment received bytes
+		if p.Pkt != nil {
+			atomic.AddUint64(&d.statBytesReceived, uint64(p.Pkt.Size()))
+		}
 
 		// Copy pkt
 		pkt := d.pp.get()
@@ -189,8 +216,8 @@ func (d *Decoder) HandlePkt(p PktHandlerPayload) {
 				// Make sure to close pkt
 				defer d.pp.put(pkt)
 
-				// Increment processed rate
-				d.statProcessedRate.Add(1)
+				// Increment packets processed
+				atomic.AddUint64(&d.statPacketsProcessed, 1)
 
 				// Send pkt to decoder
 				if err := d.codecCtx.SendPacket(pkt); err != nil {

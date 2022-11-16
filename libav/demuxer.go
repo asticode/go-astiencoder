@@ -31,7 +31,7 @@ type Demuxer struct {
 	pb                    *demuxerProbe
 	readFrameErrorHandler DemuxerReadFrameErrorHandler
 	ss                    map[int]*demuxerStream
-	statIncomingRate      *astikit.CounterRateStat
+	statBytesRead         uint64
 }
 
 // Demuxer will start by dispatching without sleeping all packets with negative PTS
@@ -212,7 +212,6 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		pb:                    newDemuxerProbe(o.ProbeDuration),
 		readFrameErrorHandler: o.ReadFrameErrorHandler,
 		ss:                    make(map[int]*demuxerStream),
-		statIncomingRate:      astikit.NewCounterRateStat(),
 	}
 
 	// Create base node
@@ -224,8 +223,8 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	// Create pkt dispatcher
 	d.d = newPktDispatcher(d, eh)
 
-	// Add stats
-	d.addStats()
+	// Add stat options
+	d.addStatOptions()
 
 	// Dictionary
 	var dict *astiav.Dictionary
@@ -409,18 +408,32 @@ func (d *Demuxer) probe() (err error) {
 	return
 }
 
-func (d *Demuxer) addStats() {
+type DemuxerStats struct {
+	BytesRead         uint64
+	PacketsAllocated  uint64
+	PacketsDispatched uint64
+}
+
+func (d *Demuxer) Stats() DemuxerStats {
+	return DemuxerStats{
+		BytesRead:         atomic.LoadUint64(&d.statBytesRead),
+		PacketsAllocated:  d.p.stats().packetsAllocated,
+		PacketsDispatched: d.d.stats().packetsDispatched,
+	}
+}
+
+func (d *Demuxer) addStatOptions() {
 	// Get stats
-	ss := d.d.stats()
-	ss = append(ss, d.p.stats()...)
+	ss := d.d.statOptions()
+	ss = append(ss, d.p.statOptions()...)
 	ss = append(ss, astikit.StatOptions{
 		Metadata: &astikit.StatMetadata{
-			Description: "Number of bits going in per second",
-			Label:       "Incoming rate",
-			Name:        StatNameIncomingRate,
-			Unit:        "bps",
+			Description: "Number of bytes read per second",
+			Label:       "Read rate",
+			Name:        StatNameReadRate,
+			Unit:        "Bps",
 		},
-		Valuer: d.statIncomingRate,
+		Valuer: astikit.NewAtomicUint64RateStat(&d.statBytesRead),
 	})
 
 	// Add stats
@@ -610,8 +623,8 @@ func (d *Demuxer) readFrame() bool {
 		return false
 	}
 
-	// Increment incoming rate
-	d.statIncomingRate.Add(float64(pkt.Size() * 8))
+	// Increment read bytes
+	atomic.AddUint64(&d.statBytesRead, uint64(pkt.Size()))
 
 	// Handle pkt
 	d.handlePkt(pkt)

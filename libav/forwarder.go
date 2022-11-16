@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/asticode/go-astiencoder"
 	"github.com/asticode/go-astikit"
@@ -14,14 +15,14 @@ var countForwarder uint64
 // Forwarder represents an object capable of forwarding frames
 type Forwarder struct {
 	*astiencoder.BaseNode
-	c                 *astikit.Chan
-	d                 *frameDispatcher
-	eh                *astiencoder.EventHandler
-	outputCtx         Context
-	p                 *framePool
-	restamper         FrameRestamper
-	statIncomingRate  *astikit.CounterRateStat
-	statProcessedRate *astikit.CounterRateStat
+	c                   *astikit.Chan
+	d                   *frameDispatcher
+	eh                  *astiencoder.EventHandler
+	outputCtx           Context
+	p                   *framePool
+	restamper           FrameRestamper
+	statFramesProcessed uint64
+	statFramesReceived  uint64
 }
 
 // ForwarderOptions represents forwarder options
@@ -39,12 +40,10 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 
 	// Create forwarder
 	f = &Forwarder{
-		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		eh:                eh,
-		outputCtx:         o.OutputCtx,
-		restamper:         o.Restamper,
-		statIncomingRate:  astikit.NewCounterRateStat(),
-		statProcessedRate: astikit.NewCounterRateStat(),
+		c:         astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		eh:        eh,
+		outputCtx: o.OutputCtx,
+		restamper: o.Restamper,
 	}
 
 	// Create base node
@@ -56,16 +55,34 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 	// Create frame dispatcher
 	f.d = newFrameDispatcher(f, eh)
 
-	// Add stats
-	f.addStats()
+	// Add stat options
+	f.addStatOptions()
 	return
 }
 
-func (f *Forwarder) addStats() {
+type ForwarderStats struct {
+	FramesAllocated uint64
+	FramesDispached uint64
+	FramesProcessed uint64
+	FramesReceived  uint64
+	WorkDuration    time.Duration
+}
+
+func (f *Forwarder) Stats() ForwarderStats {
+	return ForwarderStats{
+		FramesAllocated: f.p.stats().framesAllocated,
+		FramesDispached: f.d.stats().framesDispatched,
+		FramesProcessed: atomic.LoadUint64(&f.statFramesProcessed),
+		FramesReceived:  atomic.LoadUint64(&f.statFramesReceived),
+		WorkDuration:    f.c.Stats().WorkDuration,
+	}
+}
+
+func (f *Forwarder) addStatOptions() {
 	// Get stats
-	ss := f.c.Stats()
-	ss = append(ss, f.d.stats()...)
-	ss = append(ss, f.p.stats()...)
+	ss := f.c.StatOptions()
+	ss = append(ss, f.d.statOptions()...)
+	ss = append(ss, f.p.statOptions()...)
 	ss = append(ss,
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -74,7 +91,7 @@ func (f *Forwarder) addStats() {
 				Name:        StatNameIncomingRate,
 				Unit:        "fps",
 			},
-			Valuer: f.statIncomingRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&f.statFramesReceived),
 		},
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -83,7 +100,7 @@ func (f *Forwarder) addStats() {
 				Name:        StatNameProcessedRate,
 				Unit:        "fps",
 			},
-			Valuer: f.statProcessedRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&f.statFramesProcessed),
 		},
 	)
 
@@ -129,8 +146,8 @@ func (f *Forwarder) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 func (f *Forwarder) HandleFrame(p FrameHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
 	f.DoWhenUnclosed(func() {
-		// Increment incoming rate
-		f.statIncomingRate.Add(1)
+		// Increment received frames
+		atomic.AddUint64(&f.statFramesReceived, 1)
 
 		// Copy frame
 		fm := f.p.get()
@@ -149,8 +166,8 @@ func (f *Forwarder) HandleFrame(p FrameHandlerPayload) {
 				// Make sure to close frame
 				defer f.p.put(fm)
 
-				// Increment processed rate
-				f.statProcessedRate.Add(1)
+				// Increment processed frames
+				atomic.AddUint64(&f.statFramesProcessed, 1)
 
 				// Restamp
 				if f.restamper != nil {

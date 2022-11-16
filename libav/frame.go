@@ -2,6 +2,8 @@ package astilibav
 
 import (
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
@@ -28,20 +30,19 @@ type FrameHandlerPayload struct {
 }
 
 type frameDispatcher struct {
-	eh               *astiencoder.EventHandler
-	hs               map[string]FrameHandler
-	m                *sync.Mutex // Locks hs
-	n                astiencoder.Node
-	statOutgoingRate *astikit.CounterRateStat
+	eh                   *astiencoder.EventHandler
+	hs                   map[string]FrameHandler
+	m                    *sync.Mutex // Locks hs
+	n                    astiencoder.Node
+	statFramesDispatched uint64
 }
 
 func newFrameDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler) *frameDispatcher {
 	return &frameDispatcher{
-		eh:               eh,
-		hs:               make(map[string]FrameHandler),
-		m:                &sync.Mutex{},
-		n:                n,
-		statOutgoingRate: astikit.NewCounterRateStat(),
+		eh: eh,
+		hs: make(map[string]FrameHandler),
+		m:  &sync.Mutex{},
+		n:  n,
 	}
 }
 
@@ -58,8 +59,8 @@ func (d *frameDispatcher) delHandler(h FrameHandler) {
 }
 
 func (d *frameDispatcher) dispatch(f *astiav.Frame, descriptor Descriptor) {
-	// Increment outgoing rate
-	d.statOutgoingRate.Add(1)
+	// Increment dispatched frames
+	atomic.AddUint64(&d.statFramesDispatched, 1)
 
 	// Get handlers
 	d.m.Lock()
@@ -85,7 +86,15 @@ func (d *frameDispatcher) dispatch(f *astiav.Frame, descriptor Descriptor) {
 	}
 }
 
-func (d *frameDispatcher) stats() []astikit.StatOptions {
+type frameDispatcherStats struct {
+	framesDispatched uint64
+}
+
+func (d *frameDispatcher) stats() frameDispatcherStats {
+	return frameDispatcherStats{framesDispatched: atomic.LoadUint64(&d.statFramesDispatched)}
+}
+
+func (d *frameDispatcher) statOptions() []astikit.StatOptions {
 	return []astikit.StatOptions{
 		{
 			Metadata: &astikit.StatMetadata{
@@ -94,23 +103,22 @@ func (d *frameDispatcher) stats() []astikit.StatOptions {
 				Name:        StatNameOutgoingRate,
 				Unit:        "fps",
 			},
-			Valuer: d.statOutgoingRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&d.statFramesDispatched),
 		},
 	}
 }
 
 type framePool struct {
-	c                  astiencoder.Closer
-	m                  *sync.Mutex
-	p                  []*astiav.Frame
-	statAllocatedCount *astikit.CounterStat
+	c                   astiencoder.Closer
+	m                   *sync.Mutex
+	p                   []*astiav.Frame
+	statFramesAllocated uint64
 }
 
 func newFramePool(c astiencoder.Closer) *framePool {
 	return &framePool{
-		c:                  c,
-		m:                  &sync.Mutex{},
-		statAllocatedCount: astikit.NewCounterStat(),
+		c: c,
+		m: &sync.Mutex{},
 	}
 }
 
@@ -119,7 +127,7 @@ func (p *framePool) get() (f *astiav.Frame) {
 	defer p.m.Unlock()
 	if len(p.p) == 0 {
 		f = astiav.AllocFrame()
-		p.statAllocatedCount.Add(1)
+		atomic.AddUint64(&p.statFramesAllocated, 1)
 		p.c.AddClose(f.Free)
 		return
 	}
@@ -135,7 +143,15 @@ func (p *framePool) put(f *astiav.Frame) {
 	p.p = append(p.p, f)
 }
 
-func (p *framePool) stats() []astikit.StatOptions {
+type framePoolStats struct {
+	framesAllocated uint64
+}
+
+func (p *framePool) stats() framePoolStats {
+	return framePoolStats{framesAllocated: atomic.LoadUint64(&p.statFramesAllocated)}
+}
+
+func (p *framePool) statOptions() []astikit.StatOptions {
 	return []astikit.StatOptions{
 		{
 			Metadata: &astikit.StatMetadata{
@@ -144,7 +160,7 @@ func (p *framePool) stats() []astikit.StatOptions {
 				Name:        StatNameAllocatedFrames,
 				Unit:        "f",
 			},
-			Valuer: p.statAllocatedCount,
+			Valuer: astikit.StatValuerFunc(func(d time.Duration) interface{} { return atomic.LoadUint64(&p.statFramesAllocated) }),
 		},
 	}
 }

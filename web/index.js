@@ -1058,7 +1058,9 @@ var astiencoder = {
                 var f = parseFloat(v)
                 if (!isNaN(f)) {
                     switch (this.nodes[name].stats[payload.stat.label].unit) {
-                        case 'bps':
+                        case 'Bps':
+                            f *= 8
+                            this.nodes[name].stats[payload.stat.label].unit = 'bps'
                             if (f > 1e9) {
                                 f /= 1e9
                                 this.nodes[name].stats[payload.stat.label].unit = 'Gbps'

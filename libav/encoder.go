@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
@@ -16,15 +17,15 @@ var countEncoder uint64
 // Encoder represents an object capable of encoding frames
 type Encoder struct {
 	*astiencoder.BaseNode
-	c                  *astikit.Chan
-	codecCtx           *astiav.CodecContext
-	d                  *pktDispatcher
-	eh                 *astiencoder.EventHandler
-	fp                 *framePool
-	pp                 *pktPool
-	previousDescriptor Descriptor
-	statIncomingRate   *astikit.CounterRateStat
-	statProcessedRate  *astikit.CounterRateStat
+	c                   *astikit.Chan
+	codecCtx            *astiav.CodecContext
+	d                   *pktDispatcher
+	eh                  *astiencoder.EventHandler
+	fp                  *framePool
+	pp                  *pktPool
+	previousDescriptor  Descriptor
+	statFramesProcessed uint64
+	statFramesReceived  uint64
 }
 
 // EncoderOptions represents encoder options
@@ -41,10 +42,8 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Create encoder
 	e = &Encoder{
-		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		eh:                eh,
-		statIncomingRate:  astikit.NewCounterRateStat(),
-		statProcessedRate: astikit.NewCounterRateStat(),
+		c:  astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		eh: eh,
 	}
 
 	// Create base node
@@ -57,8 +56,8 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	// Create pkt dispatcher
 	e.d = newPktDispatcher(e, eh)
 
-	// Add stats
-	e.addStats()
+	// Add stat options
+	e.addStatOptions()
 
 	// Find encoder
 	var codec *astiav.Codec
@@ -140,12 +139,32 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	return
 }
 
-func (e *Encoder) addStats() {
+type EncoderStats struct {
+	FramesAllocated  uint64
+	FramesProcessed  uint64
+	FramesReceived   uint64
+	PacketsAllocated uint64
+	PacketsDispached uint64
+	WorkDuration     time.Duration
+}
+
+func (e *Encoder) Stats() EncoderStats {
+	return EncoderStats{
+		FramesAllocated:  e.fp.stats().framesAllocated,
+		FramesProcessed:  atomic.LoadUint64(&e.statFramesProcessed),
+		FramesReceived:   atomic.LoadUint64(&e.statFramesReceived),
+		PacketsAllocated: e.pp.stats().packetsAllocated,
+		PacketsDispached: e.d.stats().packetsDispatched,
+		WorkDuration:     e.c.Stats().WorkDuration,
+	}
+}
+
+func (e *Encoder) addStatOptions() {
 	// Get stats
-	ss := e.c.Stats()
-	ss = append(ss, e.d.stats()...)
-	ss = append(ss, e.fp.stats()...)
-	ss = append(ss, e.pp.stats()...)
+	ss := e.c.StatOptions()
+	ss = append(ss, e.d.statOptions()...)
+	ss = append(ss, e.fp.statOptions()...)
+	ss = append(ss, e.pp.statOptions()...)
 	ss = append(ss,
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -154,7 +173,7 @@ func (e *Encoder) addStats() {
 				Name:        StatNameIncomingRate,
 				Unit:        "fps",
 			},
-			Valuer: e.statIncomingRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&e.statFramesReceived),
 		},
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -163,7 +182,7 @@ func (e *Encoder) addStats() {
 				Name:        StatNameProcessedRate,
 				Unit:        "fps",
 			},
-			Valuer: e.statProcessedRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&e.statFramesProcessed),
 		},
 	)
 
@@ -211,8 +230,8 @@ func (e *Encoder) flush() {
 func (e *Encoder) HandleFrame(p FrameHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
 	e.DoWhenUnclosed(func() {
-		// Increment incoming rate
-		e.statIncomingRate.Add(1)
+		// Increment received frames
+		atomic.AddUint64(&e.statFramesReceived, 1)
 
 		// Copy frame
 		f := e.fp.get()
@@ -231,8 +250,8 @@ func (e *Encoder) HandleFrame(p FrameHandlerPayload) {
 				// Make sure to close frame
 				defer e.fp.put(f)
 
-				// Increment processed rate
-				e.statProcessedRate.Add(1)
+				// Increment processed frames
+				atomic.AddUint64(&e.statFramesProcessed, 1)
 
 				// Encode
 				e.encode(f, p.Descriptor)

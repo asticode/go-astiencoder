@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync/atomic"
 	"text/template"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
@@ -19,14 +20,14 @@ var countPktDumper uint64
 // PktDumper represents an object capable of dumping packets
 type PktDumper struct {
 	*astiencoder.BaseNode
-	c                 *astikit.Chan
-	count             uint32
-	eh                *astiencoder.EventHandler
-	o                 PktDumperOptions
-	p                 *pktPool
-	statIncomingRate  *astikit.CounterRateStat
-	statProcessedRate *astikit.CounterRateStat
-	t                 *template.Template
+	c                    *astikit.Chan
+	count                uint32
+	eh                   *astiencoder.EventHandler
+	o                    PktDumperOptions
+	p                    *pktPool
+	statPacketsProcessed uint64
+	statPacketsReceived  uint64
+	t                    *template.Template
 }
 
 // PktDumperOptions represents pkt dumper options
@@ -50,11 +51,9 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.C
 
 	// Create pkt dumper
 	d = &PktDumper{
-		c:                 astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		eh:                eh,
-		o:                 o,
-		statIncomingRate:  astikit.NewCounterRateStat(),
-		statProcessedRate: astikit.NewCounterRateStat(),
+		c:  astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		eh: eh,
+		o:  o,
 	}
 
 	// Create base node
@@ -63,8 +62,8 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.C
 	// Create pkt pool
 	d.p = newPktPool(d)
 
-	// Add stats
-	d.addStats()
+	// Add stat options
+	d.addStatOptions()
 
 	// Parse pattern
 	if len(o.Pattern) > 0 {
@@ -76,10 +75,26 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.C
 	return
 }
 
-func (d *PktDumper) addStats() {
+type PktDumperStats struct {
+	PacketsAllocated uint64
+	PacketsProcessed uint64
+	PacketsReceived  uint64
+	WorkDuration     time.Duration
+}
+
+func (d *PktDumper) Stats() PktDumperStats {
+	return PktDumperStats{
+		PacketsAllocated: d.p.stats().packetsAllocated,
+		PacketsProcessed: atomic.LoadUint64(&d.statPacketsProcessed),
+		PacketsReceived:  atomic.LoadUint64(&d.statPacketsReceived),
+		WorkDuration:     d.c.Stats().WorkDuration,
+	}
+}
+
+func (d *PktDumper) addStatOptions() {
 	// Get stats
-	ss := d.c.Stats()
-	ss = append(ss, d.p.stats()...)
+	ss := d.c.StatOptions()
+	ss = append(ss, d.p.statOptions()...)
 	ss = append(ss,
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -88,7 +103,7 @@ func (d *PktDumper) addStats() {
 				Name:        StatNameIncomingRate,
 				Unit:        "pps",
 			},
-			Valuer: d.statIncomingRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&d.statPacketsReceived),
 		},
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -97,7 +112,7 @@ func (d *PktDumper) addStats() {
 				Name:        StatNameProcessedRate,
 				Unit:        "pps",
 			},
-			Valuer: d.statProcessedRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&d.statPacketsProcessed),
 		},
 	)
 
@@ -120,8 +135,8 @@ func (d *PktDumper) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 func (d *PktDumper) HandlePkt(p PktHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
 	d.DoWhenUnclosed(func() {
-		// Increment incoming rate
-		d.statIncomingRate.Add(1)
+		// Increment received packets
+		atomic.AddUint64(&d.statPacketsReceived, 1)
 
 		// Copy pkt
 		pkt := d.p.get()
@@ -140,8 +155,8 @@ func (d *PktDumper) HandlePkt(p PktHandlerPayload) {
 				// Make sure to close pkt
 				defer d.p.put(pkt)
 
-				// Increment processed rate
-				d.statProcessedRate.Add(1)
+				// Increment processed packets
+				atomic.AddUint64(&d.statPacketsProcessed, 1)
 
 				// Get pattern
 				var args PktDumperHandlerArgs

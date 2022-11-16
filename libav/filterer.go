@@ -18,18 +18,18 @@ var countFilterer uint64
 // Filterer represents an object capable of applying a filter to frames
 type Filterer struct {
 	*astiencoder.BaseNode
-	buffersinkContext *astiav.FilterContext
-	buffersrcContexts map[astiencoder.Node][]*astiav.FilterContext
-	c                 *astikit.Chan
-	d                 *frameDispatcher
-	eh                *astiencoder.EventHandler
-	emulatePeriod     time.Duration
-	g                 *astiav.FilterGraph
-	outputCtx         Context
-	p                 *framePool
-	restamper         FrameRestamper
-	statIncomingRate  *astikit.CounterRateStat
-	statProcessedRate *astikit.CounterRateStat
+	buffersinkContext   *astiav.FilterContext
+	buffersrcContexts   map[astiencoder.Node][]*astiav.FilterContext
+	c                   *astikit.Chan
+	d                   *frameDispatcher
+	eh                  *astiencoder.EventHandler
+	emulatePeriod       time.Duration
+	g                   *astiav.FilterGraph
+	outputCtx           Context
+	p                   *framePool
+	restamper           FrameRestamper
+	statFramesProcessed uint64
+	statFramesReceived  uint64
 }
 
 // FiltererOptions represents filterer options
@@ -55,8 +55,6 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		eh:                eh,
 		outputCtx:         o.OutputCtx,
 		restamper:         o.Restamper,
-		statIncomingRate:  astikit.NewCounterRateStat(),
-		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 
 	// Create base node
@@ -68,8 +66,8 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	// Create frame dispatcher
 	f.d = newFrameDispatcher(f, eh)
 
-	// Add stats
-	f.addStats()
+	// Add stat options
+	f.addStatOptions()
 
 	// No inputs
 	if len(o.Inputs) == 0 {
@@ -217,11 +215,29 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	return
 }
 
-func (f *Filterer) addStats() {
+type FiltererStats struct {
+	FramesAllocated uint64
+	FramesDispached uint64
+	FramesProcessed uint64
+	FramesReceived  uint64
+	WorkDuration    time.Duration
+}
+
+func (f *Filterer) Stats() FiltererStats {
+	return FiltererStats{
+		FramesAllocated: f.p.stats().framesAllocated,
+		FramesDispached: f.d.stats().framesDispatched,
+		FramesProcessed: atomic.LoadUint64(&f.statFramesProcessed),
+		FramesReceived:  atomic.LoadUint64(&f.statFramesReceived),
+		WorkDuration:    f.c.Stats().WorkDuration,
+	}
+}
+
+func (f *Filterer) addStatOptions() {
 	// Get stats
-	ss := f.c.Stats()
-	ss = append(ss, f.d.stats()...)
-	ss = append(ss, f.p.stats()...)
+	ss := f.c.StatOptions()
+	ss = append(ss, f.d.statOptions()...)
+	ss = append(ss, f.p.statOptions()...)
 	ss = append(ss,
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -230,7 +246,7 @@ func (f *Filterer) addStats() {
 				Name:        StatNameIncomingRate,
 				Unit:        "fps",
 			},
-			Valuer: f.statIncomingRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&f.statFramesReceived),
 		},
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -239,7 +255,7 @@ func (f *Filterer) addStats() {
 				Name:        StatNameProcessedRate,
 				Unit:        "fps",
 			},
-			Valuer: f.statProcessedRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&f.statFramesProcessed),
 		},
 	)
 
@@ -317,8 +333,8 @@ func (f *Filterer) tickFunc(nextAt *time.Time, desc Descriptor) (stop bool) {
 func (f *Filterer) HandleFrame(p FrameHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
 	f.DoWhenUnclosed(func() {
-		// Increment incoming rate
-		f.statIncomingRate.Add(1)
+		// Increment received frames
+		atomic.AddUint64(&f.statFramesReceived, 1)
 
 		// Copy frame
 		fm := f.p.get()
@@ -337,8 +353,8 @@ func (f *Filterer) HandleFrame(p FrameHandlerPayload) {
 				// Make sure to close frame
 				defer f.p.put(fm)
 
-				// Increment processed rate
-				f.statProcessedRate.Add(1)
+				// Increment processed frames
+				atomic.AddUint64(&f.statFramesProcessed, 1)
 
 				// Retrieve buffer ctxs
 				buffersrcContexts, ok := f.buffersrcContexts[p.Node]

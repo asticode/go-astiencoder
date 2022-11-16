@@ -3,6 +3,8 @@ package astilibav
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astiencoder"
@@ -29,20 +31,19 @@ type PktHandlerPayload struct {
 }
 
 type pktDispatcher struct {
-	eh               *astiencoder.EventHandler
-	hs               map[string]PktHandler
-	m                *sync.Mutex
-	n                astiencoder.Node
-	statOutgoingRate *astikit.CounterRateStat
+	eh                    *astiencoder.EventHandler
+	hs                    map[string]PktHandler
+	m                     *sync.Mutex
+	n                     astiencoder.Node
+	statPacketsDispatched uint64
 }
 
 func newPktDispatcher(n astiencoder.Node, eh *astiencoder.EventHandler) *pktDispatcher {
 	return &pktDispatcher{
-		eh:               eh,
-		hs:               make(map[string]PktHandler),
-		m:                &sync.Mutex{},
-		n:                n,
-		statOutgoingRate: astikit.NewCounterRateStat(),
+		eh: eh,
+		hs: make(map[string]PktHandler),
+		m:  &sync.Mutex{},
+		n:  n,
 	}
 }
 
@@ -59,8 +60,8 @@ func (d *pktDispatcher) delHandler(h PktHandler) {
 }
 
 func (d *pktDispatcher) dispatch(pkt *astiav.Packet, descriptor Descriptor) {
-	// Increment outgoing rate
-	d.statOutgoingRate.Add(1)
+	// Increment dispatched packets
+	atomic.AddUint64(&d.statPacketsDispatched, 1)
 
 	// Get handlers
 	d.m.Lock()
@@ -89,7 +90,15 @@ func (d *pktDispatcher) dispatch(pkt *astiav.Packet, descriptor Descriptor) {
 	}
 }
 
-func (d *pktDispatcher) stats() []astikit.StatOptions {
+type pktDispatcherStats struct {
+	packetsDispatched uint64
+}
+
+func (d *pktDispatcher) stats() pktDispatcherStats {
+	return pktDispatcherStats{packetsDispatched: atomic.LoadUint64(&d.statPacketsDispatched)}
+}
+
+func (d *pktDispatcher) statOptions() []astikit.StatOptions {
 	return []astikit.StatOptions{
 		{
 			Metadata: &astikit.StatMetadata{
@@ -98,7 +107,7 @@ func (d *pktDispatcher) stats() []astikit.StatOptions {
 				Name:        StatNameOutgoingRate,
 				Unit:        "pps",
 			},
-			Valuer: d.statOutgoingRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&d.statPacketsDispatched),
 		},
 	}
 }
@@ -133,17 +142,16 @@ func (c *pktCond) UsePkt(pkt *astiav.Packet) bool {
 }
 
 type pktPool struct {
-	c                  astiencoder.Closer
-	m                  *sync.Mutex
-	p                  []*astiav.Packet
-	statAllocatedCount *astikit.CounterStat
+	c                    astiencoder.Closer
+	m                    *sync.Mutex
+	p                    []*astiav.Packet
+	statPacketsAllocated uint64
 }
 
 func newPktPool(c astiencoder.Closer) *pktPool {
 	return &pktPool{
-		c:                  c,
-		m:                  &sync.Mutex{},
-		statAllocatedCount: astikit.NewCounterStat(),
+		c: c,
+		m: &sync.Mutex{},
 	}
 }
 
@@ -152,7 +160,7 @@ func (p *pktPool) get() (pkt *astiav.Packet) {
 	defer p.m.Unlock()
 	if len(p.p) == 0 {
 		pkt = astiav.AllocPacket()
-		p.statAllocatedCount.Add(1)
+		atomic.AddUint64(&p.statPacketsAllocated, 1)
 		p.c.AddClose(pkt.Free)
 		return
 	}
@@ -168,7 +176,15 @@ func (p *pktPool) put(pkt *astiav.Packet) {
 	p.p = append(p.p, pkt)
 }
 
-func (p *pktPool) stats() []astikit.StatOptions {
+type pktPoolStats struct {
+	packetsAllocated uint64
+}
+
+func (p *pktPool) stats() pktPoolStats {
+	return pktPoolStats{packetsAllocated: atomic.LoadUint64(&p.statPacketsAllocated)}
+}
+
+func (p *pktPool) statOptions() []astikit.StatOptions {
 	return []astikit.StatOptions{
 		{
 			Metadata: &astikit.StatMetadata{
@@ -177,7 +193,7 @@ func (p *pktPool) stats() []astikit.StatOptions {
 				Name:        StatNameAllocatedPackets,
 				Unit:        "p",
 			},
-			Valuer: p.statAllocatedCount,
+			Valuer: astikit.StatValuerFunc(func(d time.Duration) interface{} { return atomic.LoadUint64(&p.statPacketsAllocated) }),
 		},
 	}
 }

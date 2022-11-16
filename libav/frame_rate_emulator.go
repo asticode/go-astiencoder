@@ -21,15 +21,15 @@ type frameRateEmulatorPTSReference struct {
 
 type FrameRateEmulator struct {
 	*astiencoder.BaseNode
-	c                 *astikit.Chan
-	d                 *frameDispatcher
-	eh                *astiencoder.EventHandler
-	outputCtx         Context
-	p                 *framePool
-	ptsReference      frameRateEmulatorPTSReference
-	r                 *rateEmulator
-	statIncomingRate  *astikit.CounterRateStat
-	statProcessedRate *astikit.CounterRateStat
+	c                   *astikit.Chan
+	d                   *frameDispatcher
+	eh                  *astiencoder.EventHandler
+	outputCtx           Context
+	p                   *framePool
+	ptsReference        frameRateEmulatorPTSReference
+	r                   *rateEmulator
+	statFramesProcessed uint64
+	statFramesReceived  uint64
 }
 
 type PTSReference struct {
@@ -59,8 +59,6 @@ func NewFrameRateEmulator(o FrameRateEmulatorOptions, eh *astiencoder.EventHandl
 			pts:  astiav.RescaleQ(o.PTSReference.PTS, o.PTSReference.TimeBase, o.OutputCtx.TimeBase),
 			time: o.PTSReference.Time,
 		},
-		statIncomingRate:  astikit.NewCounterRateStat(),
-		statProcessedRate: astikit.NewCounterRateStat(),
 	}
 
 	// Create base node
@@ -75,16 +73,34 @@ func NewFrameRateEmulator(o FrameRateEmulatorOptions, eh *astiencoder.EventHandl
 	// Create rate emulator
 	r.r = newRateEmulator(o.FlushOnStop, r.rateEmulatorAt, r.rateEmulatorBefore, r.rateEmulatorExec)
 
-	// Add stats
-	r.addStats()
+	// Add stat options
+	r.addStatOptions()
 	return
 }
 
-func (r *FrameRateEmulator) addStats() {
+type FrameRateEmulatorStats struct {
+	FramesAllocated uint64
+	FramesDispached uint64
+	FramesProcessed uint64
+	FramesReceived  uint64
+	WorkDuration    time.Duration
+}
+
+func (r *FrameRateEmulator) Stats() FrameRateEmulatorStats {
+	return FrameRateEmulatorStats{
+		FramesAllocated: r.p.stats().framesAllocated,
+		FramesDispached: r.d.stats().framesDispatched,
+		FramesProcessed: atomic.LoadUint64(&r.statFramesProcessed),
+		FramesReceived:  atomic.LoadUint64(&r.statFramesReceived),
+		WorkDuration:    r.c.Stats().WorkDuration,
+	}
+}
+
+func (r *FrameRateEmulator) addStatOptions() {
 	// Get stats
-	ss := r.c.Stats()
-	ss = append(ss, r.d.stats()...)
-	ss = append(ss, r.p.stats()...)
+	ss := r.c.StatOptions()
+	ss = append(ss, r.d.statOptions()...)
+	ss = append(ss, r.p.statOptions()...)
 	ss = append(ss,
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -93,7 +109,7 @@ func (r *FrameRateEmulator) addStats() {
 				Name:        StatNameIncomingRate,
 				Unit:        "fps",
 			},
-			Valuer: r.statIncomingRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&r.statFramesReceived),
 		},
 		astikit.StatOptions{
 			Metadata: &astikit.StatMetadata{
@@ -102,7 +118,7 @@ func (r *FrameRateEmulator) addStats() {
 				Name:        StatNameProcessedRate,
 				Unit:        "fps",
 			},
-			Valuer: r.statProcessedRate,
+			Valuer: astikit.NewAtomicUint64RateStat(&r.statFramesProcessed),
 		},
 	)
 
@@ -176,8 +192,8 @@ type frameRateEmulatorItem struct {
 func (r *FrameRateEmulator) HandleFrame(p FrameHandlerPayload) {
 	// Everything executed outside the main loop should be protected from the closer
 	r.DoWhenUnclosed(func() {
-		// Increment incoming rate
-		r.statIncomingRate.Add(1)
+		// Increment received frames
+		atomic.AddUint64(&r.statFramesReceived, 1)
 
 		// Copy frame
 		f := r.p.get()
@@ -193,8 +209,8 @@ func (r *FrameRateEmulator) HandleFrame(p FrameHandlerPayload) {
 				// Handle pause
 				defer r.HandlePause()
 
-				// Increment processed rate
-				r.statProcessedRate.Add(1)
+				// Increment processed frames
+				atomic.AddUint64(&r.statFramesProcessed, 1)
 
 				// Add to rate emulator
 				r.r.add(&frameRateEmulatorItem{
