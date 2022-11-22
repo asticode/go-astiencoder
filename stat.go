@@ -155,7 +155,7 @@ func newStatPSUtil() (u *statPSUtil, err error) {
 	return
 }
 
-func (s *statPSUtil) Value() interface{} {
+func (s *statPSUtil) Value(_ time.Duration) interface{} {
 	// Get process CPU
 	var v StatValueHostUsage
 	if t, err := s.p.Times(); err == nil {
