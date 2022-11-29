@@ -2,10 +2,8 @@ package astilibav
 
 import "C"
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"sync/atomic"
 	"text/template"
 	"time"
@@ -23,24 +21,20 @@ type PktDumper struct {
 	c                    *astikit.Chan
 	count                uint32
 	eh                   *astiencoder.EventHandler
-	o                    PktDumperOptions
+	h                    PktDumperHandler
 	p                    *pktPool
 	statPacketsProcessed uint64
 	statPacketsReceived  uint64
 	t                    *template.Template
 }
 
+// PktDumperHandler represents a pkt dumper handler
+type PktDumperHandler func(pkt *astiav.Packet)
+
 // PktDumperOptions represents pkt dumper options
 type PktDumperOptions struct {
-	Data    map[string]interface{}
-	Handler func(pkt *astiav.Packet, args PktDumperHandlerArgs) error
+	Handler PktDumperHandler
 	Node    astiencoder.NodeOptions
-	Pattern string
-}
-
-// PktDumperHandlerArgs represents pkt dumper handler args
-type PktDumperHandlerArgs struct {
-	Pattern string
 }
 
 // NewPktDumper creates a new pk dumper
@@ -53,7 +47,7 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.C
 	d = &PktDumper{
 		c:  astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
 		eh: eh,
-		o:  o,
+		h:  o.Handler,
 	}
 
 	// Create base node
@@ -64,14 +58,6 @@ func NewPktDumper(o PktDumperOptions, eh *astiencoder.EventHandler, c *astikit.C
 
 	// Add stat options
 	d.addStatOptions()
-
-	// Parse pattern
-	if len(o.Pattern) > 0 {
-		if d.t, err = template.New("").Parse(o.Pattern); err != nil {
-			err = fmt.Errorf("astilibav: parsing pattern %s as template failed: %w", o.Pattern, err)
-			return
-		}
-	}
 	return
 }
 
@@ -158,56 +144,11 @@ func (d *PktDumper) HandlePkt(p PktHandlerPayload) {
 				// Increment processed packets
 				atomic.AddUint64(&d.statPacketsProcessed, 1)
 
-				// Get pattern
-				var args PktDumperHandlerArgs
-				if d.t != nil {
-					// Increment count
-					c := atomic.AddUint32(&d.count, 1)
-
-					// Create data
-					data := make(map[string]interface{})
-					if d.o.Data != nil {
-						data = d.o.Data
-					}
-					data["count"] = c
-					data["pts"] = pkt.Pts()
-					data["stream_idx"] = pkt.StreamIndex()
-
-					// Execute template
-					buf := &bytes.Buffer{}
-					if err := d.t.Execute(buf, data); err != nil {
-						d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: executing template %s with data %+v failed: %w", d.o.Pattern, d.o.Data, err)))
-						return
-					}
-
-					// Add to args
-					args.Pattern = buf.String()
-				}
-
-				// Dump
-				if err := d.o.Handler(pkt, args); err != nil {
-					d.eh.Emit(astiencoder.EventError(d, fmt.Errorf("astilibav: pkt dump func with args %+v failed: %w", args, err)))
-					return
+				// Handle
+				if d.h != nil {
+					d.h(pkt)
 				}
 			})
 		})
 	})
-}
-
-// PktDumpFunc is a PktDumpFunc that dumps the packet to a file
-var PktDumpFile = func(pkt *astiav.Packet, args PktDumperHandlerArgs) (err error) {
-	// Create file
-	var f *os.File
-	if f, err = os.Create(args.Pattern); err != nil {
-		err = fmt.Errorf("astilibav: creating file %s failed: %w", args.Pattern, err)
-		return
-	}
-	defer f.Close()
-
-	// Write to file
-	if _, err = f.Write(pkt.Data()); err != nil {
-		err = fmt.Errorf("astilibav: writing to file %s failed: %w", args.Pattern, err)
-		return
-	}
-	return
 }
