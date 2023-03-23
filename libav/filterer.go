@@ -153,14 +153,10 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		switch ctx.MediaType {
 		case astiav.MediaTypeAudio:
 			args = astiav.FilterArgs{
-				"sample_fmt":  ctx.SampleFormat.String(),
-				"sample_rate": strconv.Itoa(ctx.SampleRate),
-				"time_base":   ctx.TimeBase.String(),
-			}
-			if ctx.Channels > 0 {
-				args["channel_layout"] = ctx.ChannelLayout.StringWithNbChannels(ctx.Channels)
-			} else {
-				args["channel_layout"] = ctx.ChannelLayout.String()
+				"channel_layout": ctx.ChannelLayout.String(),
+				"sample_fmt":     ctx.SampleFormat.String(),
+				"sample_rate":    strconv.Itoa(ctx.SampleRate),
+				"time_base":      ctx.TimeBase.String(),
 			}
 		case astiav.MediaTypeVideo:
 			args = astiav.FilterArgs{

@@ -22,7 +22,7 @@ type Context struct {
 	TimeBase     astiav.Rational
 
 	// Audio
-	ChannelLayout astiav.ChannelLayout
+	ChannelLayout *astiav.ChannelLayout
 	Channels      int
 	FrameSize     int
 	SampleFormat  astiav.SampleFormat
