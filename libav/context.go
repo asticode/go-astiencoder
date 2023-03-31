@@ -29,6 +29,7 @@ type Context struct {
 	SampleRate    int
 
 	// Video
+	ColorRange        astiav.ColorRange
 	FrameRate         astiav.Rational
 	GopSize           int
 	Height            int
@@ -117,6 +118,7 @@ func NewContextFromStream(s *astiav.Stream) (ctx Context) {
 		SampleRate:    cp.SampleRate(),
 
 		// Video
+		ColorRange:        cp.ColorRange(),
 		FrameRate:         streamFrameRate(s),
 		Height:            cp.Height(),
 		PixelFormat:       cp.PixelFormat(),
