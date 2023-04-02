@@ -92,12 +92,8 @@ type DemuxerProbeInfoFirstPTS struct {
 	Value    int64
 }
 
-func (i DemuxerProbeInfo) PTSReference() PTSReference {
-	return PTSReference{
-		PTS:      i.FirstPTS.Value,
-		Time:     time.Now(),
-		TimeBase: i.FirstPTS.Timebase,
-	}
+func (i DemuxerProbeInfo) PTSReference() *PTSReference {
+	return NewPTSReference().Update(i.FirstPTS.Value, time.Now(), i.FirstPTS.Timebase)
 }
 
 type demuxerProbe struct {

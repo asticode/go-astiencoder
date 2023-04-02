@@ -14,11 +14,6 @@ import (
 
 var countFrameRateEmulator uint64
 
-type frameRateEmulatorPTSReference struct {
-	pts  int64
-	time time.Time
-}
-
 type FrameRateEmulator struct {
 	*astiencoder.BaseNode
 	c                   *astikit.Chan
@@ -26,23 +21,17 @@ type FrameRateEmulator struct {
 	eh                  *astiencoder.EventHandler
 	outputCtx           Context
 	p                   *framePool
-	ptsReference        frameRateEmulatorPTSReference
+	ptsReference        *PTSReference
 	r                   *rateEmulator
 	statFramesProcessed uint64
 	statFramesReceived  uint64
-}
-
-type PTSReference struct {
-	PTS      int64
-	Time     time.Time
-	TimeBase astiav.Rational
 }
 
 type FrameRateEmulatorOptions struct {
 	FlushOnStop  bool
 	Node         astiencoder.NodeOptions
 	OutputCtx    Context
-	PTSReference PTSReference
+	PTSReference *PTSReference
 }
 
 func NewFrameRateEmulator(o FrameRateEmulatorOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s *astiencoder.Stater) (r *FrameRateEmulator) {
@@ -52,13 +41,10 @@ func NewFrameRateEmulator(o FrameRateEmulatorOptions, eh *astiencoder.EventHandl
 
 	// Create frame rate emulator
 	r = &FrameRateEmulator{
-		c:         astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		eh:        eh,
-		outputCtx: o.OutputCtx,
-		ptsReference: frameRateEmulatorPTSReference{
-			pts:  astiav.RescaleQ(o.PTSReference.PTS, o.PTSReference.TimeBase, o.OutputCtx.TimeBase),
-			time: o.PTSReference.Time,
-		},
+		c:            astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		eh:           eh,
+		outputCtx:    o.OutputCtx,
+		ptsReference: o.PTSReference,
 	}
 
 	// Create base node
@@ -212,6 +198,11 @@ func (r *FrameRateEmulator) HandleFrame(p FrameHandlerPayload) {
 				// Increment processed frames
 				atomic.AddUint64(&r.statFramesProcessed, 1)
 
+				// Make sure pts reference exists
+				if r.ptsReference == nil {
+					r.ptsReference = NewPTSReference().Update(f.Pts(), time.Now(), r.outputCtx.TimeBase)
+				}
+
 				// Add to rate emulator
 				r.r.add(&frameRateEmulatorItem{
 					d: p.Descriptor,
@@ -223,7 +214,7 @@ func (r *FrameRateEmulator) HandleFrame(p FrameHandlerPayload) {
 }
 
 func (r *FrameRateEmulator) rateEmulatorAt(i interface{}) time.Time {
-	return r.ptsReference.time.Add(time.Duration(astiav.RescaleQ(i.(*frameRateEmulatorItem).f.Pts()-r.ptsReference.pts, r.outputCtx.TimeBase, nanosecondRational)))
+	return r.ptsReference.TimeFromPTS(i.(*frameRateEmulatorItem).f.Pts(), r.outputCtx.TimeBase)
 }
 
 func (r *FrameRateEmulator) rateEmulatorBefore(a, b interface{}) bool {

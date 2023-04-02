@@ -30,34 +30,12 @@ type RateEnforcer struct {
 	outputCtx           Context
 	p                   *framePool
 	period              time.Duration
-	ptsReferences       map[astiencoder.Node]*rateEnforcerPTSReference
+	ptsReferences       *ptsReferences
 	restamper           FrameRestamper
 	statFramesDelay     *astikit.AtomicDuration
 	statFramesFilled    uint64
 	statFramesProcessed uint64
 	statFramesReceived  uint64
-}
-
-type rateEnforcerPTSReference struct {
-	pts      int64
-	t        time.Time
-	timeBase astiav.Rational
-}
-
-func newRateEnforcerPTSReference(pts int64, t time.Time, timeBase astiav.Rational) *rateEnforcerPTSReference {
-	return &rateEnforcerPTSReference{
-		pts:      pts,
-		t:        t,
-		timeBase: timeBase,
-	}
-}
-
-func (r *rateEnforcerPTSReference) timeFromPTS(pts int64) time.Time {
-	return r.t.Add(time.Duration(astiav.RescaleQ(pts-r.pts, r.timeBase, nanosecondRational)))
-}
-
-func (r *rateEnforcerPTSReference) ptsFromTime(t time.Time) int64 {
-	return astiav.RescaleQ(int64(t.Sub(r.t)), nanosecondRational, r.timeBase) + r.pts
 }
 
 // RateEnforcerOptions represents rate enforcer options
@@ -66,8 +44,9 @@ type RateEnforcerOptions struct {
 	Filler RateEnforcerFiller
 	Node   astiencoder.NodeOptions
 	// Both FrameRate and TimeBase are mandatory
-	OutputCtx Context
-	Restamper FrameRestamper
+	OutputCtx     Context
+	PTSReferences map[astiencoder.Node]*PTSReference
+	Restamper     FrameRestamper
 }
 
 // NewRateEnforcer creates a new rate enforcer
@@ -87,7 +66,7 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 		m:               &sync.Mutex{},
 		outputCtx:       o.OutputCtx,
 		period:          time.Duration(float64(1e9) / o.OutputCtx.FrameRate.ToDouble()),
-		ptsReferences:   map[astiencoder.Node]*rateEnforcerPTSReference{},
+		ptsReferences:   newPTSReferences(o.PTSReferences),
 		restamper:       o.Restamper,
 		statFramesDelay: astikit.NewAtomicDuration(0),
 	}
@@ -296,16 +275,31 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 					r.frames[p.Node] = append(r.frames[p.Node], f)
 				}
 
-				// Update pts reference
-				ptsReference, ok := r.ptsReferences[p.Node]
-				if !ok || ptsReference == nil || ptsReference.timeFromPTS(f.Pts()).After(t) {
-					r.ptsReferences[p.Node] = newRateEnforcerPTSReference(f.Pts(), t, r.outputCtx.TimeBase)
-					ptsReference = r.ptsReferences[p.Node]
+				// Get pts reference
+				ptsReference := r.ptsReferences.get(p.Node)
+
+				// Lock pts reference
+				if ptsReference != nil {
+					ptsReference.lock()
+					defer ptsReference.unlock()
 				}
 
-				// Increment frames delay
-				if r.currentNode == p.Node {
-					r.statFramesDelay.Add(t.Sub(ptsReference.timeFromPTS(f.Pts())))
+				// Increment frames delay before updating pts reference
+				if ptsReference != nil && !ptsReference.isZeroUnsafe() && r.currentNode == p.Node {
+					r.statFramesDelay.Add(t.Sub(ptsReference.timeFromPTSUnsafe(f.Pts(), r.outputCtx.TimeBase)))
+				}
+
+				// Make sure pts reference exists
+				if ptsReference == nil {
+					ptsReference = NewPTSReference()
+					ptsReference.lock()
+					defer ptsReference.unlock()
+					r.ptsReferences.set(p.Node, ptsReference)
+				}
+
+				// Update pts reference
+				if ptsReference.isZeroUnsafe() || ptsReference.timeFromPTSUnsafe(f.Pts(), r.outputCtx.TimeBase).After(t) {
+					ptsReference.updateUnsafe(f.Pts(), t, r.outputCtx.TimeBase)
 				}
 			})
 		})
@@ -379,6 +373,10 @@ func (r *RateEnforcer) tickFunc(ctx context.Context, nextAt *time.Time) (stop bo
 }
 
 func (r *RateEnforcer) frame(from time.Time) (f *astiav.Frame, n astiencoder.Node, filled bool) {
+	// Lock pts references
+	r.ptsReferences.lockAll()
+	defer r.ptsReferences.unlockAll()
+
 	// Get to
 	to := from.Add(r.period)
 
@@ -411,14 +409,14 @@ func (r *RateEnforcer) frame(from time.Time) (f *astiav.Frame, n astiencoder.Nod
 
 func (r *RateEnforcer) frameForNode(n astiencoder.Node, from, to time.Time) (f *astiav.Frame) {
 	// Get pts reference
-	ptsReference, ok := r.ptsReferences[n]
-	if !ok {
+	ptsReference := r.ptsReferences.get(n)
+	if ptsReference == nil {
 		return
 	}
 
 	// Get pts boundaries
-	ptsMin := ptsReference.ptsFromTime(from)
-	ptsMax := ptsReference.ptsFromTime(to)
+	ptsMin := ptsReference.ptsFromTimeUnsafe(from, r.outputCtx.TimeBase)
+	ptsMax := ptsReference.ptsFromTimeUnsafe(to, r.outputCtx.TimeBase)
 
 	// Loop through frames
 	for idx := range r.frames[n] {
@@ -435,13 +433,13 @@ func (r *RateEnforcer) cleanup(to time.Time) {
 	// Loop through nodes
 	for n := range r.frames {
 		// Get pts reference
-		ptsReference, ok := r.ptsReferences[n]
-		if !ok {
+		ptsReference := r.ptsReferences.get(n)
+		if ptsReference == nil {
 			continue
 		}
 
 		// Get max pts
-		ptsMax := ptsReference.ptsFromTime(to)
+		ptsMax := ptsReference.ptsFromTimeUnsafe(to, r.outputCtx.TimeBase)
 
 		// Loop through frames
 		for idx := 0; idx < len(r.frames[n]); idx++ {
