@@ -222,7 +222,7 @@ func (d *Decoder) HandlePkt(p PktHandlerPayload) {
 
 				// Check dts
 				if d.previousDts != nil && *d.previousDts >= pkt.Dts() {
-					emitError(d, d.eh, fmt.Errorf("previous: %d >= current: %d", *d.previousDts, pkt.Dts()), "checking packet dts")
+					emitError(d, d.eh, errors.New("astilibav: previous dts >= current dts"), "checking packet dts")
 					return
 				}
 				d.previousDts = astikit.Int64Ptr(pkt.Dts())
