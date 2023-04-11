@@ -23,6 +23,7 @@ type Decoder struct {
 	eh                   *astiencoder.EventHandler
 	fp                   *framePool
 	outputCtx            Context
+	previousDts          *int64
 	statBytesReceived    uint64
 	statPacketsProcessed uint64
 	statPacketsReceived  uint64
@@ -218,6 +219,13 @@ func (d *Decoder) HandlePkt(p PktHandlerPayload) {
 
 				// Increment packets processed
 				atomic.AddUint64(&d.statPacketsProcessed, 1)
+
+				// Check dts
+				if d.previousDts != nil && *d.previousDts >= pkt.Dts() {
+					emitError(d, d.eh, fmt.Errorf("previous: %d >= current: %d", *d.previousDts, pkt.Dts()), "checking packet dts")
+					return
+				}
+				d.previousDts = astikit.Int64Ptr(pkt.Dts())
 
 				// Send pkt to decoder
 				if err := d.codecCtx.SendPacket(pkt); err != nil {
