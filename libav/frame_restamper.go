@@ -1,6 +1,9 @@
 package astilibav
 
 import (
+	"sync"
+	"time"
+
 	"github.com/asticode/go-astiav"
 	"github.com/asticode/go-astikit"
 )
@@ -32,15 +35,23 @@ func (r *frameRestamperWithValue) restamp(f *astiav.Frame, fn func(v *int64) *in
 type frameRestamperWithFrameDuration struct {
 	*frameRestamperWithValue
 	frameDuration int64
+	startPTSFunc  FrameRestamperStartPTSFunc
 }
 
-// NewFrameRestamperWithFrameDuration creates a new frame restamper that starts timestamps from 0 and increments them
+type FrameRestamperStartPTSFunc func() int64
+
+func FrameRestamperStartPTSFuncFromPTSReference(r *PTSReference, timeBase astiav.Rational) FrameRestamperStartPTSFunc {
+	return func() int64 { return r.PTSFromTime(time.Now(), timeBase) }
+}
+
+// NewFrameRestamperWithFrameDuration creates a new frame restamper that starts timestamps from startPTS and increments them
 // of frameDuration
 // frameDuration must be a duration in frame time base
-func NewFrameRestamperWithFrameDuration(frameDuration int64) FrameRestamper {
+func NewFrameRestamperWithFrameDuration(frameDuration int64, startPTSFunc FrameRestamperStartPTSFunc) FrameRestamper {
 	return &frameRestamperWithFrameDuration{
 		frameRestamperWithValue: newFrameRestamperWithValue(),
 		frameDuration:           frameDuration,
+		startPTSFunc:            startPTSFunc,
 	}
 }
 
@@ -50,7 +61,11 @@ func (r *frameRestamperWithFrameDuration) Restamp(f *astiav.Frame) {
 		if v != nil {
 			return astikit.Int64Ptr(*v + r.frameDuration)
 		}
-		return astikit.Int64Ptr(0)
+		var nv int64
+		if r.startPTSFunc != nil {
+			nv = r.startPTSFunc()
+		}
+		return astikit.Int64Ptr(nv)
 	})
 }
 
@@ -82,4 +97,80 @@ func (r *frameRestamperWithModulo) Restamp(f *astiav.Frame) {
 		}
 		return astikit.Int64Ptr(f.Pts() - (f.Pts() % r.frameDuration))
 	})
+}
+
+type FrameRestamperOffseter interface {
+	Offset(f *astiav.Frame, frameDuration int64, timeBase astiav.Rational) int64
+}
+
+type FrameRestamperOffseterWithStartFromZero struct {
+	lastFrameDuration int64  // In nanosecond rational
+	lastPTS           *int64 // In nanosecond rational
+	m                 *sync.Mutex
+	offset            *int64 // In nanosecond rational
+	updateOnNextFrame bool
+}
+
+func NewFrameRestamperOffseterWithStartFromZero() *FrameRestamperOffseterWithStartFromZero {
+	return &FrameRestamperOffseterWithStartFromZero{m: &sync.Mutex{}}
+}
+
+func (o *FrameRestamperOffseterWithStartFromZero) Offset(f *astiav.Frame, frameDuration int64, timeBase astiav.Rational) int64 {
+	// Lock
+	o.m.Lock()
+	defer o.m.Unlock()
+
+	// Get pts
+	pts := astiav.RescaleQ(f.Pts(), timeBase, nanosecondRational)
+
+	// Get offset
+	var offset int64
+	if o.offset != nil {
+		offset = *o.offset
+	} else {
+		offset = pts
+	}
+
+	// Update on next frame
+	if o.updateOnNextFrame && o.lastPTS != nil {
+		offset += pts - *o.lastPTS - o.lastFrameDuration
+		o.updateOnNextFrame = false
+	}
+
+	// Store offset
+	o.offset = &offset
+
+	// Store last pts
+	if o.lastPTS == nil || pts > *o.lastPTS {
+		o.lastPTS = astikit.Int64Ptr(pts)
+		o.lastFrameDuration = astiav.RescaleQ(frameDuration, timeBase, nanosecondRational)
+	}
+
+	// Rescale
+	return astiav.RescaleQ(-offset, nanosecondRational, timeBase)
+}
+
+func (o *FrameRestamperOffseterWithStartFromZero) Paused() {
+	o.m.Lock()
+	defer o.m.Unlock()
+	o.updateOnNextFrame = true
+}
+
+type frameRestamperWithOffset struct {
+	o             FrameRestamperOffseter
+	frameDuration int64
+	timeBase      astiav.Rational
+}
+
+func NewFrameRestamperWithOffset(o FrameRestamperOffseter, frameDuration int64, timeBase astiav.Rational) FrameRestamper {
+	return &frameRestamperWithOffset{
+		o:             o,
+		frameDuration: frameDuration,
+		timeBase:      timeBase,
+	}
+}
+
+func (r *frameRestamperWithOffset) Restamp(f *astiav.Frame) {
+	// Restamp
+	f.SetPts(f.Pts() + r.o.Offset(f, r.frameDuration, r.timeBase))
 }
