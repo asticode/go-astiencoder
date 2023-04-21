@@ -21,6 +21,7 @@ type Decoder struct {
 	codecCtx             *astiav.CodecContext
 	d                    *frameDispatcher
 	eh                   *astiencoder.EventHandler
+	enforceMonotonicDTS  bool
 	fp                   *framePool
 	outputCtx            Context
 	previousDts          *int64
@@ -32,10 +33,11 @@ type Decoder struct {
 
 // DecoderOptions represents decoder options
 type DecoderOptions struct {
-	CodecParameters *astiav.CodecParameters
-	Name            string
-	Node            astiencoder.NodeOptions
-	OutputCtx       Context
+	CodecParameters     *astiav.CodecParameters
+	EnforceMonotonicDTS bool
+	Name                string
+	Node                astiencoder.NodeOptions
+	OutputCtx           Context
 }
 
 // NewDecoder creates a new decoder
@@ -46,9 +48,10 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Create decoder
 	d = &Decoder{
-		c:         astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		eh:        eh,
-		outputCtx: o.OutputCtx,
+		c:                   astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		eh:                  eh,
+		enforceMonotonicDTS: o.EnforceMonotonicDTS,
+		outputCtx:           o.OutputCtx,
 	}
 
 	// Create base node
@@ -220,9 +223,9 @@ func (d *Decoder) HandlePkt(p PktHandlerPayload) {
 				// Increment packets processed
 				atomic.AddUint64(&d.statPacketsProcessed, 1)
 
-				// Check dts
-				if d.previousDts != nil && *d.previousDts >= pkt.Dts() {
-					emitError(d, d.eh, errors.New("astilibav: previous dts >= current dts"), "checking packet dts")
+				// Enforce monotonic dts
+				if d.enforceMonotonicDTS && d.previousDts != nil && *d.previousDts >= pkt.Dts() {
+					emitError(d, d.eh, errors.New("astilibav: previous dts >= current dts"), "enforcing monotonic dts")
 					return
 				}
 				d.previousDts = astikit.Int64Ptr(pkt.Dts())
