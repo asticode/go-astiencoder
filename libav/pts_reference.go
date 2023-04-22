@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiav"
-	"github.com/asticode/go-astiencoder"
 )
 
 type PTSReference struct {
@@ -62,51 +61,4 @@ func (r *PTSReference) Update(pts int64, t time.Time, timeBase astiav.Rational) 
 	r.m.Lock()
 	defer r.m.Unlock()
 	return r.updateUnsafe(pts, t, timeBase)
-}
-
-type ptsReferences struct {
-	m *sync.Mutex
-	p map[astiencoder.Node]*PTSReference
-}
-
-func newPTSReferences(p map[astiencoder.Node]*PTSReference) *ptsReferences {
-	// Create pts references
-	r := &ptsReferences{
-		m: &sync.Mutex{},
-		p: make(map[astiencoder.Node]*PTSReference),
-	}
-
-	// Copy pts references
-	for k, v := range p {
-		r.p[k] = v
-	}
-	return r
-}
-
-func (rs *ptsReferences) get(n astiencoder.Node) *PTSReference {
-	rs.m.Lock()
-	defer rs.m.Unlock()
-	return rs.p[n]
-}
-
-func (rs *ptsReferences) set(n astiencoder.Node, r *PTSReference) {
-	rs.m.Lock()
-	defer rs.m.Unlock()
-	rs.p[n] = r
-}
-
-func (rs *ptsReferences) lockAll() {
-	rs.m.Lock()
-	defer rs.m.Unlock()
-	for _, r := range rs.p {
-		r.lock()
-	}
-}
-
-func (rs *ptsReferences) unlockAll() {
-	rs.m.Lock()
-	defer rs.m.Unlock()
-	for _, r := range rs.p {
-		r.unlock()
-	}
 }
