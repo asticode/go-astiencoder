@@ -11,10 +11,10 @@ import (
 func durationToTimeBase(d time.Duration, t astiav.Rational) (i int64, r time.Duration) {
 	// Get duration expressed in stream timebase
 	// We need to make sure it's rounded to the nearest smaller int
-	i = astiav.RescaleQRnd(d.Nanoseconds(), nanosecondRational, t, astiav.RoundingDown)
+	i = astiav.RescaleQRnd(d.Nanoseconds(), NanosecondRational, t, astiav.RoundingDown)
 
 	// Update remainder
-	r = d - time.Duration(astiav.RescaleQ(i, t, nanosecondRational))
+	r = d - time.Duration(astiav.RescaleQ(i, t, NanosecondRational))
 	return
 }
 

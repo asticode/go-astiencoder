@@ -33,7 +33,7 @@ func (r PTSReference) isZeroUnsafe() bool {
 }
 
 func (r PTSReference) ptsFromTimeUnsafe(t time.Time, timeBase astiav.Rational) int64 {
-	return astiav.RescaleQ(int64(t.Sub(r.t))+r.pts, nanosecondRational, timeBase)
+	return astiav.RescaleQ(int64(t.Sub(r.t))+r.pts, NanosecondRational, timeBase)
 }
 
 func (r PTSReference) PTSFromTime(t time.Time, timeBase astiav.Rational) int64 {
@@ -43,7 +43,7 @@ func (r PTSReference) PTSFromTime(t time.Time, timeBase astiav.Rational) int64 {
 }
 
 func (r PTSReference) timeFromPTSUnsafe(pts int64, timeBase astiav.Rational) time.Time {
-	return r.t.Add(time.Duration(astiav.RescaleQ(pts, timeBase, nanosecondRational) - r.pts))
+	return r.t.Add(time.Duration(astiav.RescaleQ(pts, timeBase, NanosecondRational) - r.pts))
 }
 
 func (r PTSReference) TimeFromPTS(pts int64, timeBase astiav.Rational) time.Time {
@@ -53,7 +53,7 @@ func (r PTSReference) TimeFromPTS(pts int64, timeBase astiav.Rational) time.Time
 }
 
 func (r *PTSReference) updateUnsafe(pts int64, t time.Time, timeBase astiav.Rational) *PTSReference {
-	r.pts = astiav.RescaleQ(pts, timeBase, nanosecondRational)
+	r.pts = astiav.RescaleQ(pts, timeBase, NanosecondRational)
 	r.t = t
 	return r
 }

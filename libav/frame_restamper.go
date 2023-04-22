@@ -121,7 +121,7 @@ func (o *FrameRestamperOffseterWithStartFromZero) Offset(f *astiav.Frame, frameD
 	defer o.m.Unlock()
 
 	// Get pts
-	pts := astiav.RescaleQ(f.Pts(), timeBase, nanosecondRational)
+	pts := astiav.RescaleQ(f.Pts(), timeBase, NanosecondRational)
 
 	// Get offset
 	var offset int64
@@ -143,11 +143,11 @@ func (o *FrameRestamperOffseterWithStartFromZero) Offset(f *astiav.Frame, frameD
 	// Store last pts
 	if o.lastPTS == nil || pts > *o.lastPTS {
 		o.lastPTS = astikit.Int64Ptr(pts)
-		o.lastFrameDuration = astiav.RescaleQ(frameDuration, timeBase, nanosecondRational)
+		o.lastFrameDuration = astiav.RescaleQ(frameDuration, timeBase, NanosecondRational)
 	}
 
 	// Rescale
-	return astiav.RescaleQ(-offset, nanosecondRational, timeBase)
+	return astiav.RescaleQ(-offset, NanosecondRational, timeBase)
 }
 
 func (o *FrameRestamperOffseterWithStartFromZero) Paused() {

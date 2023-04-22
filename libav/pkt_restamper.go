@@ -102,7 +102,7 @@ func (r *pktRestamperWithTime) Restamp(pkt *astiav.Packet) {
 	if r.firstAt == nil {
 		r.firstAt = astikit.TimePtr(n)
 	}
-	currentDTS := astiav.RescaleQ(int64(n.Sub(*r.firstAt)), nanosecondRational, r.timeBase)
+	currentDTS := astiav.RescaleQ(int64(n.Sub(*r.firstAt)), NanosecondRational, r.timeBase)
 	dts := currentDTS
 	if r.fillGaps && r.lastDTS != nil {
 		if previousDTS := currentDTS - r.frameDuration; *r.lastDTS < previousDTS {

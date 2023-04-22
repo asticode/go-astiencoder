@@ -311,7 +311,7 @@ func (e *Encoder) receivePkt(d Descriptor) (stop bool) {
 
 	// Set pkt duration based on framerate
 	if f := e.codecCtx.Framerate(); f.Num() > 0 {
-		pkt.SetDuration(astiav.RescaleQ(int64(1e9/f.ToDouble()), nanosecondRational, d.TimeBase()))
+		pkt.SetDuration(astiav.RescaleQ(int64(1e9/f.ToDouble()), NanosecondRational, d.TimeBase()))
 	}
 
 	// Rescale timestamps

@@ -15,7 +15,7 @@ import (
 
 var (
 	countDemuxer       uint64
-	nanosecondRational = astiav.NewRational(1, 1e9)
+	NanosecondRational = astiav.NewRational(1, 1e9)
 )
 
 // Demuxer represents an object capable of demuxing packets out of an input
@@ -368,7 +368,7 @@ func (d *Demuxer) probe() (err error) {
 		}
 
 		// We've reached probe duration
-		if time.Duration(astiav.RescaleQ(pts-firstPTSs[s], s.ctx.TimeBase, nanosecondRational)) > d.pb.duration {
+		if time.Duration(astiav.RescaleQ(pts-firstPTSs[s], s.ctx.TimeBase, NanosecondRational)) > d.pb.duration {
 			break
 		}
 	}
@@ -376,7 +376,7 @@ func (d *Demuxer) probe() (err error) {
 	// Get first overall PTS in nanosecond timebase
 	var firstPTS *int64
 	for s, v := range firstPTSs {
-		pts := astiav.RescaleQ(v, s.ctx.TimeBase, nanosecondRational)
+		pts := astiav.RescaleQ(v, s.ctx.TimeBase, NanosecondRational)
 		if firstPTS == nil {
 			firstPTS = astikit.Int64Ptr(pts)
 		} else if pts < *firstPTS {
@@ -387,11 +387,11 @@ func (d *Demuxer) probe() (err error) {
 	// Update probe info
 	d.pb.info = &DemuxerProbeInfo{FirstPTS: DemuxerProbeInfoFirstPTS{
 		Streams:  make(map[int]bool),
-		Timebase: nanosecondRational,
+		Timebase: NanosecondRational,
 		Value:    *firstPTS,
 	}}
 	for s, v := range firstPTSs {
-		pts := astiav.RescaleQ(v, s.ctx.TimeBase, nanosecondRational)
+		pts := astiav.RescaleQ(v, s.ctx.TimeBase, NanosecondRational)
 		if pts == *firstPTS {
 			d.pb.info.FirstPTS.Streams[s.s.Index()] = true
 		}
@@ -399,7 +399,7 @@ func (d *Demuxer) probe() (err error) {
 
 	// Update streams emulate rate reference timestamp
 	for _, s := range d.ss {
-		s.er.referenceTS = astiav.RescaleQ(*firstPTS, nanosecondRational, s.ctx.TimeBase)
+		s.er.referenceTS = astiav.RescaleQ(*firstPTS, NanosecondRational, s.ctx.TimeBase)
 	}
 	return
 }
@@ -641,7 +641,7 @@ func (d *Demuxer) handlePkt(pkt *astiav.Packet) {
 		// Since we can't get more precise than nanoseconds, if there's precision loss here, there's nothing
 		// we can do about it
 		if d.l.cycleCount == 0 {
-			s.l.cycleLastPktDuration = time.Duration(astiav.RescaleQ(pkt.Duration(), s.ctx.TimeBase, nanosecondRational))
+			s.l.cycleLastPktDuration = time.Duration(astiav.RescaleQ(pkt.Duration(), s.ctx.TimeBase, NanosecondRational))
 		}
 
 		// Process pkt side data
@@ -696,7 +696,7 @@ func (d *Demuxer) handlePkt(pkt *astiav.Packet) {
 		// Emulate rate
 		if d.er.enabled {
 			// Get pkt at
-			pktAt := s.er.referenceTime.Add(time.Duration(astiav.RescaleQ(pkt.Dts()-s.er.referenceTS, s.ctx.TimeBase, nanosecondRational)))
+			pktAt := s.er.referenceTime.Add(time.Duration(astiav.RescaleQ(pkt.Dts()-s.er.referenceTS, s.ctx.TimeBase, NanosecondRational)))
 
 			// Wait if there are too many pkts in rate emulator buffer
 			if delta := time.Until(pktAt) - s.er.bufferDuration; delta > 0 {
@@ -753,7 +753,7 @@ func (d *Demuxer) loop() {
 			// Get duration
 			// Since we can't get more precise than nanoseconds, if there's precision loss here, there's nothing
 			// we can do about it
-			ld := s.l.cycleFirstPktPTSRemainder + s.l.cycleLastPktDuration + time.Duration(astiav.RescaleQ(s.l.cycleLastPktPTS-*s.l.cycleFirstPktPTS, s.ctx.TimeBase, nanosecondRational))
+			ld := s.l.cycleFirstPktPTSRemainder + s.l.cycleLastPktDuration + time.Duration(astiav.RescaleQ(s.l.cycleLastPktPTS-*s.l.cycleFirstPktPTS, s.ctx.TimeBase, NanosecondRational))
 
 			// Update loop cycle duration
 			if d.l.cycleDuration < ld {
