@@ -1,7 +1,7 @@
 github.com/StackExchange/wmi v1.2.1 h1:VIkavFPXSjcnS+O8yTq7NI32k0R5Aj+v39y29VYDOSA=
 github.com/StackExchange/wmi v1.2.1/go.mod h1:rcmrprowKIVzvc+NUiLncP2uuArMWLCbu9SBzvHz7e8=
-github.com/asticode/go-astiav v0.8.0 h1:igU7tFhHnx7rc60hFsCKMfxXK7fFWb/gBeX3NE98pSE=
-github.com/asticode/go-astiav v0.8.0/go.mod h1:phvUnSSlV91S/PELeLkDisYiRLOssxWOsj4oDrqM/54=
+github.com/asticode/go-astiav v0.10.0 h1:f/YHASav/+iHdI6QQs6bS3t73WlnWZ6oB5J9VOAA+i0=
+github.com/asticode/go-astiav v0.10.0/go.mod h1:phvUnSSlV91S/PELeLkDisYiRLOssxWOsj4oDrqM/54=
 github.com/asticode/go-astikit v0.28.2/go.mod h1:h4ly7idim1tNhaVkdVBeXQZEE3L0xblP7fCWbgwipF0=
 github.com/asticode/go-astikit v0.37.0 h1:FaMrY4m+xUTHgwLdgNbDuEFG27UVJTSlWdPqbRsmgOM=
 github.com/asticode/go-astikit v0.37.0/go.mod h1:h4ly7idim1tNhaVkdVBeXQZEE3L0xblP7fCWbgwipF0=
