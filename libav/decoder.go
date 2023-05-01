@@ -58,7 +58,7 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	d.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, d, astiencoder.EventTypeToNodeEventName)
 
 	// Create pools
-	d.fp = newFramePool(d)
+	d.fp = newFramePool(d.NewChildCloser())
 	d.pp = newPktPool(d)
 
 	// Create frame dispatcher

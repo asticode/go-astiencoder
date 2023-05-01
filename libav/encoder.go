@@ -50,7 +50,7 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	e.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, e, astiencoder.EventTypeToNodeEventName)
 
 	// Create pools
-	e.fp = newFramePool(e)
+	e.fp = newFramePool(e.NewChildCloser())
 	e.pp = newPktPool(e)
 
 	// Create pkt dispatcher

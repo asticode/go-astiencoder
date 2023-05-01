@@ -98,6 +98,7 @@ type Closer interface {
 	Close() error
 	DoWhenUnclosed(func())
 	IsClosed() bool
+	NewChildCloser() *astikit.Closer
 }
 
 // Starter represents an object that can start/pause/continue/stop
@@ -191,6 +192,10 @@ func (n *BaseNode) AddClose(fn astikit.CloseFunc) {
 
 func (n *BaseNode) AddCloseWithError(fn astikit.CloseFuncWithError) {
 	n.c.AddWithError(fn)
+}
+
+func (n *BaseNode) NewChildCloser() *astikit.Closer {
+	return n.c.NewChild()
 }
 
 func (n *BaseNode) Close() error {

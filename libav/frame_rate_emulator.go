@@ -51,7 +51,7 @@ func NewFrameRateEmulator(o FrameRateEmulatorOptions, eh *astiencoder.EventHandl
 	r.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, r, astiencoder.EventTypeToNodeEventName)
 
 	// Create frame pool
-	r.p = newFramePool(r)
+	r.p = newFramePool(r.NewChildCloser())
 
 	// Create frame dispatcher
 	r.d = newFrameDispatcher(r, eh)

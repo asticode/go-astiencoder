@@ -109,13 +109,13 @@ func (d *frameDispatcher) statOptions() []astikit.StatOptions {
 }
 
 type framePool struct {
-	c                   astiencoder.Closer
+	c                   *astikit.Closer
 	m                   *sync.Mutex
 	p                   []*astiav.Frame
 	statFramesAllocated uint64
 }
 
-func newFramePool(c astiencoder.Closer) *framePool {
+func newFramePool(c *astikit.Closer) *framePool {
 	return &framePool{
 		c: c,
 		m: &sync.Mutex{},
@@ -128,7 +128,7 @@ func (p *framePool) get() (f *astiav.Frame) {
 	if len(p.p) == 0 {
 		f = astiav.AllocFrame()
 		atomic.AddUint64(&p.statFramesAllocated, 1)
-		p.c.AddClose(f.Free)
+		p.c.Add(f.Free)
 		return
 	}
 	f = p.p[0]

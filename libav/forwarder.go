@@ -50,7 +50,7 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 	f.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, f, astiencoder.EventTypeToNodeEventName)
 
 	// Create frame pool
-	f.p = newFramePool(f)
+	f.p = newFramePool(f.NewChildCloser())
 
 	// Create frame dispatcher
 	f.d = newFrameDispatcher(f, eh)
