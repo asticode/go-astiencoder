@@ -24,7 +24,7 @@ type RateEnforcer struct {
 	descriptor                Descriptor
 	desiredNode               astiencoder.Node
 	eh                        *astiencoder.EventHandler
-	f                         RateEnforcerFiller
+	ff                        *FrameFiller
 	frames                    map[astiencoder.Node][]*astiav.Frame
 	m                         *sync.Mutex
 	outputCtx                 Context
@@ -41,9 +41,9 @@ type RateEnforcer struct {
 
 // RateEnforcerOptions represents rate enforcer options
 type RateEnforcerOptions struct {
-	Delay  time.Duration
-	Filler RateEnforcerFiller
-	Node   astiencoder.NodeOptions
+	Delay       time.Duration
+	FrameFiller *FrameFiller
+	Node        astiencoder.NodeOptions
 	// Both FrameRate and TimeBase are mandatory
 	OutputCtx                 Context
 	PTSReference              *PTSReference
@@ -64,7 +64,7 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 		descriptor:                o.OutputCtx.Descriptor(),
 		frames:                    make(map[astiencoder.Node][]*astiav.Frame),
 		eh:                        eh,
-		f:                         o.Filler,
+		ff:                        o.FrameFiller,
 		m:                         &sync.Mutex{},
 		outputCtx:                 o.OutputCtx,
 		period:                    time.Duration(float64(1e9) / o.OutputCtx.FrameRate.ToDouble()),
@@ -78,14 +78,14 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 	r.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, r, astiencoder.EventTypeToNodeEventName)
 
 	// Create frame pool
-	r.p = newFramePool(r)
+	r.p = newFramePool(r.NewChildCloser())
 
 	// Create frame dispatcher
 	r.d = newFrameDispatcher(r, eh)
 
 	// Create filler
-	if r.f == nil {
-		r.f = newPreviousRateEnforcerFiller(r, r.eh, r.p)
+	if r.ff == nil {
+		r.ff = NewFrameFiller(r.NewChildCloser(), eh, r).WithPreviousFrame()
 	}
 
 	// Create pts reference
@@ -394,10 +394,10 @@ func (r *RateEnforcer) frame(from time.Time) (f *astiav.Frame, n astiencoder.Nod
 
 	// Fill
 	if f == nil {
-		f, n = r.f.Fill()
+		f, n = r.ff.Get()
 		filled = true
 	} else {
-		r.f.NoFill(f, n)
+		r.ff.Put(f, n)
 	}
 	return
 }
@@ -435,85 +435,3 @@ func (r *RateEnforcer) cleanup(to time.Time) {
 		}
 	}
 }
-
-type RateEnforcerFiller interface {
-	Fill() (*astiav.Frame, astiencoder.Node)
-	NoFill(*astiav.Frame, astiencoder.Node)
-}
-
-type previousRateEnforcerFiller struct {
-	eh     *astiencoder.EventHandler
-	f      *astiav.Frame
-	n      astiencoder.Node
-	p      *framePool
-	target interface{}
-}
-
-func newPreviousRateEnforcerFiller(target interface{}, eh *astiencoder.EventHandler, p *framePool) *previousRateEnforcerFiller {
-	return &previousRateEnforcerFiller{
-		eh:     eh,
-		p:      p,
-		target: target,
-	}
-}
-
-func (f *previousRateEnforcerFiller) Fill() (*astiav.Frame, astiencoder.Node) {
-	return f.f, f.n
-}
-
-func (f *previousRateEnforcerFiller) NoFill(fm *astiav.Frame, n astiencoder.Node) {
-	// Store
-	f.n = n
-
-	// Create frame
-	if f.f == nil {
-		f.f = f.p.get()
-	} else {
-		f.f.Unref()
-	}
-
-	// Copy frame
-	if err := f.f.Ref(fm); err != nil {
-		emitError(f.target, f.eh, err, "refing frame")
-		f.p.put(f.f)
-		f.f = nil
-	}
-}
-
-type frameRateEnforcerFiller struct {
-	f *astiav.Frame
-}
-
-func NewFrameRateEnforcerFiller(fn func(fm *astiav.Frame) error, c *astikit.Closer) (f *frameRateEnforcerFiller, err error) {
-	// Alloc frame
-	fm := astiav.AllocFrame()
-
-	// Make sure to free frame
-	defer func(err *error) {
-		if *err != nil {
-			fm.Free()
-		} else {
-			c.Add(fm.Free)
-		}
-	}(&err)
-
-	// Adapt frame
-	if fn != nil {
-		if err = fn(fm); err != nil {
-			err = fmt.Errorf("astilibav: adapting frame failed: %w", err)
-			return
-		}
-	}
-
-	// Create filler
-	f = &frameRateEnforcerFiller{
-		f: fm,
-	}
-	return
-}
-
-func (f *frameRateEnforcerFiller) Fill() (*astiav.Frame, astiencoder.Node) {
-	return f.f, nil
-}
-
-func (f *frameRateEnforcerFiller) NoFill(fm *astiav.Frame, n astiencoder.Node) {}
