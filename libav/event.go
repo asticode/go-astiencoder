@@ -5,6 +5,7 @@ const (
 	EventNameLog = "astilibav.log"
 	// First frame of new node has been dispatched by the rate enforcer
 	EventNameRateEnforcerSwitchedOut = "astilibav.rate.enforcer.switched.out"
+	EventNameSwitcherSwitchedOut     = "astilibav.switcher.switched.out"
 )
 
 // Stat names

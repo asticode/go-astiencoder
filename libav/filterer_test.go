@@ -93,7 +93,7 @@ func TestFilterer(t *testing.T) {
 	}
 	m := &sync.Mutex{}
 	interceptedFrames := make(map[string][]interceptedFrame)
-	i := newMockedFrameInterceptor(func(p FrameHandlerPayload) {
+	i := newFrameInterceptor(func(p FrameHandlerPayload) {
 		m.Lock()
 		defer m.Unlock()
 		interceptedFrames[p.Node.Metadata().Name] = append(interceptedFrames[p.Node.Metadata().Name], interceptedFrame{

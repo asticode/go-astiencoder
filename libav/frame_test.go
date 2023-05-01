@@ -7,15 +7,15 @@ import (
 	"github.com/asticode/go-astikit"
 )
 
-type mockedFrameInterceptor struct {
+type frameInterceptor struct {
 	*astiencoder.BaseNode
 	d       *frameDispatcher
 	onFrame func(p FrameHandlerPayload)
 }
 
-func newMockedFrameInterceptor(onFrame func(p FrameHandlerPayload), eh *astiencoder.EventHandler, c *astikit.Closer, s *astiencoder.Stater) *mockedFrameInterceptor {
+func newFrameInterceptor(onFrame func(p FrameHandlerPayload), eh *astiencoder.EventHandler, c *astikit.Closer, s *astiencoder.Stater) *frameInterceptor {
 	// Create interceptor
-	i := &mockedFrameInterceptor{onFrame: onFrame}
+	i := &frameInterceptor{onFrame: onFrame}
 
 	// Create base node
 	i.BaseNode = astiencoder.NewBaseNode(astiencoder.NodeOptions{}, c, eh, s, i, astiencoder.EventTypeToNodeEventName)
@@ -25,13 +25,13 @@ func newMockedFrameInterceptor(onFrame func(p FrameHandlerPayload), eh *astienco
 	return i
 }
 
-func (i *mockedFrameInterceptor) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
+func (i *frameInterceptor) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	i.BaseNode.Start(ctx, t, func(t *astikit.Task) {
 		<-ctx.Done()
 	})
 }
 
-func (i *mockedFrameInterceptor) Connect(h FrameHandler) {
+func (i *frameInterceptor) Connect(h FrameHandler) {
 	// Add handler
 	i.d.addHandler(h)
 
@@ -39,7 +39,7 @@ func (i *mockedFrameInterceptor) Connect(h FrameHandler) {
 	astiencoder.ConnectNodes(i, h)
 }
 
-func (i *mockedFrameInterceptor) Disconnect(h FrameHandler) {
+func (i *frameInterceptor) Disconnect(h FrameHandler) {
 	// Delete handler
 	i.d.delHandler(h)
 
@@ -47,7 +47,7 @@ func (i *mockedFrameInterceptor) Disconnect(h FrameHandler) {
 	astiencoder.DisconnectNodes(i, h)
 }
 
-func (i *mockedFrameInterceptor) HandleFrame(p FrameHandlerPayload) {
+func (i *frameInterceptor) HandleFrame(p FrameHandlerPayload) {
 	if i.onFrame != nil {
 		i.onFrame(p)
 	}
