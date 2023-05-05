@@ -21,6 +21,7 @@ type Switcher struct {
 	currentPTS          *int64
 	d                   *frameDispatcher
 	eh                  *astiencoder.EventHandler
+	frameTimeout        time.Duration
 	ff                  *FrameFiller
 	frameDuration       int64
 	is                  []*switcherItem
@@ -31,8 +32,20 @@ type Switcher struct {
 	statFramesReceived  uint64
 }
 
+type switcherFrame struct {
+	at time.Time
+	f  *astiav.Frame
+}
+
+func newSwitcherFrame(f *astiav.Frame) *switcherFrame {
+	return &switcherFrame{
+		at: time.Now(),
+		f:  f,
+	}
+}
+
 type switcherItem struct {
-	fs     map[int64]*astiav.Frame
+	fs     map[int64]*switcherFrame
 	n      astiencoder.Node
 	ptsMax *int64
 	ptsMin *int64
@@ -40,7 +53,7 @@ type switcherItem struct {
 
 func newSwitcherItem(n astiencoder.Node) *switcherItem {
 	return &switcherItem{
-		fs: map[int64]*astiav.Frame{},
+		fs: map[int64]*switcherFrame{},
 		n:  n,
 	}
 }
@@ -48,6 +61,7 @@ func newSwitcherItem(n astiencoder.Node) *switcherItem {
 // SwitcherOptions represents switcher options
 type SwitcherOptions struct {
 	FrameDuration int64
+	FrameTimeout  time.Duration
 	Node          astiencoder.NodeOptions
 	OutputCtx     Context
 }
@@ -63,6 +77,7 @@ func NewSwitcher(o SwitcherOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		c:             astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
 		eh:            eh,
 		frameDuration: o.FrameDuration,
+		frameTimeout:  o.FrameTimeout,
 		m:             &sync.Mutex{},
 		outputCtx:     o.OutputCtx,
 	}
@@ -289,7 +304,7 @@ func (s *Switcher) addUnsafe(f *astiav.Frame, n astiencoder.Node) (added bool) {
 
 		// Valid pts
 		if i.ptsMin != nil && *i.ptsMin <= f.Pts() && (i.ptsMax == nil || *i.ptsMax > f.Pts()) {
-			i.fs[f.Pts()] = f
+			i.fs[f.Pts()] = newSwitcherFrame(f)
 			added = true
 			break
 		}
@@ -308,21 +323,31 @@ func (s *Switcher) addUnsafe(f *astiav.Frame, n astiencoder.Node) (added bool) {
 
 		// Add frame
 		if f.Pts() >= ptsMin {
-			s.is[len(s.is)-1].fs[f.Pts()] = f
+			s.is[len(s.is)-1].fs[f.Pts()] = newSwitcherFrame(f)
 			added = true
 		}
 	}
 
 	// Frame has been added
 	if added {
-		// Loop through items except the last
+		// Loop through items except the last one
 		for idx := 0; idx < len(s.is)-1; idx++ {
 			// Get item
 			i := s.is[idx]
 
-			// Try to close item
+			// Item needs to be closed
 			if i.ptsMax == nil && s.is[idx+1].ptsMin != nil {
+				// Close item
 				i.ptsMax = astikit.Int64Ptr(*s.is[idx+1].ptsMin)
+
+				// Remove frames outside of interval
+				for pts := range i.fs {
+					// Invalid pts
+					if *i.ptsMin > pts || *i.ptsMax <= pts {
+						// Remove pts
+						delete(i.fs, pts)
+					}
+				}
 			}
 		}
 	}
@@ -362,7 +387,7 @@ func (s *Switcher) nextPullUnsafe() (p *switcherPulledFrame, switched astiencode
 	// No current pts
 	if s.currentPTS == nil {
 		i := s.is[0]
-		p = &switcherPulledFrame{f: i.fs[*i.ptsMin]}
+		p = &switcherPulledFrame{f: i.fs[*i.ptsMin].f}
 		delete(i.fs, *i.ptsMin)
 		switched = i.n
 		return
@@ -380,9 +405,10 @@ func (s *Switcher) nextPullUnsafe() (p *switcherPulledFrame, switched astiencode
 
 		// Get frame
 		var filled bool
-		f, ok := i.fs[nextPTS]
+		sf, ok := i.fs[nextPTS]
 
 		// Frame doesn't exist but there are already later frames available, we need to fill
+		var f *astiav.Frame
 		if !ok && len(i.fs) > 0 {
 			// Fill frame
 			if f, _ = s.ff.Get(); f != nil {
@@ -390,22 +416,53 @@ func (s *Switcher) nextPullUnsafe() (p *switcherPulledFrame, switched astiencode
 				f.SetPts(nextPTS)
 			}
 		} else if ok {
+			f = sf.f
 			delete(i.fs, nextPTS)
 		}
 
-		// Update pulled frame
+		// Frame has been pulled
 		if f != nil {
+			// Create pulled frame
 			p = &switcherPulledFrame{
 				f:      f,
 				filled: filled,
 			}
-		}
 
-		// Update switched
-		if f != nil && *i.ptsMin == nextPTS {
-			switched = i.n
+			// Update switched
+			if *i.ptsMin == nextPTS {
+				switched = i.n
+			}
+			return
 		}
+	}
+
+	// No frame timeout
+	if s.frameTimeout <= 0 {
 		return
+	}
+
+	// No valid frame was found but we still need to check whether some frame has timed out
+	// Loop through items
+	for _, i := range s.is {
+		// Loop through frames
+		for _, sf := range i.fs {
+			// Frame has timed out
+			if time.Since(sf.at) >= s.frameTimeout {
+				// Fill frame
+				f, _ := s.ff.Get()
+				if f != nil {
+					// Restamp
+					f.SetPts(nextPTS)
+
+					// Create pulled frame
+					p = &switcherPulledFrame{
+						f:      f,
+						filled: true,
+					}
+					return
+				}
+			}
+		}
 	}
 	return
 }
@@ -420,7 +477,7 @@ func (s *Switcher) cleanUnsafe() {
 		if i.ptsMax != nil && s.currentPTS != nil && *i.ptsMax <= *s.currentPTS+s.frameDuration {
 			// Close remaining frames
 			for _, f := range i.fs {
-				s.p.put(f)
+				s.p.put(f.f)
 			}
 
 			// Remove item

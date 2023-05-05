@@ -32,7 +32,10 @@ func TestSwitcher(t *testing.T) {
 	defer f2.Free()
 	require.NoError(t, EmptyVideoFrameAdapter(astiav.ColorRangeUnspecified, astiav.PixelFormatYuv420P, 2, 2)(f2))
 
-	sw, err := NewSwitcher(SwitcherOptions{FrameDuration: 1}, eh, c, s)
+	sw, err := NewSwitcher(SwitcherOptions{
+		FrameDuration: 1,
+		FrameTimeout:  10 * time.Millisecond,
+	}, eh, c, s)
 	require.NoError(t, err)
 
 	dispatch := func(n astiencoder.Node, pts int64) {
@@ -77,14 +80,12 @@ func TestSwitcher(t *testing.T) {
 				dispatch(n2, 12)
 				dispatch(n1, 11)
 				dispatch(n2, 13)
-				/*
-					TODO
-					case 13:
-						sw.Switch(n1)
-						dispatch(n1, 15)
-						dispatch(n2, 15)
-						dispatch(n1, 16)
-				*/
+			case 13:
+				sw.Switch(n1)
+				dispatch(n1, 15)
+				dispatch(n2, 15)
+				time.Sleep(15 * time.Millisecond)
+				dispatch(n1, 16)
 				wk.Stop()
 			}
 		}(p.Frame.Pts())
@@ -116,6 +117,9 @@ func TestSwitcher(t *testing.T) {
 		{pts: 11, w: 1},
 		{pts: 12, w: 2},
 		{pts: 13, w: 2},
+		{pts: 14, w: 2},
+		{pts: 15, w: 1},
+		{pts: 16, w: 1},
 	}, interceptedFrames)
-	require.Equal(t, []string{"n1", "n2", "n1", "n2"}, swiched)
+	require.Equal(t, []string{"n1", "n2", "n1", "n2", "n1"}, swiched)
 }
