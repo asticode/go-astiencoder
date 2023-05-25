@@ -17,26 +17,25 @@ var countRateEnforcer uint64
 // RateEnforcer represents an object capable of enforcing rate based on PTS
 type RateEnforcer struct {
 	*astiencoder.BaseNode
-	c                         *astikit.Chan
-	currentNode               astiencoder.Node
-	d                         *frameDispatcher
-	delay                     time.Duration
-	descriptor                Descriptor
-	desiredNode               astiencoder.Node
-	eh                        *astiencoder.EventHandler
-	ff                        *FrameFiller
-	frames                    map[astiencoder.Node][]*astiav.Frame
-	m                         *sync.Mutex
-	outputCtx                 Context
-	p                         *framePool
-	period                    time.Duration
-	ptsReference              *PTSReference
-	restamper                 FrameRestamper
-	statFramesDelay           *astikit.AtomicDuration
-	statFramesFilled          uint64
-	statFramesProcessed       uint64
-	statFramesReceived        uint64
-	updatePTSReferenceOnFrame bool
+	c                   *astikit.Chan
+	currentNode         astiencoder.Node
+	d                   *frameDispatcher
+	delay               time.Duration
+	descriptor          Descriptor
+	desiredNode         astiencoder.Node
+	eh                  *astiencoder.EventHandler
+	ff                  *FrameFiller
+	frames              map[astiencoder.Node][]*astiav.Frame
+	m                   *sync.Mutex
+	outputCtx           Context
+	p                   *framePool
+	period              time.Duration
+	ptsReference        *PTSReference
+	restamper           FrameRestamper
+	statFramesDelay     *astikit.AtomicDuration
+	statFramesFilled    uint64
+	statFramesProcessed uint64
+	statFramesReceived  uint64
 }
 
 // RateEnforcerOptions represents rate enforcer options
@@ -45,10 +44,9 @@ type RateEnforcerOptions struct {
 	FrameFiller *FrameFiller
 	Node        astiencoder.NodeOptions
 	// Both FrameRate and TimeBase are mandatory
-	OutputCtx                 Context
-	PTSReference              *PTSReference
-	Restamper                 FrameRestamper
-	UpdatePTSReferenceOnFrame bool
+	OutputCtx    Context
+	PTSReference *PTSReference
+	Restamper    FrameRestamper
 }
 
 // NewRateEnforcer creates a new rate enforcer
@@ -59,19 +57,18 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 
 	// Create rate enforcer
 	r = &RateEnforcer{
-		c:                         astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		delay:                     o.Delay,
-		descriptor:                o.OutputCtx.Descriptor(),
-		frames:                    make(map[astiencoder.Node][]*astiav.Frame),
-		eh:                        eh,
-		ff:                        o.FrameFiller,
-		m:                         &sync.Mutex{},
-		outputCtx:                 o.OutputCtx,
-		period:                    time.Duration(float64(1e9) / o.OutputCtx.FrameRate.ToDouble()),
-		ptsReference:              o.PTSReference,
-		restamper:                 o.Restamper,
-		statFramesDelay:           astikit.NewAtomicDuration(0),
-		updatePTSReferenceOnFrame: o.UpdatePTSReferenceOnFrame,
+		c:               astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
+		delay:           o.Delay,
+		descriptor:      o.OutputCtx.Descriptor(),
+		frames:          make(map[astiencoder.Node][]*astiav.Frame),
+		eh:              eh,
+		ff:              o.FrameFiller,
+		m:               &sync.Mutex{},
+		outputCtx:       o.OutputCtx,
+		period:          time.Duration(float64(1e9) / o.OutputCtx.FrameRate.ToDouble()),
+		ptsReference:    o.PTSReference,
+		restamper:       o.Restamper,
+		statFramesDelay: astikit.NewAtomicDuration(0),
 	}
 
 	// Create base node
@@ -293,7 +290,7 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 				}
 
 				// Update pts reference
-				if r.ptsReference.isZeroUnsafe() || (r.updatePTSReferenceOnFrame && r.ptsReference.timeFromPTSUnsafe(f.Pts(), r.outputCtx.TimeBase).After(t)) {
+				if r.ptsReference.isZeroUnsafe() || r.ptsReference.timeFromPTSUnsafe(f.Pts(), r.outputCtx.TimeBase).After(t) {
 					r.ptsReference.updateUnsafe(f.Pts(), t, r.outputCtx.TimeBase)
 				}
 			})
