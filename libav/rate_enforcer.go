@@ -285,7 +285,7 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 				defer r.ptsReference.unlock()
 
 				// Increment frames delay before updating pts reference
-				if r.ptsReference != nil && !r.ptsReference.isZeroUnsafe() && (r.currentNode == p.Node || (r.currentNode == nil && r.desiredNode == p.Node)) {
+				if !r.ptsReference.isZeroUnsafe() && (r.currentNode == p.Node || (r.currentNode == nil && r.desiredNode == p.Node)) {
 					r.statFramesDelay.Add(t.Sub(r.ptsReference.timeFromPTSUnsafe(f.Pts(), r.outputCtx.TimeBase)))
 				}
 
