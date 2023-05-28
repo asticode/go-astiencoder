@@ -10,13 +10,14 @@ const (
 
 // Stat names
 const (
-	StatNameAllocatedFrames  = "astilibav.allocated.frames"
-	StatNameAllocatedPackets = "astilibav.allocated.packets"
-	StatNameAverageDelay     = "astilibav.average.delay"
-	StatNameFilledRate       = "astilibav.filled.rate"
-	StatNameIncomingRate     = "astilibav.incoming.rate"
-	StatNameOutgoingRate     = "astilibav.outgoing.rate"
-	StatNameProcessedRate    = "astilibav.processed.rate"
-	StatNameReadRate         = "astilibav.read.rate"
-	StatNameWrittenRate      = "astilibav.written.rate"
+	StatNameAllocatedFrames   = "astilibav.allocated.frames"
+	StatNameAllocatedPackets  = "astilibav.allocated.packets"
+	StatNameAverageDelay      = "astilibav.average.delay"
+	StatNameAverageFrameDelay = "astilibav.average.frame.delay"
+	StatNameFilledRate        = "astilibav.filled.rate"
+	StatNameIncomingRate      = "astilibav.incoming.rate"
+	StatNameOutgoingRate      = "astilibav.outgoing.rate"
+	StatNameProcessedRate     = "astilibav.processed.rate"
+	StatNameReadRate          = "astilibav.read.rate"
+	StatNameWrittenRate       = "astilibav.written.rate"
 )

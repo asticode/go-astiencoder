@@ -20,7 +20,7 @@ type RateEnforcer struct {
 	c                   *astikit.Chan
 	currentNode         astiencoder.Node
 	d                   *frameDispatcher
-	delay               time.Duration
+	delayer             Delayer
 	descriptor          Descriptor
 	desiredNode         astiencoder.Node
 	eh                  *astiencoder.EventHandler
@@ -40,7 +40,7 @@ type RateEnforcer struct {
 
 // RateEnforcerOptions represents rate enforcer options
 type RateEnforcerOptions struct {
-	Delay       time.Duration
+	Delayer     Delayer
 	FrameFiller *FrameFiller
 	Node        astiencoder.NodeOptions
 	// Both FrameRate and TimeBase are mandatory
@@ -58,7 +58,7 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 	// Create rate enforcer
 	r = &RateEnforcer{
 		c:               astikit.NewChan(astikit.ChanOptions{ProcessAll: true}),
-		delay:           o.Delay,
+		delayer:         o.Delayer,
 		descriptor:      o.OutputCtx.Descriptor(),
 		frames:          make(map[astiencoder.Node][]*astiav.Frame),
 		eh:              eh,
@@ -73,6 +73,11 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 
 	// Create base node
 	r.BaseNode = astiencoder.NewBaseNode(o.Node, c, eh, s, r, astiencoder.EventTypeToNodeEventName)
+
+	// Create delayer
+	if r.delayer == nil {
+		r.delayer = NewConstantDelayer(0)
+	}
 
 	// Create frame pool
 	r.p = newFramePool(r.NewChildCloser())
@@ -240,7 +245,7 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 		}
 
 		// Get time
-		t := time.Now().Add(r.delay)
+		t := time.Now()
 
 		// Restamp
 		f.SetPts(astiav.RescaleQ(f.Pts(), p.Descriptor.TimeBase(), r.outputCtx.TimeBase))
@@ -284,9 +289,11 @@ func (r *RateEnforcer) HandleFrame(p FrameHandlerPayload) {
 				r.ptsReference.lock()
 				defer r.ptsReference.unlock()
 
-				// Increment frames delay before updating pts reference
+				// Process frame delay before updating pts reference
 				if !r.ptsReference.isZeroUnsafe() && (r.currentNode == p.Node || (r.currentNode == nil && r.desiredNode == p.Node)) {
-					r.statFramesDelay.Add(t.Sub(r.ptsReference.timeFromPTSUnsafe(f.Pts(), r.outputCtx.TimeBase)))
+					d := t.Sub(r.ptsReference.timeFromPTSUnsafe(f.Pts(), r.outputCtx.TimeBase))
+					r.delayer.HandleFrame(d, r)
+					r.statFramesDelay.Add(d)
 				}
 
 				// Update pts reference
@@ -368,6 +375,9 @@ func (r *RateEnforcer) frame(from time.Time) (f *astiav.Frame, n astiencoder.Nod
 	// Lock pts reference
 	r.ptsReference.lock()
 	defer r.ptsReference.unlock()
+
+	// Add delay
+	from = r.delayer.Apply(from)
 
 	// Get to
 	to := from.Add(r.period)
