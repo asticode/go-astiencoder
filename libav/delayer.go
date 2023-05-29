@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/asticode/go-astiencoder"
-	"github.com/asticode/go-astikit"
 )
 
 type Delayer interface {
@@ -32,13 +31,13 @@ type AdaptiveDelayer struct {
 }
 
 type adaptiveDelayerBuffer struct {
-	delays  map[astiencoder.Node][]int64
+	delays  map[astiencoder.Node][]time.Duration
 	firstAt time.Time
 }
 
 func newAdaptiveDelayerBuffer(n time.Time) *adaptiveDelayerBuffer {
 	return &adaptiveDelayerBuffer{
-		delays:  make(map[astiencoder.Node][]int64),
+		delays:  make(map[astiencoder.Node][]time.Duration),
 		firstAt: n,
 	}
 }
@@ -84,28 +83,29 @@ func (d *AdaptiveDelayer) updateDelayUnsafe() {
 		return
 	}
 
-	// Get max delay
-	var maxDelay *time.Duration
+	// Get max average delay
+	var maxAverageDelay *time.Duration
 	for _, delays := range d.b.delays {
 		// No delays
 		if len(delays) <= 0 {
 			continue
 		}
 
-		// Sort delays
-		astikit.SortInt64(delays)
+		// Get average
+		var sum time.Duration
+		for _, v := range delays {
+			sum += v
+		}
+		avg := sum / time.Duration(len(delays))
 
-		// Get 95th percentile value to avoid weird values
-		m := time.Duration(delays[int((float64(len(delays)-1))*0.95)])
-
-		// Update max delay
-		if maxDelay == nil || *maxDelay < m {
-			maxDelay = &m
+		// Update max average delay
+		if maxAverageDelay == nil || *maxAverageDelay < avg {
+			maxAverageDelay = &avg
 		}
 	}
 
-	// Process max delay
-	if maxDelay != nil {
+	// Process max average delay
+	if maxAverageDelay != nil {
 		// Loop through steps
 		for idx := 1; idx <= d.stepsCount; idx++ {
 			// Get step delay
@@ -127,7 +127,7 @@ func (d *AdaptiveDelayer) updateDelayUnsafe() {
 			}
 
 			// Update delay
-			if (idx == 0 || *maxDelay >= min) && (idx == d.stepsCount || *maxDelay <= max) {
+			if (idx == 0 || *maxAverageDelay >= min) && (idx == d.stepsCount || *maxAverageDelay <= max) {
 				d.d = stepDelay
 				break
 			}
@@ -152,7 +152,7 @@ func (d *AdaptiveDelayer) HandleFrame(delay time.Duration, n astiencoder.Node) {
 	}
 
 	// Add delay
-	d.b.delays[n] = append(d.b.delays[n], int64(delay))
+	d.b.delays[n] = append(d.b.delays[n], delay)
 }
 
 type ConstantDelayer struct {
