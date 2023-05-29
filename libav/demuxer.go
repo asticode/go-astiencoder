@@ -24,6 +24,7 @@ type Demuxer struct {
 	d                     *pktDispatcher
 	eh                    *astiencoder.EventHandler
 	er                    *demuxerEmulateRate
+	flushOnStart          bool
 	formatContext         *astiav.FormatContext
 	interruptRet          *int
 	l                     *demuxerLoop
@@ -175,6 +176,8 @@ type DemuxerOptions struct {
 	Dictionary *Dictionary
 	// Emulate rate options
 	EmulateRate DemuxerEmulateRateOptions
+	// If true, flushes internal data on start
+	FlushOnStart bool
 	// Exact input format
 	Format *astiav.InputFormat
 	// Loop options
@@ -204,6 +207,7 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	d = &Demuxer{
 		eh:                    eh,
 		er:                    newDemuxerEmulateRate(o.EmulateRate),
+		flushOnStart:          o.FlushOnStart,
 		l:                     newDemuxerLoop(o.Loop),
 		pb:                    newDemuxerProbe(o.ProbeDuration),
 		readFrameErrorHandler: o.ReadFrameErrorHandler,
@@ -519,6 +523,13 @@ func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 				if s.er.referenceTime.IsZero() {
 					s.er.referenceTime = referenceTime
 				}
+			}
+		}
+
+		// Flush
+		if d.flushOnStart {
+			if err := d.formatContext.Flush(); err != nil {
+				emitError(d, d.eh, err, "flushing")
 			}
 		}
 
