@@ -61,20 +61,20 @@ func NewForwarder(o ForwarderOptions, eh *astiencoder.EventHandler, c *astikit.C
 }
 
 type ForwarderStats struct {
-	FramesAllocated uint64
-	FramesDispached uint64
-	FramesProcessed uint64
-	FramesReceived  uint64
-	WorkDuration    time.Duration
+	FramesAllocated  uint64
+	FramesDispatched uint64
+	FramesProcessed  uint64
+	FramesReceived   uint64
+	WorkDuration     time.Duration
 }
 
 func (f *Forwarder) Stats() ForwarderStats {
 	return ForwarderStats{
-		FramesAllocated: f.p.stats().framesAllocated,
-		FramesDispached: f.d.stats().framesDispatched,
-		FramesProcessed: atomic.LoadUint64(&f.statFramesProcessed),
-		FramesReceived:  atomic.LoadUint64(&f.statFramesReceived),
-		WorkDuration:    f.c.Stats().WorkDuration,
+		FramesAllocated:  f.p.stats().framesAllocated,
+		FramesDispatched: f.d.stats().framesDispatched,
+		FramesProcessed:  atomic.LoadUint64(&f.statFramesProcessed),
+		FramesReceived:   atomic.LoadUint64(&f.statFramesReceived),
+		WorkDuration:     f.c.Stats().WorkDuration,
 	}
 }
 

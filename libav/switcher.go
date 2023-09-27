@@ -119,20 +119,20 @@ func NewSwitcher(o SwitcherOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 }
 
 type SwitcherStats struct {
-	FramesAllocated uint64
-	FramesDispached uint64
-	FramesProcessed uint64
-	FramesReceived  uint64
-	WorkDuration    time.Duration
+	FramesAllocated  uint64
+	FramesDispatched uint64
+	FramesProcessed  uint64
+	FramesReceived   uint64
+	WorkDuration     time.Duration
 }
 
 func (s *Switcher) Stats() SwitcherStats {
 	return SwitcherStats{
-		FramesAllocated: s.p.stats().framesAllocated,
-		FramesDispached: s.d.stats().framesDispatched,
-		FramesProcessed: atomic.LoadUint64(&s.statFramesProcessed),
-		FramesReceived:  atomic.LoadUint64(&s.statFramesReceived),
-		WorkDuration:    s.c.Stats().WorkDuration,
+		FramesAllocated:  s.p.stats().framesAllocated,
+		FramesDispatched: s.d.stats().framesDispatched,
+		FramesProcessed:  atomic.LoadUint64(&s.statFramesProcessed),
+		FramesReceived:   atomic.LoadUint64(&s.statFramesReceived),
+		WorkDuration:     s.c.Stats().WorkDuration,
 	}
 }
 

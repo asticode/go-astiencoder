@@ -65,20 +65,20 @@ func NewFrameRateEmulator(o FrameRateEmulatorOptions, eh *astiencoder.EventHandl
 }
 
 type FrameRateEmulatorStats struct {
-	FramesAllocated uint64
-	FramesDispached uint64
-	FramesProcessed uint64
-	FramesReceived  uint64
-	WorkDuration    time.Duration
+	FramesAllocated  uint64
+	FramesDispatched uint64
+	FramesProcessed  uint64
+	FramesReceived   uint64
+	WorkDuration     time.Duration
 }
 
 func (r *FrameRateEmulator) Stats() FrameRateEmulatorStats {
 	return FrameRateEmulatorStats{
-		FramesAllocated: r.p.stats().framesAllocated,
-		FramesDispached: r.d.stats().framesDispatched,
-		FramesProcessed: atomic.LoadUint64(&r.statFramesProcessed),
-		FramesReceived:  atomic.LoadUint64(&r.statFramesReceived),
-		WorkDuration:    r.c.Stats().WorkDuration,
+		FramesAllocated:  r.p.stats().framesAllocated,
+		FramesDispatched: r.d.stats().framesDispatched,
+		FramesProcessed:  atomic.LoadUint64(&r.statFramesProcessed),
+		FramesReceived:   atomic.LoadUint64(&r.statFramesReceived),
+		WorkDuration:     r.c.Stats().WorkDuration,
 	}
 }
 

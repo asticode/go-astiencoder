@@ -11,6 +11,7 @@ import (
 type FrameFiller struct {
 	eh            *astiencoder.EventHandler
 	fallbackFrame *astiav.Frame
+	fallbackNode  astiencoder.Node
 	previousFrame *astiav.Frame
 	previousNode  astiencoder.Node
 	onPuts        []func(f *astiav.Frame, n astiencoder.Node)
@@ -26,7 +27,7 @@ func NewFrameFiller(c *astikit.Closer, eh *astiencoder.EventHandler, target inte
 	}
 }
 
-func (ff *FrameFiller) WithFallbackFrame(a FrameAdapter) (dst *FrameFiller, err error) {
+func (ff *FrameFiller) WithFallbackFrameAndNode(a FrameAdapter, n astiencoder.Node) (dst *FrameFiller, err error) {
 	// Create dst
 	dst = ff
 
@@ -39,9 +40,14 @@ func (ff *FrameFiller) WithFallbackFrame(a FrameAdapter) (dst *FrameFiller, err 
 		return
 	}
 
-	// Store frame
+	// Store frame and node
 	ff.fallbackFrame = f
+	ff.fallbackNode = n
 	return
+}
+
+func (ff *FrameFiller) WithFallbackFrame(a FrameAdapter) (*FrameFiller, error) {
+	return ff.WithFallbackFrameAndNode(a, nil)
 }
 
 func (ff *FrameFiller) WithPreviousFrame() *FrameFiller {
@@ -71,7 +77,7 @@ func (ff *FrameFiller) Get() (*astiav.Frame, astiencoder.Node) {
 	if ff.previousFrame != nil {
 		return ff.previousFrame, ff.previousNode
 	}
-	return ff.fallbackFrame, nil
+	return ff.fallbackFrame, ff.fallbackNode
 }
 
 func (ff *FrameFiller) Put(f *astiav.Frame, n astiencoder.Node) {

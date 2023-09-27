@@ -101,24 +101,24 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 }
 
 type RateEnforcerStats struct {
-	FramesAllocated uint64
-	FramesDelay     time.Duration
-	FramesDispached uint64
-	FramesFilled    uint64
-	FramesProcessed uint64
-	FramesReceived  uint64
-	WorkDuration    time.Duration
+	FramesAllocated  uint64
+	FramesDelay      time.Duration
+	FramesDispatched uint64
+	FramesFilled     uint64
+	FramesProcessed  uint64
+	FramesReceived   uint64
+	WorkDuration     time.Duration
 }
 
 func (r *RateEnforcer) Stats() RateEnforcerStats {
 	return RateEnforcerStats{
-		FramesAllocated: r.p.stats().framesAllocated,
-		FramesDelay:     r.statFramesDelay.Duration(),
-		FramesDispached: r.d.stats().framesDispatched,
-		FramesFilled:    atomic.LoadUint64(&r.statFramesFilled),
-		FramesProcessed: atomic.LoadUint64(&r.statFramesProcessed),
-		FramesReceived:  atomic.LoadUint64(&r.statFramesReceived),
-		WorkDuration:    r.c.Stats().WorkDuration,
+		FramesAllocated:  r.p.stats().framesAllocated,
+		FramesDelay:      r.statFramesDelay.Duration(),
+		FramesDispatched: r.d.stats().framesDispatched,
+		FramesFilled:     atomic.LoadUint64(&r.statFramesFilled),
+		FramesProcessed:  atomic.LoadUint64(&r.statFramesProcessed),
+		FramesReceived:   atomic.LoadUint64(&r.statFramesReceived),
+		WorkDuration:     r.c.Stats().WorkDuration,
 	}
 }
 
@@ -173,6 +173,11 @@ func (r *RateEnforcer) addStatOptions() {
 // OutputCtx returns the output ctx
 func (r *RateEnforcer) OutputCtx() Context {
 	return r.outputCtx
+}
+
+// FrameFiller returns the frame filler
+func (r *RateEnforcer) FrameFiller() *FrameFiller {
+	return r.ff
 }
 
 // Switch switches the source

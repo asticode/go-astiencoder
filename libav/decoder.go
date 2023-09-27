@@ -107,7 +107,7 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 type DecoderStats struct {
 	BytesReceived    uint64
 	FramesAllocated  uint64
-	FramesDispached  uint64
+	FramesDispatched uint64
 	PacketsAllocated uint64
 	PacketsProcessed uint64
 	PacketsReceived  uint64
@@ -118,7 +118,7 @@ func (d *Decoder) Stats() DecoderStats {
 	return DecoderStats{
 		BytesReceived:    atomic.LoadUint64(&d.statBytesReceived),
 		FramesAllocated:  d.fp.stats().framesAllocated,
-		FramesDispached:  d.d.stats().framesDispatched,
+		FramesDispatched: d.d.stats().framesDispatched,
 		PacketsAllocated: d.pp.stats().packetsAllocated,
 		PacketsProcessed: atomic.LoadUint64(&d.statPacketsProcessed),
 		PacketsReceived:  atomic.LoadUint64(&d.statPacketsReceived),

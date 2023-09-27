@@ -379,20 +379,20 @@ func (f *Filterer) createGraph(ctxs map[astiencoder.Node]Context) (err error) {
 }
 
 type FiltererStats struct {
-	FramesAllocated uint64
-	FramesDispached uint64
-	FramesProcessed uint64
-	FramesReceived  uint64
-	WorkDuration    time.Duration
+	FramesAllocated  uint64
+	FramesDispatched uint64
+	FramesProcessed  uint64
+	FramesReceived   uint64
+	WorkDuration     time.Duration
 }
 
 func (f *Filterer) Stats() FiltererStats {
 	return FiltererStats{
-		FramesAllocated: f.p.stats().framesAllocated,
-		FramesDispached: f.d.stats().framesDispatched,
-		FramesProcessed: atomic.LoadUint64(&f.statFramesProcessed),
-		FramesReceived:  atomic.LoadUint64(&f.statFramesReceived),
-		WorkDuration:    f.c.Stats().WorkDuration,
+		FramesAllocated:  f.p.stats().framesAllocated,
+		FramesDispatched: f.d.stats().framesDispatched,
+		FramesProcessed:  atomic.LoadUint64(&f.statFramesProcessed),
+		FramesReceived:   atomic.LoadUint64(&f.statFramesReceived),
+		WorkDuration:     f.c.Stats().WorkDuration,
 	}
 }
 

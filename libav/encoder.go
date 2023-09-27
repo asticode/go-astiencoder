@@ -140,22 +140,22 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 }
 
 type EncoderStats struct {
-	FramesAllocated  uint64
-	FramesProcessed  uint64
-	FramesReceived   uint64
-	PacketsAllocated uint64
-	PacketsDispached uint64
-	WorkDuration     time.Duration
+	FramesAllocated   uint64
+	FramesProcessed   uint64
+	FramesReceived    uint64
+	PacketsAllocated  uint64
+	PacketsDispatched uint64
+	WorkDuration      time.Duration
 }
 
 func (e *Encoder) Stats() EncoderStats {
 	return EncoderStats{
-		FramesAllocated:  e.fp.stats().framesAllocated,
-		FramesProcessed:  atomic.LoadUint64(&e.statFramesProcessed),
-		FramesReceived:   atomic.LoadUint64(&e.statFramesReceived),
-		PacketsAllocated: e.pp.stats().packetsAllocated,
-		PacketsDispached: e.d.stats().packetsDispatched,
-		WorkDuration:     e.c.Stats().WorkDuration,
+		FramesAllocated:   e.fp.stats().framesAllocated,
+		FramesProcessed:   atomic.LoadUint64(&e.statFramesProcessed),
+		FramesReceived:    atomic.LoadUint64(&e.statFramesReceived),
+		PacketsAllocated:  e.pp.stats().packetsAllocated,
+		PacketsDispatched: e.d.stats().packetsDispatched,
+		WorkDuration:      e.c.Stats().WorkDuration,
 	}
 }
 
