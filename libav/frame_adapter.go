@@ -8,7 +8,7 @@ import (
 
 type FrameAdapter func(f *astiav.Frame) error
 
-func EmptyAudioFrameAdapter(nbSamples, sampleRate int, cl *astiav.ChannelLayout, sf astiav.SampleFormat) FrameAdapter {
+func EmptyAudioFrameAdapter(nbSamples, sampleRate int, cl astiav.ChannelLayout, sf astiav.SampleFormat) FrameAdapter {
 	return func(f *astiav.Frame) (err error) {
 		// Init frame
 		f.SetNbSamples(nbSamples)
