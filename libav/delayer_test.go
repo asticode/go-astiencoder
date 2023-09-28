@@ -20,9 +20,9 @@ func TestAdaptiveDelayer(t *testing.T) {
 		LookBehind:      500 * time.Millisecond,
 		MarginGoingDown: 150 * time.Millisecond,
 		MarginGoingUp:   50 * time.Millisecond,
-		Maximum:         2 * time.Second,
-		Start:           400 * time.Millisecond,
+		Minimum:         400 * time.Millisecond,
 		Step:            400 * time.Millisecond,
+		StepsCount:      5,
 	})
 
 	for _, v := range []struct {

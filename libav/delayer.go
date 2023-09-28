@@ -17,17 +17,21 @@ type AdaptiveDelayerOptions struct {
 	LookBehind      time.Duration
 	MarginGoingDown time.Duration
 	MarginGoingUp   time.Duration
-	Maximum         time.Duration
-	Start           time.Duration
+	Minimum         time.Duration
 	Step            time.Duration
+	StepsCount      uint
 }
 
 type AdaptiveDelayer struct {
-	b          *adaptiveDelayerBuffer
-	d          time.Duration
-	m          *sync.Mutex
-	o          AdaptiveDelayerOptions
-	stepsCount int
+	b               *adaptiveDelayerBuffer
+	d               time.Duration
+	lookBehind      time.Duration
+	m               *sync.Mutex
+	marginGoingDown time.Duration
+	marginGoingUp   time.Duration
+	minimum         time.Duration
+	step            time.Duration
+	stepsCount      int
 }
 
 type adaptiveDelayerBuffer struct {
@@ -43,12 +47,20 @@ func newAdaptiveDelayerBuffer(n time.Time) *adaptiveDelayerBuffer {
 }
 
 func NewAdaptiveDelayer(o AdaptiveDelayerOptions) *AdaptiveDelayer {
-	return &AdaptiveDelayer{
-		d:          o.Start,
-		m:          &sync.Mutex{},
-		o:          o,
-		stepsCount: int(o.Maximum / o.Step),
+	d := &AdaptiveDelayer{
+		d:               o.Minimum,
+		lookBehind:      o.LookBehind,
+		m:               &sync.Mutex{},
+		marginGoingDown: o.MarginGoingDown,
+		marginGoingUp:   o.MarginGoingUp,
+		minimum:         o.Minimum,
+		step:            o.Step,
+		stepsCount:      int(o.StepsCount),
 	}
+	if d.stepsCount < 1 {
+		d.stepsCount = 1
+	}
+	return d
 }
 
 func (d *AdaptiveDelayer) Apply(t time.Time) time.Time {
@@ -79,7 +91,7 @@ func (d *AdaptiveDelayer) delayUnsafe() time.Duration {
 
 func (d *AdaptiveDelayer) updateDelayUnsafe() {
 	// Nothing to do
-	if d.b == nil || time.Since(d.b.firstAt) < d.o.LookBehind {
+	if d.b == nil || time.Since(d.b.firstAt) < d.lookBehind {
 		return
 	}
 
@@ -107,9 +119,9 @@ func (d *AdaptiveDelayer) updateDelayUnsafe() {
 	// Process max average delay
 	if maxAverageDelay != nil {
 		// Loop through steps
-		for idx := 1; idx <= d.stepsCount; idx++ {
+		for idx := 0; idx < d.stepsCount; idx++ {
 			// Get step delay
-			stepDelay := time.Duration(idx) * d.o.Step
+			stepDelay := time.Duration(idx)*d.step + d.minimum
 
 			// Same as current delay
 			if d.d == stepDelay {
@@ -119,15 +131,15 @@ func (d *AdaptiveDelayer) updateDelayUnsafe() {
 			// Get boundaries
 			var min, max time.Duration
 			if stepDelay < d.d {
-				min = stepDelay - d.o.Step - d.o.MarginGoingDown
-				max = stepDelay - d.o.MarginGoingDown
+				min = stepDelay - d.step - d.marginGoingDown
+				max = stepDelay - d.marginGoingDown
 			} else {
-				min = stepDelay - d.o.Step - d.o.MarginGoingUp
-				max = stepDelay - d.o.MarginGoingUp
+				min = stepDelay - d.step - d.marginGoingUp
+				max = stepDelay - d.marginGoingUp
 			}
 
 			// Update delay
-			if (idx == 0 || *maxAverageDelay >= min) && (idx == d.stepsCount || *maxAverageDelay <= max) {
+			if (idx == 0 || *maxAverageDelay >= min) && (idx == d.stepsCount-1 || *maxAverageDelay <= max) {
 				d.d = stepDelay
 				break
 			}
@@ -153,6 +165,10 @@ func (d *AdaptiveDelayer) HandleFrame(delay time.Duration, n astiencoder.Node) {
 
 	// Add delay
 	d.b.delays[n] = append(d.b.delays[n], delay)
+}
+
+func (d *AdaptiveDelayer) SetMinimum(min time.Duration) {
+	d.minimum = min
 }
 
 type ConstantDelayer struct {
