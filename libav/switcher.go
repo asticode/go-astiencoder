@@ -91,12 +91,12 @@ func NewSwitcher(o SwitcherOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 	// Adapt frame filler
 	switch s.outputCtx.MediaType {
 	case astiav.MediaTypeAudio:
-		if _, err = s.ff.WithFallbackFrame(EmptyAudioFrameAdapter(
+		if _, err = s.ff.WithFallbackFrame(FrameFillerFallbackFrameOptions{FrameAdapter: EmptyAudioFrameAdapter(
 			s.outputCtx.FrameSize,
 			s.outputCtx.SampleRate,
 			s.outputCtx.ChannelLayout,
 			s.outputCtx.SampleFormat,
-		)); err != nil {
+		)}); err != nil {
 			err = fmt.Errorf("astilibav: adapting frame filler failed: %w", err)
 			return
 		}

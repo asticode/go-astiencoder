@@ -27,27 +27,38 @@ func NewFrameFiller(c *astikit.Closer, eh *astiencoder.EventHandler, target inte
 	}
 }
 
-func (ff *FrameFiller) WithFallbackFrameAndNode(a FrameAdapter, n astiencoder.Node) (dst *FrameFiller, err error) {
+type FrameFillerFallbackFrameOptions struct {
+	Frame        *astiav.Frame
+	FrameAdapter FrameAdapter
+	Node         astiencoder.Node
+}
+
+func (ff *FrameFiller) WithFallbackFrame(o FrameFillerFallbackFrameOptions) (dst *FrameFiller, err error) {
 	// Create dst
 	dst = ff
 
 	// Get frame
 	f := ff.p.get()
 
-	// Adapt frame
-	if err = a(f); err != nil {
-		err = fmt.Errorf("astilibav: adapting frame failed: %w", err)
-		return
+	// Process frame
+	if o.FrameAdapter != nil {
+		// Adapt frame
+		if err = o.FrameAdapter(f); err != nil {
+			err = fmt.Errorf("astilibav: adapting frame failed: %w", err)
+			return
+		}
+	} else if o.Frame != nil {
+		// Ref frame
+		if err = f.Ref(o.Frame); err != nil {
+			err = fmt.Errorf("astilibav: refing frame failed: %w", err)
+			return
+		}
 	}
 
 	// Store frame and node
 	ff.fallbackFrame = f
-	ff.fallbackNode = n
+	ff.fallbackNode = o.Node
 	return
-}
-
-func (ff *FrameFiller) WithFallbackFrame(a FrameAdapter) (*FrameFiller, error) {
-	return ff.WithFallbackFrameAndNode(a, nil)
 }
 
 func (ff *FrameFiller) WithPreviousFrame() *FrameFiller {

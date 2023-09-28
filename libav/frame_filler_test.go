@@ -27,13 +27,18 @@ func TestFrameFiller(t *testing.T) {
 
 	ff.WithPreviousFrame()
 	nn := &Filterer{}
-	_, err := ff.WithFallbackFrameAndNode(EmptyVideoFrameAdapter(astiav.ColorRangeUnspecified, astiav.PixelFormatYuv420P, 4, 2), nn)
+	_, err := ff.WithFallbackFrame(FrameFillerFallbackFrameOptions{
+		FrameAdapter: EmptyVideoFrameAdapter(astiav.ColorRangeUnspecified, astiav.PixelFormatYuv420P, 4, 2),
+		Node:         nn,
+	})
 	require.NoError(t, err)
 	f, n = ff.Get()
 	require.NotNil(t, f)
 	require.Equal(t, n, nn)
 
-	_, err = ff.WithFallbackFrame(EmptyVideoFrameAdapter(astiav.ColorRangeUnspecified, astiav.PixelFormatYuv420P, 4, 2))
+	_, err = ff.WithFallbackFrame(FrameFillerFallbackFrameOptions{
+		FrameAdapter: EmptyVideoFrameAdapter(astiav.ColorRangeUnspecified, astiav.PixelFormatYuv420P, 4, 2),
+	})
 	require.NoError(t, err)
 	f, n = ff.Get()
 	require.NotNil(t, f)
