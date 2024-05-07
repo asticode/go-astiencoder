@@ -65,7 +65,7 @@ func NewRateEnforcer(o RateEnforcerOptions, eh *astiencoder.EventHandler, c *ast
 		ff:              o.FrameFiller,
 		m:               &sync.Mutex{},
 		outputCtx:       o.OutputCtx,
-		period:          time.Duration(float64(1e9) / o.OutputCtx.FrameRate.ToDouble()),
+		period:          time.Duration(float64(1e9) / o.OutputCtx.FrameRate.Float64()),
 		ptsReference:    o.PTSReference,
 		restamper:       o.Restamper,
 		statFramesDelay: astikit.NewAtomicDuration(0),

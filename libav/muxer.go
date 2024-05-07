@@ -71,22 +71,15 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 
 	// We need to use an io context if this is a file
 	if !m.formatContext.OutputFormat().Flags().Has(astiav.IOFormatFlagNofile) {
-		// Create io context
-		ioContext := astiav.NewIOContext()
-
 		// Open
-		if err = ioContext.Open(o.URL, astiav.NewIOContextFlags(astiav.IOContextFlagWrite)); err != nil {
+		var ioContext *astiav.IOContext
+		if ioContext, err = astiav.OpenIOContext(o.URL, astiav.NewIOContextFlags(astiav.IOContextFlagWrite)); err != nil {
 			err = fmt.Errorf("astilibav: opening io context failed: %w", err)
 			return
 		}
 
-		// Make sure the io context is properly closed
-		m.AddCloseWithError(func() error {
-			if err := ioContext.Closep(); err != nil {
-				return fmt.Errorf("astilibav: closing io context failed: %w", err)
-			}
-			return nil
-		})
+		// Make sure the io context is properly freed
+		m.AddCloseWithError(ioContext.Close)
 
 		// Set pb
 		m.formatContext.SetPb(ioContext)

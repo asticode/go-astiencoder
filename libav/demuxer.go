@@ -26,7 +26,7 @@ type Demuxer struct {
 	er                    *demuxerEmulateRate
 	flushOnStart          bool
 	formatContext         *astiav.FormatContext
-	interruptRet          *int
+	interruptCallback     astiav.IOInterrupter
 	l                     *demuxerLoop
 	p                     *pktPool
 	pb                    *demuxerProbe
@@ -118,7 +118,7 @@ type demuxerStreamEmulateRate struct {
 	referenceTS int64
 }
 
-func (d *Demuxer) newDemuxerStreamEmulateRate(s *demuxerStream) *demuxerStreamEmulateRate {
+func (d *Demuxer) newDemuxerStreamEmulateRate() *demuxerStreamEmulateRate {
 	return &demuxerStreamEmulateRate{bufferDuration: d.er.bufferDuration}
 }
 
@@ -147,16 +147,13 @@ func (d *Demuxer) newDemuxerStream(s *astiav.Stream) *demuxerStream {
 	ctx := NewContextFromStream(s)
 
 	// Create demuxer stream
-	ds := &demuxerStream{
+	return &demuxerStream{
 		ctx: ctx,
 		d:   ctx.Descriptor(),
+		er:  d.newDemuxerStreamEmulateRate(),
 		l:   newDemuxerStreamLoop(),
 		s:   s,
 	}
-
-	// Create rate emulator
-	ds.er = d.newDemuxerStreamEmulateRate(ds)
-	return ds
 }
 
 func (d *demuxerStream) stream() *Stream {
@@ -180,6 +177,8 @@ type DemuxerOptions struct {
 	FlushOnStart bool
 	// Exact input format
 	Format *astiav.InputFormat
+	// IO Context to use
+	IOContext *astiav.IOContext
 	// Loop options
 	Loop DemuxerLoopOptions
 	// Basic node options
@@ -246,7 +245,7 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	d.AddClose(d.formatContext.Free)
 
 	// Set interrupt callback
-	d.interruptRet = d.formatContext.SetInterruptCallback()
+	d.interruptCallback = d.formatContext.SetInterruptCallback()
 
 	// Handle probe cancellation
 	if o.ProbeCtx != nil {
@@ -254,16 +253,21 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 		probeCtx, probeCancel := context.WithCancel(o.ProbeCtx)
 
 		// Handle interrupt
-		*d.interruptRet = 0
+		d.interruptCallback.Resume()
 		go func() {
 			<-probeCtx.Done()
 			if o.ProbeCtx.Err() != nil {
-				*d.interruptRet = 1
+				d.interruptCallback.Interrupt()
 			}
 		}()
 
 		// Make sure to cancel context so that go routine is closed
 		defer probeCancel()
+	}
+
+	// No url but an io context, we need to set the pb before opening the input
+	if o.URL == "" && o.IOContext != nil {
+		d.formatContext.SetPb(o.IOContext)
 	}
 
 	// Open input
@@ -274,6 +278,16 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Make sure the input is properly closed
 	d.AddClose(d.formatContext.CloseInput)
+
+	// An url and an io context, we need to set the pb after opening the input
+	// Make sure the previous pb is closed
+	if o.URL != "" && o.IOContext != nil {
+		if pb := d.formatContext.Pb(); pb != nil {
+			pb.Close()
+		}
+		d.formatContext.SetPb(o.IOContext)
+		d.formatContext.SetFlags(d.formatContext.Flags().Add(astiav.FormatContextFlagCustomIo))
+	}
 
 	// Check whether probe has been cancelled
 	if o.ProbeCtx != nil && o.ProbeCtx.Err() != nil {
@@ -506,10 +520,10 @@ func (d *Demuxer) DisconnectForStream(h PktHandler, i *Stream) {
 func (d *Demuxer) Start(ctx context.Context, t astiencoder.CreateTaskFunc) {
 	d.BaseNode.Start(ctx, t, func(t *astikit.Task) {
 		// Handle interrupt callback
-		*d.interruptRet = 0
+		d.interruptCallback.Resume()
 		go func() {
 			<-d.Context().Done()
-			*d.interruptRet = 1
+			d.interruptCallback.Interrupt()
 		}()
 
 		// Update emulate rate time references

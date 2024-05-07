@@ -56,7 +56,7 @@ func (ctx Context) String() string {
 	} else if ctx.CodecID > 0 {
 		ss = append(ss, "codec id: "+ctx.CodecID.String())
 	}
-	if ctx.TimeBase.ToDouble() > 0 {
+	if ctx.TimeBase.Float64() > 0 {
 		ss = append(ss, "timebase: "+ctx.TimeBase.String())
 	}
 
@@ -77,10 +77,10 @@ func (ctx Context) String() string {
 		if ctx.PixelFormat >= 0 {
 			ss = append(ss, "pixel format: "+ctx.PixelFormat.String())
 		}
-		if ctx.SampleAspectRatio.ToDouble() > 0 {
+		if ctx.SampleAspectRatio.Float64() > 0 {
 			ss = append(ss, "sample aspect ratio: "+ctx.SampleAspectRatio.String())
 		}
-		if ctx.FrameRate.ToDouble() > 0 {
+		if ctx.FrameRate.Float64() > 0 {
 			ss = append(ss, "framerate: "+ctx.FrameRate.String())
 		}
 		if ctx.GopSize > 0 {

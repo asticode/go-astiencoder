@@ -12,7 +12,6 @@ type EventLog struct {
 	Format string
 	Level  astiav.LogLevel
 	Msg    string
-	Parent string
 }
 
 type EventHandlerLogAdapterOptions struct {
@@ -27,15 +26,14 @@ func EventHandlerLogAdapter(o EventHandlerLogAdapterOptions) astiencoder.EventHa
 
 		// Set log callback
 		// TODO Process parent and update event's target
-		astiav.SetLogCallback(func(level astiav.LogLevel, fmt, msg, parent string) {
+		astiav.SetLogCallback(func(c astiav.Classer, l astiav.LogLevel, fmt, msg string) {
 			// Emit event
 			h.Emit(astiencoder.Event{
 				Name: EventNameLog,
 				Payload: EventLog{
 					Format: fmt,
-					Level:  level,
+					Level:  l,
 					Msg:    msg,
-					Parent: parent,
 				},
 			})
 		})
@@ -62,11 +60,6 @@ func EventHandlerLogAdapter(o EventHandlerLogAdapterOptions) astiencoder.EventHa
 				// Add prefix
 				format = "astilibav: " + format
 				msg = "astilibav: " + msg
-
-				// Add parent
-				if strings.Index(v.Parent, "0x") == 0 {
-					msg += " (" + v.Parent + ")"
-				}
 
 				// Get level
 				ll, processed, stop := llf(v.Level)
