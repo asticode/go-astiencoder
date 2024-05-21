@@ -38,6 +38,8 @@ type DecoderOptions struct {
 	Name                string
 	Node                astiencoder.NodeOptions
 	OutputCtx           Context
+	ThreadCount         int
+	ThreadType          astiav.ThreadType
 }
 
 // NewDecoder creates a new decoder
@@ -94,6 +96,14 @@ func NewDecoder(o DecoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	if err = o.CodecParameters.ToCodecContext(d.codecCtx); err != nil {
 		err = fmt.Errorf("astilibav: converting codec parameters to codec context failed: %w", err)
 		return
+	}
+
+	// Set thread parameters
+	if o.ThreadCount > 0 {
+		d.codecCtx.SetThreadCount(o.ThreadCount)
+	}
+	if o.ThreadType != astiav.ThreadTypeUndefined {
+		d.codecCtx.SetThreadType(o.ThreadType)
 	}
 
 	// Open codec

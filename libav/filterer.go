@@ -43,6 +43,8 @@ type Filterer struct {
 	restamper             FrameRestamper
 	statFramesProcessed   uint64
 	statFramesReceived    uint64
+	threadCount           int
+	threadType            astiav.ThreadType
 }
 
 type filtererFrame struct {
@@ -80,6 +82,8 @@ type FiltererOptions struct {
 	OnInputContextChanges FiltererOnInputContextChangesFunc
 	OutputCtx             Context
 	Restamper             FrameRestamper
+	ThreadCount           int
+	ThreadType            astiav.ThreadType
 }
 
 // NewFilterer creates a new filterer
@@ -97,6 +101,8 @@ func NewFilterer(o FiltererOptions, eh *astiencoder.EventHandler, c *astikit.Clo
 		onInputContextChanges: o.OnInputContextChanges,
 		outputCtx:             o.OutputCtx,
 		restamper:             o.Restamper,
+		threadCount:           o.ThreadCount,
+		threadType:            o.ThreadType,
 	}
 
 	// Create base node
@@ -228,6 +234,14 @@ func (f *Filterer) createGraph(ctxs map[astiencoder.Node]Context) (err error) {
 	// Create graph
 	g := astiav.AllocFilterGraph()
 	c.Add(g.Free)
+
+	// Set thread parameters
+	if f.threadCount > 0 {
+		g.SetThreadCount(f.threadCount)
+	}
+	if f.threadType != astiav.ThreadTypeUndefined {
+		g.SetThreadType(f.threadType)
+	}
 
 	// Create buffersrc func and buffersink
 	var buffersrcFunc func() *astiav.Filter

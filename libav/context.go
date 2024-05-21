@@ -17,8 +17,6 @@ type Context struct {
 	GlobalHeader bool
 	Index        int
 	MediaType    astiav.MediaType
-	ThreadCount  *int
-	ThreadType   *astiav.ThreadType
 	TimeBase     astiav.Rational
 
 	// Audio

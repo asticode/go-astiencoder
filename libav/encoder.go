@@ -30,8 +30,10 @@ type Encoder struct {
 
 // EncoderOptions represents encoder options
 type EncoderOptions struct {
-	Ctx  Context
-	Node astiencoder.NodeOptions
+	Ctx         Context
+	Node        astiencoder.NodeOptions
+	ThreadCount int
+	ThreadType  astiav.ThreadType
 }
 
 // NewEncoder creates a new encoder
@@ -89,11 +91,11 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	if o.Ctx.GlobalHeader {
 		e.codecCtx.SetFlags(e.codecCtx.Flags().Add(astiav.CodecContextFlagGlobalHeader))
 	}
-	if o.Ctx.ThreadCount != nil {
-		e.codecCtx.SetThreadCount(*o.Ctx.ThreadCount)
+	if o.ThreadCount > 0 {
+		e.codecCtx.SetThreadCount(o.ThreadCount)
 	}
-	if o.Ctx.ThreadType != nil {
-		e.codecCtx.SetThreadType(*o.Ctx.ThreadType)
+	if o.ThreadType != astiav.ThreadTypeUndefined {
+		e.codecCtx.SetThreadType(o.ThreadType)
 	}
 
 	// Set media type-specific context parameters
