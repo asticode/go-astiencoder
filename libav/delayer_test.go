@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAdaptiveDelayer(t *testing.T) {
+func TestAverageAdaptiveDelayer(t *testing.T) {
 	_now := now
 	defer func() { now = _now }()
 	var count int64
@@ -17,12 +17,14 @@ func TestAdaptiveDelayer(t *testing.T) {
 	}
 
 	d := NewAdaptiveDelayer(AdaptiveDelayerOptions{
-		LookBehind:      500 * time.Millisecond,
-		MarginGoingDown: 150 * time.Millisecond,
-		MarginGoingUp:   50 * time.Millisecond,
-		Minimum:         400 * time.Millisecond,
-		Step:            400 * time.Millisecond,
-		StepsCount:      5,
+		Handler: AdaptiveDelayerHandlerOptions{Average: &AdaptiveDelayerAverageHandlerOptions{
+			LookBehind:     500 * time.Millisecond,
+			MarginDecrease: 150 * time.Millisecond,
+			MarginIncrease: 50 * time.Millisecond,
+		}},
+		Minimum:    400 * time.Millisecond,
+		Step:       400 * time.Millisecond,
+		StepsCount: 5,
 	})
 
 	for _, v := range []struct {
@@ -72,5 +74,63 @@ func TestAdaptiveDelayer(t *testing.T) {
 	} {
 		d.HandleFrame(v.input, nil)
 		require.Equal(t, v.expected, d.Delay())
+	}
+}
+
+func TestAverageLosslessDelayer(t *testing.T) {
+	_now := now
+	defer func() { now = _now }()
+	var n time.Time
+	now = func() time.Time { return n }
+
+	d := NewAdaptiveDelayer(AdaptiveDelayerOptions{
+		Handler: AdaptiveDelayerHandlerOptions{Lossless: &AdaptiveDelayerLosslessHandlerOptions{
+			LookBehind: 2 * time.Second,
+		}},
+		Minimum:    400 * time.Millisecond,
+		Step:       400 * time.Millisecond,
+		StepsCount: 5,
+	})
+
+	for idx, v := range []struct {
+		expected time.Duration
+		input    time.Duration
+	}{
+		{
+			expected: 400 * time.Millisecond,
+			input:    399 * time.Millisecond,
+		},
+		{
+			expected: 800 * time.Millisecond,
+			input:    401 * time.Millisecond,
+		},
+		{
+			expected: 800 * time.Millisecond,
+			input:    399 * time.Millisecond,
+		},
+		{
+			expected: 400 * time.Millisecond,
+			input:    399 * time.Millisecond,
+		},
+		{
+			expected: 1200 * time.Millisecond,
+			input:    801 * time.Millisecond,
+		},
+		{
+			expected: 2 * time.Second,
+			input:    3 * time.Second,
+		},
+		{
+			expected: 2 * time.Second,
+			input:    300 * time.Millisecond,
+		},
+		{
+			expected: 400 * time.Millisecond,
+			input:    300 * time.Millisecond,
+		},
+	} {
+		n = time.Unix(int64(idx), 0)
+		d.HandleFrame(v.input, nil)
+		require.Equal(t, v.expected, d.Delay(), "idx: %d - input: %s", idx, v.input)
 	}
 }

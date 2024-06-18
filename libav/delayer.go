@@ -14,51 +14,50 @@ type Delayer interface {
 }
 
 type AdaptiveDelayerOptions struct {
-	LookBehind      time.Duration
-	MarginGoingDown time.Duration
-	MarginGoingUp   time.Duration
-	Minimum         time.Duration
-	Step            time.Duration
-	StepsCount      uint
+	Handler    AdaptiveDelayerHandlerOptions
+	Minimum    time.Duration
+	Step       time.Duration
+	StepsCount uint
+}
+
+type AdaptiveDelayerHandlerOptions struct {
+	Average  *AdaptiveDelayerAverageHandlerOptions
+	Lossless *AdaptiveDelayerLosslessHandlerOptions
 }
 
 type AdaptiveDelayer struct {
-	b               *adaptiveDelayerBuffer
-	d               time.Duration
-	lookBehind      time.Duration
-	m               *sync.Mutex
-	marginGoingDown time.Duration
-	marginGoingUp   time.Duration
-	minimum         time.Duration
-	step            time.Duration
-	stepsCount      int
+	d          time.Duration
+	h          adaptiveDelayerHandler
+	m          *sync.Mutex
+	minimum    time.Duration
+	step       time.Duration
+	stepsCount int
 }
 
-type adaptiveDelayerBuffer struct {
-	delays  map[astiencoder.Node][]time.Duration
-	firstAt time.Time
-}
-
-func newAdaptiveDelayerBuffer(n time.Time) *adaptiveDelayerBuffer {
-	return &adaptiveDelayerBuffer{
-		delays:  make(map[astiencoder.Node][]time.Duration),
-		firstAt: n,
-	}
+type adaptiveDelayerHandler interface {
+	handleFrame(delay time.Duration, n astiencoder.Node)
+	updateDelay()
 }
 
 func NewAdaptiveDelayer(o AdaptiveDelayerOptions) *AdaptiveDelayer {
+	// Create delayer
 	d := &AdaptiveDelayer{
-		d:               o.Minimum,
-		lookBehind:      o.LookBehind,
-		m:               &sync.Mutex{},
-		marginGoingDown: o.MarginGoingDown,
-		marginGoingUp:   o.MarginGoingUp,
-		minimum:         o.Minimum,
-		step:            o.Step,
-		stepsCount:      int(o.StepsCount),
+		d:          o.Minimum,
+		m:          &sync.Mutex{},
+		minimum:    o.Minimum,
+		step:       o.Step,
+		stepsCount: int(o.StepsCount),
 	}
 	if d.stepsCount < 1 {
 		d.stepsCount = 1
+	}
+
+	// Create handler
+	switch {
+	case o.Handler.Average != nil:
+		d.h = newAdaptiveDelayerAverageHandler(d, *o.Handler.Average)
+	case o.Handler.Lossless != nil:
+		d.h = newAdaptiveDelayerLosslessHandler(d, *o.Handler.Lossless)
 	}
 	return d
 }
@@ -90,14 +89,85 @@ func (d *AdaptiveDelayer) delayUnsafe() time.Duration {
 }
 
 func (d *AdaptiveDelayer) updateDelayUnsafe() {
+	if d.h != nil {
+		d.h.updateDelay()
+	}
+}
+
+func (d *AdaptiveDelayer) HandleFrame(delay time.Duration, n astiencoder.Node) {
+	// Lock
+	d.m.Lock()
+	defer d.m.Unlock()
+
+	// Make sure to update delay first
+	d.updateDelayUnsafe()
+
+	// Handle frame
+	if d.h != nil {
+		d.h.handleFrame(delay, n)
+	}
+}
+
+func (d *AdaptiveDelayer) SetMinimum(min time.Duration) {
+	d.minimum = min
+}
+
+var _ adaptiveDelayerHandler = (*adaptiveDelayerAverageHandler)(nil)
+
+type adaptiveDelayerAverageHandler struct {
+	b              *adaptiveDelayerAverageHandlerBuffer
+	d              *AdaptiveDelayer
+	lookBehind     time.Duration
+	marginDecrease time.Duration
+	marginIncrease time.Duration
+}
+
+type adaptiveDelayerAverageHandlerBuffer struct {
+	delays  map[astiencoder.Node][]time.Duration
+	firstAt time.Time
+}
+
+func newAdaptiveDelayerAverageHandlerBuffer(n time.Time) *adaptiveDelayerAverageHandlerBuffer {
+	return &adaptiveDelayerAverageHandlerBuffer{
+		delays:  make(map[astiencoder.Node][]time.Duration),
+		firstAt: n,
+	}
+}
+
+type AdaptiveDelayerAverageHandlerOptions struct {
+	LookBehind     time.Duration
+	MarginDecrease time.Duration
+	MarginIncrease time.Duration
+}
+
+func newAdaptiveDelayerAverageHandler(d *AdaptiveDelayer, o AdaptiveDelayerAverageHandlerOptions) *adaptiveDelayerAverageHandler {
+	return &adaptiveDelayerAverageHandler{
+		d:              d,
+		lookBehind:     o.LookBehind,
+		marginDecrease: o.MarginDecrease,
+		marginIncrease: o.MarginIncrease,
+	}
+}
+
+func (h *adaptiveDelayerAverageHandler) handleFrame(delay time.Duration, n astiencoder.Node) {
+	// Make sure to create buffer
+	if h.b == nil {
+		h.b = newAdaptiveDelayerAverageHandlerBuffer(now())
+	}
+
+	// Add delay
+	h.b.delays[n] = append(h.b.delays[n], delay)
+}
+
+func (h *adaptiveDelayerAverageHandler) updateDelay() {
 	// Nothing to do
-	if d.b == nil || time.Since(d.b.firstAt) < d.lookBehind {
+	if h.b == nil || time.Since(h.b.firstAt) < h.lookBehind {
 		return
 	}
 
 	// Get max average delay
 	var maxAverageDelay *time.Duration
-	for _, delays := range d.b.delays {
+	for _, delays := range h.b.delays {
 		// No delays
 		if len(delays) <= 0 {
 			continue
@@ -119,56 +189,101 @@ func (d *AdaptiveDelayer) updateDelayUnsafe() {
 	// Process max average delay
 	if maxAverageDelay != nil {
 		// Loop through steps
-		for idx := 0; idx < d.stepsCount; idx++ {
+		for idx := 0; idx < h.d.stepsCount; idx++ {
 			// Get step delay
-			stepDelay := time.Duration(idx)*d.step + d.minimum
+			stepDelay := time.Duration(idx)*h.d.step + h.d.minimum
 
 			// Same as current delay
-			if d.d == stepDelay {
+			if h.d.d == stepDelay {
 				continue
 			}
 
 			// Get boundaries
 			var min, max time.Duration
-			if stepDelay < d.d {
-				min = stepDelay - d.step - d.marginGoingDown
-				max = stepDelay - d.marginGoingDown
+			if stepDelay < h.d.d {
+				min = stepDelay - h.d.step - h.marginDecrease
+				max = stepDelay - h.marginDecrease
 			} else {
-				min = stepDelay - d.step - d.marginGoingUp
-				max = stepDelay - d.marginGoingUp
+				min = stepDelay - h.d.step - h.marginIncrease
+				max = stepDelay - h.marginIncrease
 			}
 
 			// Update delay
-			if (idx == 0 || *maxAverageDelay >= min) && (idx == d.stepsCount-1 || *maxAverageDelay <= max) {
-				d.d = stepDelay
+			if (idx == 0 || *maxAverageDelay >= min) && (idx == h.d.stepsCount-1 || *maxAverageDelay <= max) {
+				h.d.d = stepDelay
 				break
 			}
 		}
 	}
 
 	// Reset buffer
-	d.b = nil
+	h.b = nil
 }
 
-func (d *AdaptiveDelayer) HandleFrame(delay time.Duration, n astiencoder.Node) {
-	// Lock
-	d.m.Lock()
-	defer d.m.Unlock()
+var _ adaptiveDelayerHandler = (*adaptiveDelayerLosslessHandler)(nil)
 
-	// Make sure to update delay first
-	d.updateDelayUnsafe()
+type adaptiveDelayerLosslessHandler struct {
+	b          map[astiencoder.Node][]adaptiveDelayerLosslessHandlerBufferItem
+	d          *AdaptiveDelayer
+	lookBehind time.Duration
+}
 
-	// Make sure to create buffer
-	if d.b == nil {
-		d.b = newAdaptiveDelayerBuffer(now())
+type adaptiveDelayerLosslessHandlerBufferItem struct {
+	at    time.Time
+	delay time.Duration
+}
+
+type AdaptiveDelayerLosslessHandlerOptions struct {
+	LookBehind time.Duration
+}
+
+func newAdaptiveDelayerLosslessHandler(d *AdaptiveDelayer, o AdaptiveDelayerLosslessHandlerOptions) *adaptiveDelayerLosslessHandler {
+	return &adaptiveDelayerLosslessHandler{
+		b:          make(map[astiencoder.Node][]adaptiveDelayerLosslessHandlerBufferItem),
+		d:          d,
+		lookBehind: o.LookBehind,
+	}
+}
+
+func (h *adaptiveDelayerLosslessHandler) handleFrame(delay time.Duration, n astiencoder.Node) {
+	// Add delay
+	h.b[n] = append(h.b[n], adaptiveDelayerLosslessHandlerBufferItem{
+		at:    now(),
+		delay: delay,
+	})
+}
+
+func (h *adaptiveDelayerLosslessHandler) updateDelay() {
+	// Loop through nodes
+	var maxDelay time.Duration
+	for n := range h.b {
+		// Loop through items
+		for idx := 0; idx < len(h.b[n]); idx++ {
+			// Get item
+			i := h.b[n][idx]
+
+			// Item is too old
+			if now().Sub(i.at) >= h.lookBehind {
+				h.b[n] = append(h.b[n][:idx], h.b[n][idx+1:]...)
+				idx--
+				continue
+			}
+
+			// Update max delay
+			if i.delay > maxDelay {
+				maxDelay = i.delay
+			}
+		}
 	}
 
-	// Add delay
-	d.b.delays[n] = append(d.b.delays[n], delay)
-}
-
-func (d *AdaptiveDelayer) SetMinimum(min time.Duration) {
-	d.minimum = min
+	// Find the best step to have no lost frames
+	for idx := 0; idx < h.d.stepsCount; idx++ {
+		// Update delay
+		if stepDelay := time.Duration(idx)*h.d.step + h.d.minimum; idx == h.d.stepsCount-1 || stepDelay > maxDelay {
+			h.d.d = stepDelay
+			break
+		}
+	}
 }
 
 type ConstantDelayer struct {
