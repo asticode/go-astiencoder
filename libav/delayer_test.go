@@ -133,4 +133,55 @@ func TestAverageLosslessDelayer(t *testing.T) {
 		d.HandleFrame(v.input, nil)
 		require.Equal(t, v.expected, d.Delay(), "idx: %d - input: %s", idx, v.input)
 	}
+
+	d = NewAdaptiveDelayer(AdaptiveDelayerOptions{
+		Handler: AdaptiveDelayerHandlerOptions{Lossless: &AdaptiveDelayerLosslessHandlerOptions{
+			DisableDecrease: true,
+		}},
+		Minimum:    400 * time.Millisecond,
+		Step:       400 * time.Millisecond,
+		StepsCount: 5,
+	})
+
+	for idx, v := range []struct {
+		expected time.Duration
+		input    time.Duration
+	}{
+		{
+			expected: 400 * time.Millisecond,
+			input:    399 * time.Millisecond,
+		},
+		{
+			expected: 800 * time.Millisecond,
+			input:    401 * time.Millisecond,
+		},
+		{
+			expected: 800 * time.Millisecond,
+			input:    399 * time.Millisecond,
+		},
+		{
+			expected: 800 * time.Millisecond,
+			input:    399 * time.Millisecond,
+		},
+		{
+			expected: 1200 * time.Millisecond,
+			input:    801 * time.Millisecond,
+		},
+		{
+			expected: 2 * time.Second,
+			input:    3 * time.Second,
+		},
+		{
+			expected: 2 * time.Second,
+			input:    300 * time.Millisecond,
+		},
+		{
+			expected: 2 * time.Second,
+			input:    300 * time.Millisecond,
+		},
+	} {
+		n = time.Unix(int64(idx), 0)
+		d.HandleFrame(v.input, nil)
+		require.Equal(t, v.expected, d.Delay(), "idx: %d - input: %s", idx, v.input)
+	}
 }

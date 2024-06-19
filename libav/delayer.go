@@ -223,9 +223,10 @@ func (h *adaptiveDelayerAverageHandler) updateDelay() {
 var _ adaptiveDelayerHandler = (*adaptiveDelayerLosslessHandler)(nil)
 
 type adaptiveDelayerLosslessHandler struct {
-	b          map[astiencoder.Node][]adaptiveDelayerLosslessHandlerBufferItem
-	d          *AdaptiveDelayer
-	lookBehind time.Duration
+	b               map[astiencoder.Node][]adaptiveDelayerLosslessHandlerBufferItem
+	d               *AdaptiveDelayer
+	disableDecrease bool
+	lookBehind      time.Duration
 }
 
 type adaptiveDelayerLosslessHandlerBufferItem struct {
@@ -234,15 +235,21 @@ type adaptiveDelayerLosslessHandlerBufferItem struct {
 }
 
 type AdaptiveDelayerLosslessHandlerOptions struct {
-	LookBehind time.Duration
+	DisableDecrease bool
+	LookBehind      time.Duration
 }
 
 func newAdaptiveDelayerLosslessHandler(d *AdaptiveDelayer, o AdaptiveDelayerLosslessHandlerOptions) *adaptiveDelayerLosslessHandler {
-	return &adaptiveDelayerLosslessHandler{
-		b:          make(map[astiencoder.Node][]adaptiveDelayerLosslessHandlerBufferItem),
-		d:          d,
-		lookBehind: o.LookBehind,
+	h := &adaptiveDelayerLosslessHandler{
+		b:               make(map[astiencoder.Node][]adaptiveDelayerLosslessHandlerBufferItem),
+		d:               d,
+		disableDecrease: o.DisableDecrease,
+		lookBehind:      o.LookBehind,
 	}
+	if h.lookBehind <= 0 {
+		h.lookBehind = time.Second
+	}
+	return h
 }
 
 func (h *adaptiveDelayerLosslessHandler) handleFrame(delay time.Duration, n astiencoder.Node) {
@@ -278,9 +285,14 @@ func (h *adaptiveDelayerLosslessHandler) updateDelay() {
 
 	// Find the best step to have no lost frames
 	for idx := 0; idx < h.d.stepsCount; idx++ {
+		// Get step delay
+		stepDelay := time.Duration(idx)*h.d.step + h.d.minimum
+
 		// Update delay
-		if stepDelay := time.Duration(idx)*h.d.step + h.d.minimum; idx == h.d.stepsCount-1 || stepDelay > maxDelay {
-			h.d.d = stepDelay
+		if idx == h.d.stepsCount-1 || stepDelay > maxDelay {
+			if !h.disableDecrease || h.d.d < stepDelay {
+				h.d.d = stepDelay
+			}
 			break
 		}
 	}
