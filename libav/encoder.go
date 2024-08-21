@@ -103,7 +103,6 @@ func NewEncoder(o EncoderOptions, eh *astiencoder.EventHandler, c *astikit.Close
 	case astiav.MediaTypeAudio:
 		e.codecCtx.SetBitRate(int64(o.Ctx.BitRate))
 		e.codecCtx.SetChannelLayout(o.Ctx.ChannelLayout)
-		e.codecCtx.SetChannels(o.Ctx.Channels)
 		e.codecCtx.SetSampleFormat(o.Ctx.SampleFormat)
 		e.codecCtx.SetSampleRate(o.Ctx.SampleRate)
 	case astiav.MediaTypeVideo:

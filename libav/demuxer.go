@@ -745,7 +745,7 @@ func (d *Demuxer) processPktSideData(pkt *astiav.Packet, s *demuxerStream) (skip
 
 func (d *Demuxer) processPktSideDataSkipSamples(pkt *astiav.Packet, s *demuxerStream) (skippedStart, skippedEnd time.Duration) {
 	// Get skip samples side data
-	sd := pkt.SideData(astiav.PacketSideDataTypeSkipSamples)
+	sd := pkt.SideData().Get(astiav.PacketSideDataTypeSkipSamples)
 	if sd == nil {
 		return
 	}

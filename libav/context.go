@@ -21,7 +21,6 @@ type Context struct {
 
 	// Audio
 	ChannelLayout astiav.ChannelLayout
-	Channels      int
 	FrameSize     int
 	SampleFormat  astiav.SampleFormat
 	SampleRate    int
@@ -110,7 +109,6 @@ func NewContextFromStream(s *astiav.Stream) (ctx Context) {
 
 		// Audio
 		ChannelLayout: cp.ChannelLayout(),
-		Channels:      cp.Channels(),
 		FrameSize:     cp.FrameSize(),
 		SampleFormat:  cp.SampleFormat(),
 		SampleRate:    cp.SampleRate(),
@@ -125,7 +123,7 @@ func NewContextFromStream(s *astiav.Stream) (ctx Context) {
 	}
 
 	// Get display matrix side data
-	if sd := s.SideData(astiav.PacketSideDataTypeDisplaymatrix); len(sd) > 0 {
+	if sd := cp.SideData().Get(astiav.PacketSideDataTypeDisplaymatrix); len(sd) > 0 {
 		if dm, err := astiav.NewDisplayMatrixFromBytes(sd); err == nil {
 			ctx.Rotation = dm.Rotation()
 		}
