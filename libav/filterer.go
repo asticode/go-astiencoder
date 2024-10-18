@@ -26,7 +26,7 @@ var countFilterer uint64
 // Filterer represents an object capable of applying a filter to frames
 type Filterer struct {
 	*astiencoder.BaseNode
-	buffersinkContext     *astiav.FilterContext
+	buffersinkContext     *astiav.BuffersinkFilterContext
 	c                     *astikit.Chan
 	content               string
 	d                     *frameDispatcher
@@ -61,7 +61,7 @@ type filtererFrameHandler interface {
 
 type filtererInput struct {
 	ctx               Context
-	buffersrcContexts []*astiav.FilterContext
+	buffersrcContexts []*astiav.BuffersrcFilterContext
 	name              string
 }
 
@@ -265,27 +265,27 @@ func (f *Filterer) createGraph(ctxs map[astiencoder.Node]Context) (err error) {
 	}
 
 	// Create buffersink context
-	var buffersinkContext *astiav.FilterContext
-	if buffersinkContext, err = g.NewFilterContext(buffersink, "out", nil); err != nil {
+	var buffersinkContext *astiav.BuffersinkFilterContext
+	if buffersinkContext, err = g.NewBuffersinkFilterContext(buffersink, "out", nil); err != nil {
 		err = fmt.Errorf("astilibav: creating buffersink context failed: %w", err)
 		return
 	}
 
 	// Make sure buffersink context is freed
-	c.Add(buffersinkContext.Free)
+	c.Add(buffersinkContext.FilterContext().Free)
 
 	// Create inputs
 	inputs := astiav.AllocFilterInOut()
 	c.Add(inputs.Free)
 	inputs.SetName("out")
-	inputs.SetFilterContext(buffersinkContext)
+	inputs.SetFilterContext(buffersinkContext.FilterContext())
 	inputs.SetPadIdx(0)
 	inputs.SetNext(nil)
 
 	// Loop through provided inputs
 	type inputUpdate struct {
 		ctx  Context
-		ctxs []*astiav.FilterContext
+		ctxs []*astiav.BuffersrcFilterContext
 		i    *filtererInput
 	}
 	inputUpdates := make(map[astiencoder.Node]*inputUpdate)
@@ -338,19 +338,19 @@ func (f *Filterer) createGraph(ctxs map[astiencoder.Node]Context) (err error) {
 		}
 
 		// Create buffersrc ctx
-		var buffersrcCtx *astiav.FilterContext
-		if buffersrcCtx, err = g.NewFilterContext(buffersrc, "in", args); err != nil {
+		var buffersrcCtx *astiav.BuffersrcFilterContext
+		if buffersrcCtx, err = g.NewBuffersrcFilterContext(buffersrc, "in", args); err != nil {
 			err = fmt.Errorf("astilibav: creating buffersrc context failed: %w", err)
 			return
 		}
 
 		// Make sure buffersrc context is freed
-		c.Add(buffersrcCtx.Free)
+		c.Add(buffersrcCtx.FilterContext().Free)
 
 		// Create outputs
 		o := astiav.AllocFilterInOut()
 		o.SetName(i.name)
-		o.SetFilterContext(buffersrcCtx)
+		o.SetFilterContext(buffersrcCtx.FilterContext())
 		o.SetPadIdx(0)
 		o.SetNext(outputs)
 
@@ -598,7 +598,7 @@ func (f *Filterer) HandleFrame(p FrameHandlerPayload) {
 					// Loop through buffer ctxs
 					for _, buffersrcContext := range v.i.buffersrcContexts {
 						// Add frame
-						if err := buffersrcContext.BuffersrcAddFrame(v.f, astiav.NewBuffersrcFlags(astiav.BuffersrcFlagKeepRef)); err != nil {
+						if err := buffersrcContext.AddFrame(v.f, astiav.NewBuffersrcFlags(astiav.BuffersrcFlagKeepRef)); err != nil {
 							// TODO Fill intput frame when frame handler strategy is pts?
 							emitError(f, f.eh, err, "adding frame to buffersrc")
 							continue
@@ -732,7 +732,7 @@ func (f *Filterer) pullFilteredFrame() (stop bool) {
 	defer f.p.put(fm)
 
 	// Pull filtered frame from graph
-	if err := f.buffersinkContext.BuffersinkGetFrame(fm, astiav.NewBuffersinkFlags()); err != nil {
+	if err := f.buffersinkContext.GetFrame(fm, astiav.NewBuffersinkFlags()); err != nil {
 		if !errors.Is(err, astiav.ErrEof) && !errors.Is(err, astiav.ErrEagain) {
 			// TODO Fill output frame when frame handler strategy is pts?
 			emitError(f, f.eh, err, "getting frame from buffersink")
@@ -779,13 +779,7 @@ type filtererDescriptor struct {
 }
 
 func (f *Filterer) newFiltererDescriptor() (d *filtererDescriptor) {
-	d = &filtererDescriptor{}
-	if is := f.buffersinkContext.Inputs(); len(is) > 0 {
-		d.timeBase = is[0].TimeBase()
-	} else {
-		d.timeBase = f.outputCtx.TimeBase
-	}
-	return
+	return &filtererDescriptor{timeBase: f.buffersinkContext.TimeBase()}
 }
 
 // TimeBase implements the Descriptor interface
@@ -852,7 +846,7 @@ func (h *ptsFiltererFrameHandler) add(f *filtererFrame, src []*filtererItem) []*
 		if f.f.Pts() == pts {
 			i.fs[f.n] = f
 		} else {
-			src = append(src[:idx], append([]*filtererItem{ni}, src[idx+1:]...)...)
+			src = append(src[:idx], append([]*filtererItem{ni}, src[idx:]...)...)
 		}
 		inserted = true
 		break
