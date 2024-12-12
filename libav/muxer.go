@@ -73,7 +73,7 @@ func NewMuxer(o MuxerOptions, eh *astiencoder.EventHandler, c *astikit.Closer, s
 	if !m.formatContext.OutputFormat().Flags().Has(astiav.IOFormatFlagNofile) {
 		// Open
 		var ioContext *astiav.IOContext
-		if ioContext, err = astiav.OpenIOContext(o.URL, astiav.NewIOContextFlags(astiav.IOContextFlagWrite)); err != nil {
+		if ioContext, err = astiav.OpenIOContext(o.URL, astiav.NewIOContextFlags(astiav.IOContextFlagWrite), nil, nil); err != nil {
 			err = fmt.Errorf("astilibav: opening io context failed: %w", err)
 			return
 		}
