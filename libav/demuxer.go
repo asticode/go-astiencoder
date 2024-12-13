@@ -246,6 +246,7 @@ func NewDemuxer(o DemuxerOptions, eh *astiencoder.EventHandler, c *astikit.Close
 
 	// Set io interrupt
 	d.ioInterrupter = astiav.NewIOInterrupter()
+	d.AddClose(d.ioInterrupter.Free)
 	d.formatContext.SetIOInterrupter(d.ioInterrupter)
 
 	// Handle probe cancellation
