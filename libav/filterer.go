@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -60,9 +59,9 @@ type filtererFrameHandler interface {
 }
 
 type filtererInput struct {
-	ctx               Context
-	buffersrcContexts []*astiav.BuffersrcFilterContext
-	name              string
+	ctx           Context
+	buffersrcCtxs []*astiav.BuffersrcFilterContext
+	name          string
 }
 
 type filtererItem struct {
@@ -266,7 +265,7 @@ func (f *Filterer) createGraph(ctxs map[astiencoder.Node]Context) (err error) {
 
 	// Create buffersink context
 	var buffersinkContext *astiav.BuffersinkFilterContext
-	if buffersinkContext, err = g.NewBuffersinkFilterContext(buffersink, "out", nil); err != nil {
+	if buffersinkContext, err = g.NewBuffersinkFilterContext(buffersink, "out"); err != nil {
 		err = fmt.Errorf("astilibav: creating buffersink context failed: %w", err)
 		return
 	}
@@ -312,25 +311,23 @@ func (f *Filterer) createGraph(ctxs map[astiencoder.Node]Context) (err error) {
 			return
 		}
 
-		// Create args
-		var args astiav.FilterArgs
+		// Create buffersrc context parameters
+		buffersrcCtxParameters := astiav.AllocBuffersrcFilterContextParameters()
+		defer buffersrcCtxParameters.Free()
 		switch ctx.MediaType {
 		case astiav.MediaTypeAudio:
-			args = astiav.FilterArgs{
-				"channel_layout": ctx.ChannelLayout.String(),
-				"sample_fmt":     ctx.SampleFormat.String(),
-				"sample_rate":    strconv.Itoa(ctx.SampleRate),
-				"time_base":      ctx.TimeBase.String(),
-			}
+			buffersrcCtxParameters.SetChannelLayout(ctx.ChannelLayout)
+			buffersrcCtxParameters.SetSampleFormat(ctx.SampleFormat)
+			buffersrcCtxParameters.SetSampleRate(ctx.SampleRate)
+			buffersrcCtxParameters.SetTimeBase(ctx.TimeBase)
 		case astiav.MediaTypeVideo:
-			args = astiav.FilterArgs{
-				"pix_fmt":      strconv.Itoa(int(ctx.PixelFormat)),
-				"pixel_aspect": ctx.SampleAspectRatio.String(),
-				"time_base":    ctx.TimeBase.String(),
-				"video_size":   strconv.Itoa(ctx.Width) + "x" + strconv.Itoa(ctx.Height),
-			}
+			buffersrcCtxParameters.SetHeight(ctx.Height)
+			buffersrcCtxParameters.SetPixelFormat(ctx.PixelFormat)
+			buffersrcCtxParameters.SetSampleAspectRatio(ctx.SampleAspectRatio)
+			buffersrcCtxParameters.SetTimeBase(ctx.TimeBase)
+			buffersrcCtxParameters.SetWidth(ctx.Width)
 			if ctx.FrameRate.Num() > 0 {
-				args["frame_rate"] = ctx.FrameRate.String()
+				buffersrcCtxParameters.SetFramerate(ctx.FrameRate)
 			}
 		default:
 			err = fmt.Errorf("astilibav: media type %s is not handled by filterer", ctx.MediaType)
@@ -339,13 +336,25 @@ func (f *Filterer) createGraph(ctxs map[astiencoder.Node]Context) (err error) {
 
 		// Create buffersrc ctx
 		var buffersrcCtx *astiav.BuffersrcFilterContext
-		if buffersrcCtx, err = g.NewBuffersrcFilterContext(buffersrc, "in", args); err != nil {
+		if buffersrcCtx, err = g.NewBuffersrcFilterContext(buffersrc, "in"); err != nil {
 			err = fmt.Errorf("astilibav: creating buffersrc context failed: %w", err)
 			return
 		}
 
 		// Make sure buffersrc context is freed
 		c.Add(buffersrcCtx.FilterContext().Free)
+
+		// Set buffersrc context parameters
+		if err = buffersrcCtx.SetParameters(buffersrcCtxParameters); err != nil {
+			err = fmt.Errorf("main: setting buffersrc context parameters failed: %w", err)
+			return
+		}
+
+		// Initialize buffersrc context
+		if err = buffersrcCtx.Initialize(); err != nil {
+			err = fmt.Errorf("main: initializing buffersrc context failed: %w", err)
+			return
+		}
 
 		// Create outputs
 		o := astiav.AllocFilterInOut()
@@ -385,7 +394,7 @@ func (f *Filterer) createGraph(ctxs map[astiencoder.Node]Context) (err error) {
 	f.buffersinkContext = buffersinkContext
 	for _, u := range inputUpdates {
 		u.i.ctx = u.ctx
-		u.i.buffersrcContexts = u.ctxs
+		u.i.buffersrcCtxs = u.ctxs
 	}
 	f.g = g
 	f.gc = c
@@ -596,9 +605,9 @@ func (f *Filterer) HandleFrame(p FrameHandlerPayload) {
 				// Loop through frames to add
 				for _, v := range framesToAdd {
 					// Loop through buffer ctxs
-					for _, buffersrcContext := range v.i.buffersrcContexts {
+					for _, buffersrcCtx := range v.i.buffersrcCtxs {
 						// Add frame
-						if err := buffersrcContext.AddFrame(v.f, astiav.NewBuffersrcFlags(astiav.BuffersrcFlagKeepRef)); err != nil {
+						if err := buffersrcCtx.AddFrame(v.f, astiav.NewBuffersrcFlags(astiav.BuffersrcFlagKeepRef)); err != nil {
 							// TODO Fill intput frame when frame handler strategy is pts?
 							emitError(f, f.eh, err, "adding frame to buffersrc")
 							continue
